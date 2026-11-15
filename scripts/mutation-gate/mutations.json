@@ -1,0 +1,57 @@
+{
+  "self_tests": [
+    {
+      "id": "mutation-gate",
+      "verifies": "this gate reports a surviving mutation instead of a pass",
+      "command": [
+        "python3",
+        "scripts/mutation-gate/run.py",
+        "--self-test"
+      ],
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "requires": [
+        "python3"
+      ],
+      "mutations": [
+        {
+          "name": "a-green-self-test-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"
+        },
+        {
+          "name": "a-failure-that-names-nothing-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            elif mutation[\"expect\"] not in output:",
+          "replace": "            elif False:",
+          "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"
+        },
+        {
+          "name": "a-stale-mutation-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if occurrences != expected:",
+          "replace": "    if False:",
+          "expect": "FAIL  a mutation whose find no longer matches is reported as stale"
+        },
+        {
+          "name": "a-red-baseline-mutated-anyway",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return",
+          "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return",
+          "expect": "FAIL  a self-test that is already red is reported instead of mutated"
+        },
+        {
+          "name": "mutations-not-restored-between-runs",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "        scratch.restore(mutation[\"file\"])",
+          "replace": "        pass",
+          "expect": "FAIL  every mutation is restored before the next one"
+        }
+      ]
+    }
+  ]
+}

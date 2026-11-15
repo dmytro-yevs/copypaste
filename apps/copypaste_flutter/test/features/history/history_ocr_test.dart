@@ -1,0 +1,654 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
+import '../../support/temporary_payloads.dart';
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+
+import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_ocr_controller.dart';
+import 'package:copypaste_flutter/features/history/models/history_models.dart';
+import 'package:copypaste_flutter/features/history/repository/history_image_input.dart';
+import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
+import 'package:copypaste_flutter/features/history/repository/temporary_history_image_input.dart';
+import 'package:copypaste_flutter/features/history/view/history_screen.dart';
+import 'package:copypaste_flutter/features/history/view/history_inspector.dart';
+import 'package:copypaste_flutter/features/history/view/history_ocr_dialog.dart';
+import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
+import 'package:copypaste_flutter/features/modules/models/module_models.dart';
+import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
+import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import '../modules/modules_test_support.dart';
+
+final _image = HistoryClip(
+  id: 'screenshot',
+  contentType: 'image/png',
+  preview: '[Image]',
+  createdAt: DateTime.utc(2026),
+  pinned: false,
+);
+
+InstalledModule _ocrModule({bool enabled = true, bool restart = false}) =>
+    InstalledModule(
+      id: 'copypaste.ocr',
+      title: 'OCR',
+      description: 'Recognize image text locally.',
+      version: '0.1.0',
+      enabled: enabled,
+      restartRequired: restart,
+      sizeBytes: 1,
+      commands: const [
+        ModuleCommand(
+          id: 'recognize-image',
+          title: 'Recognize image text',
+          description: '',
+          arguments: [],
+        ),
+      ],
+      preferenceFields: const [],
+      preferences: const {},
+    );
+
+Future<
+  ({
+    ModulesController modules,
+    _OcrModulesRepository repository,
+    HistoryOcrController ocr,
+    _ImageInput input,
+    _Clipboard clipboard,
+  })
+>
+_fixture({Future<void> Function(String id, String text)? copyText}) async {
+  final repository = _OcrModulesRepository()..modules = [_ocrModule()];
+  final modules = ModulesController(
+    repository: repository,
+    marketplace: MemoryModuleMarketplace(),
+  );
+  await modules.initialize();
+  final input = _ImageInput();
+  final clipboard = _Clipboard();
+  final ocr = HistoryOcrController(
+    modules: modules,
+    imageInput: input,
+    clipboard: clipboard,
+    copyText: copyText,
+  );
+  return (
+    modules: modules,
+    repository: repository,
+    ocr: ocr,
+    input: input,
+    clipboard: clipboard,
+  );
+}
+
+void main() {
+  test('OCR rereads module availability before preparing image data', () async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    addTearDown(f.ocr.dispose);
+    expect(f.ocr.available, isTrue);
+    // Simulate another engine disabling the module after this inspector opened.
+    f.repository.modules = [_ocrModule(enabled: false)];
+    await f.ocr.recognize(_image);
+    expect(f.ocr.available, isFalse);
+    expect(f.input.prepared, isEmpty);
+    expect(f.repository.invocations, isEmpty);
+    expect(f.ocr.errorMessage, contains('OCR is unavailable'));
+  });
+
+  for (final width in [320.0, 448.0, 816.0, 1400.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'OCR dialog keeps loading geometry at $width and scale $scale',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 800));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final fixture = await _fixture();
+          addTearDown(fixture.modules.dispose);
+          addTearDown(fixture.ocr.dispose);
+          fixture.repository.pending = Completer<ModuleResult>();
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light,
+              builder: (context, child) => AppTheme.builder(
+                context,
+                MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: TextScaler.linear(scale)),
+                  child: child!,
+                ),
+              ),
+              home: Scaffold(
+                child: Builder(
+                  builder: (context) => Button.primary(
+                    onPressed: () => showHistoryOcrDialog(
+                      context,
+                      controller: fixture.ocr,
+                      clip: _image,
+                    ),
+                    child: const Text('Recognize'),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('Recognize'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+          final loading = tester.getRect(find.byType(AlertDialog));
+          final copy = tester.getRect(
+            find.byKey(const ValueKey('history-ocr-copy')),
+          );
+          fixture.repository.pending!.complete(
+            ModuleResult(List.filled(100, 'Recognized text').join('\n')),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.getRect(find.byType(AlertDialog)), loading);
+          expect(
+            tester.getRect(find.byKey(const ValueKey('history-ocr-copy'))),
+            copy,
+          );
+          expect(copy.bottom, lessThanOrEqualTo(800));
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+        variant: TargetPlatformVariant({
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+          TargetPlatform.android,
+        }),
+      );
+    }
+  }
+
+  test(
+    'availability follows module enable, remove, and restart state',
+    () async {
+      final f = await _fixture();
+      addTearDown(f.modules.dispose);
+      addTearDown(f.ocr.dispose);
+      expect(f.ocr.canRun, isTrue);
+      await f.modules.setEnabled('copypaste.ocr', false);
+      expect(f.ocr.available, isFalse);
+      await f.ocr.recognize(_image);
+      expect(f.input.prepared, isEmpty);
+      await f.modules.setEnabled('copypaste.ocr', true);
+      expect(f.ocr.available, isTrue);
+      await f.ocr.recognize(
+        HistoryClip(
+          id: 'text',
+          contentType: 'text',
+          preview: 'Text',
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+        ),
+      );
+      expect(f.input.prepared, isEmpty);
+      f.repository.modules = [_ocrModule(restart: true)];
+      await f.modules.initialize();
+      expect(f.ocr.available, isFalse);
+      await f.modules.remove('copypaste.ocr');
+      expect(f.ocr.available, isFalse);
+    },
+  );
+
+  test('runs once for the captured clip and copies only on request', () async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    addTearDown(f.ocr.dispose);
+    f.repository.pending = Completer<ModuleResult>();
+    final run = f.ocr.recognize(_image);
+    await Future<void>.delayed(Duration.zero);
+    expect(f.ocr.busy, isTrue);
+    expect(f.ocr.canRun, isFalse);
+    await f.ocr.recognize(_image);
+    expect(f.input.prepared, ['screenshot']);
+    expect(f.repository.invocations, [
+      ('copypaste.ocr', 'recognize-image', '/private/original.png'),
+    ]);
+    expect(f.input.cleaned, 0);
+    f.repository.pending!.complete(
+      const ModuleResult('Розпізнаний текст\nText'),
+    );
+    await run;
+    expect(f.ocr.text, 'Розпізнаний текст\nText');
+    expect(f.input.cleaned, 1);
+    expect(f.clipboard.values, isEmpty);
+    expect(await f.ocr.copyText(), isTrue);
+    expect(f.clipboard.values, ['Розпізнаний текст\nText']);
+  });
+
+  test(
+    'OCR copy retains the originating clip in the shared native copy path',
+    () async {
+      final copied = <(String, String)>[];
+      final f = await _fixture(
+        copyText: (id, text) async {
+          copied.add((id, text));
+        },
+      );
+      addTearDown(f.modules.dispose);
+      addTearDown(f.ocr.dispose);
+      await f.ocr.recognize(_image);
+      expect(await f.ocr.copySelection('Recognized'), isTrue);
+      expect(copied, [('screenshot', 'Recognized')]);
+      expect(f.clipboard.values, isEmpty);
+    },
+  );
+
+  test('failed invocation cleans input and supports a fresh retry', () async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    addTearDown(f.ocr.dispose);
+    f.repository.failure = const ModulesException('Model unavailable.');
+    await f.ocr.recognize(_image);
+    expect(f.ocr.errorMessage, 'Model unavailable.');
+    expect(f.input.cleaned, 1);
+    expect(await f.ocr.copyText(), isFalse);
+    f.repository.failure = null;
+    f.repository.result = '   ';
+    await f.ocr.recognize(_image);
+    expect(f.ocr.errorMessage, isNull);
+    expect(f.input.cleaned, 2);
+    expect(await f.ocr.copyText(), isFalse);
+  });
+
+  test('disposing during recognition still cleans input', () async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    f.repository.pending = Completer<ModuleResult>();
+    final run = f.ocr.recognize(_image);
+    await Future<void>.delayed(Duration.zero);
+    f.ocr.dispose();
+    f.repository.pending!.complete(const ModuleResult('Ignored'));
+    await run;
+    expect(f.input.cleaned, 1);
+    expect(f.ocr.text, isNull);
+  });
+
+  test(
+    'temporary input exports original bytes and cleans failed exports',
+    () async {
+      final root = await Directory.systemTemp.createTemp('ocr-test-');
+      addTearDown(() => root.delete(recursive: true));
+      final history = _HistoryRepository();
+      final input = TemporaryHistoryImageInput(
+        repository: history,
+        temporaryDirectory: () async => root,
+      );
+      final selected = await input.prepare(_image);
+      expect(history.savedIds, ['screenshot']);
+      expect(await File(selected.path).readAsBytes(), [1, 2, 3, 4]);
+      await selected.dispose();
+      expect(await temporaryPayloads(root), isEmpty);
+      history.exportFails = true;
+      await expectLater(input.prepare(_image), throwsStateError);
+      expect(await temporaryPayloads(root), isEmpty);
+    },
+  );
+
+  for (final (platform, size) in [
+    (TargetPlatform.macOS, const Size(1400, 900)),
+    (TargetPlatform.windows, const Size(1400, 900)),
+    (TargetPlatform.android, const Size(390, 844)),
+  ]) {
+    testWidgets('inspector OCR result and Copy at $size', (tester) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final f = await _fixture();
+      addTearDown(f.modules.dispose);
+      f.repository.pending = Completer<ModuleResult>();
+      final history = _HistoryRepository();
+      final controller = HistoryController(history, ocr: f.ocr);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('history-clip-screenshot')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('history-ocr')), findsOneWidget);
+      final ocrButton = tester.widget<Button>(
+        find.byKey(const ValueKey('history-ocr')),
+      );
+      expect(
+        ocrButton.child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
+      expect(ocrButton.leading, isNull);
+      final actionHeight = tester
+          .getSize(find.byKey(const ValueKey('history-detail-copy')))
+          .height;
+      for (final key in [
+        'history-ocr',
+        'history-detail-delete',
+        'history-pin-screenshot',
+      ]) {
+        expect(
+          tester.getSize(find.byKey(ValueKey(key))).height,
+          closeTo(actionHeight, 0.01),
+        );
+      }
+      expect(find.text('OCR'), findsNothing);
+      expect(find.bySemanticsLabel('Recognize image text'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('history-ocr')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Recognizing image text.'), findsOneWidget);
+      expect(
+        tester
+            .widget<Button>(find.byKey(const ValueKey('history-ocr-copy')))
+            .onPressed,
+        isNull,
+      );
+      final text = List.filled(80, 'Recognized screenshot text').join('\n');
+      f.repository.pending!.complete(ModuleResult(text));
+      await tester.pumpAndSettle();
+      expect(find.text(text), findsOneWidget);
+      expect(f.clipboard.values, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('history-ocr-copy')));
+      await tester.pumpAndSettle();
+      expect(f.clipboard.values, [text]);
+      expect(find.text('Recognized text copied.'), findsOneWidget);
+      // Advance the toast's normal auto-dismiss lifecycle before teardown.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(controller.selection.selectedId, 'screenshot');
+      expect(
+        controller.selection.selectedClip?.contentKind,
+        HistoryClipKind.image,
+      );
+      expect(history.savedIds, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await f.modules.setEnabled('copypaste.ocr', false);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('history-ocr')), findsNothing);
+    }, variant: TargetPlatformVariant({platform}));
+  }
+
+  testWidgets(
+    'inspector hides labels only when the action row cannot fit',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = await _fixture();
+      addTearDown(fixture.modules.dispose);
+      final controller = HistoryController(
+        _HistoryRepository(),
+        ocr: fixture.ocr,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.selection.select(_image.id);
+      Future<void> render(double width, double textScale) async {
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: AppTheme.builder,
+            home: Scaffold(
+              child: Center(
+                child: SizedBox(
+                  width: width,
+                  height: 800,
+                  child: MediaQuery(
+                    data: MediaQueryData(
+                      textScaler: TextScaler.linear(textScale),
+                    ),
+                    child: HistoryInspector(
+                      controller: controller,
+                      inDrawer: false,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final keys = [
+        'history-detail-copy',
+        'history-detail-share',
+        'history-pin-screenshot',
+        'history-detail-secret',
+        'history-ocr',
+        'history-detail-delete',
+      ];
+      await render(660, 1);
+      expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Delete'), findsOneWidget);
+      await render(340, 1);
+      final first = tester.getRect(find.byKey(ValueKey<String>(keys.first)));
+      for (final key in keys) {
+        final finder = find.byKey(ValueKey<String>(key));
+        expect(
+          tester.widget<Button>(finder).child,
+          isA<AppIconFrame>().having(
+            (frame) => frame.child,
+            'icon',
+            isA<Icon>(),
+          ),
+        );
+        final size = tester.getSize(finder);
+        expect(size.width, closeTo(size.height, 0.01));
+        expect(
+          tester.getRect(finder).center.dy,
+          closeTo(first.center.dy, 0.01),
+        );
+        expect(finder.hitTestable(), findsOneWidget);
+      }
+      for (final label in ['Copy', 'Pin', 'Delete']) {
+        expect(find.bySemanticsLabel(label), findsOneWidget);
+        expect(find.widgetWithText(Button, label), findsNothing);
+      }
+      for (var index = 1; index < keys.length; index++) {
+        expect(
+          tester.getRect(find.byKey(ValueKey<String>(keys[index]))).left,
+          greaterThan(
+            tester.getRect(find.byKey(ValueKey<String>(keys[index - 1]))).right,
+          ),
+        );
+      }
+      await render(220, 1);
+      // Buttons that do not fit even as icons move into the More menu; the
+      // rest stay on one row.
+      final more = find.byKey(const ValueKey('history-detail-more'));
+      final visible = [
+        for (final key in keys)
+          if (find.byKey(ValueKey<String>(key)).evaluate().isNotEmpty)
+            find.byKey(ValueKey<String>(key)),
+      ];
+      expect(visible.length, lessThan(keys.length));
+      expect(find.byKey(const ValueKey('history-detail-copy')), findsOneWidget);
+      expect(more, findsOneWidget);
+      final actionBounds = tester.getRect(
+        find.byKey(const ValueKey('history-detail-actions')),
+      );
+      final narrowRects = [
+        for (final finder in [...visible, more]) tester.getRect(finder),
+      ];
+      for (var index = 0; index < narrowRects.length; index++) {
+        final rect = narrowRects[index];
+        expect(rect.width, closeTo(rect.height, 0.01));
+        expect(rect.center.dy, closeTo(narrowRects.first.center.dy, 0.01));
+        expect(rect.left, greaterThanOrEqualTo(actionBounds.left));
+        expect(rect.right, lessThanOrEqualTo(actionBounds.right));
+        for (final previous in narrowRects.take(index)) {
+          expect(rect.overlaps(previous), isFalse);
+        }
+      }
+      await tester.tap(more);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.byKey(const ValueKey('history-detail-menu-ocr')),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump(const Duration(milliseconds: 300));
+      await render(340, 1);
+      await tester.tap(
+        find.byKey(const ValueKey<String>('history-pin-screenshot')),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.selection.selectedClip?.pinned, isTrue);
+      await render(340, 1);
+      expect(find.bySemanticsLabel('Pinned'), findsOneWidget);
+      await render(520, 2);
+      expect(
+        tester
+            .widget<Button>(
+              find.byKey(const ValueKey<String>('history-detail-copy')),
+            )
+            .child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
+      await render(720, 1);
+      expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Pinned'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets('OCR failure can retry to an empty result', (tester) async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    final controller = HistoryController(_HistoryRepository(), ocr: f.ocr);
+    addTearDown(controller.dispose);
+    f.repository.failure = const ModulesException('Model unavailable.');
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('history-clip-screenshot')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('history-ocr')));
+    await tester.pumpAndSettle();
+    expect(find.text('OCR failed'), findsOneWidget);
+    expect(find.text('Model unavailable.'), findsOneWidget);
+    f.repository.failure = null;
+    f.repository.result = '';
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(find.text('No text found'), findsOneWidget);
+    expect(
+      tester
+          .widget<Button>(find.byKey(const ValueKey('history-ocr-copy')))
+          .onPressed,
+      isNull,
+    );
+    expect(f.input.cleaned, 2);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _OcrModulesRepository extends MemoryModulesRepository {
+  Completer<ModuleResult>? pending;
+  String result = 'Recognized text';
+  final invocations = <(String, String, String)>[];
+
+  @override
+  Future<ModuleResult> invoke(
+    String id,
+    String command,
+    Map<String, Object> arguments,
+  ) async {
+    invocations.add((id, command, arguments['image_path'] as String));
+    if (failure case final error?) throw error;
+    return pending == null ? ModuleResult(result) : await pending!.future;
+  }
+}
+
+class _ImageInput implements HistoryImageInput {
+  final prepared = <String>[];
+  int cleaned = 0;
+
+  @override
+  Future<SelectedModuleInput> prepare(HistoryClip clip) async {
+    prepared.add(clip.id);
+    return SelectedModuleInput(
+      path: '/private/original.png',
+      name: 'original.png',
+      dispose: () async {
+        cleaned++;
+      },
+    );
+  }
+}
+
+class _Clipboard implements ClipboardWriter {
+  final values = <String>[];
+
+  @override
+  Future<void> writeText(String text) async => values.add(text);
+}
+
+class _HistoryRepository implements HistoryRepository {
+  final savedIds = <String>[];
+  bool exportFails = false;
+  HistoryClip clip = _image;
+
+  @override
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
+  @override
+  Future<HistoryFacets> facets() async => const HistoryFacets();
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async => HistoryClipPage(items: [clip]);
+  @override
+  Future<HistoryClip> get(String id) async => clip;
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
+  Future<void> setPinned(String id, bool pinned) async {
+    clip = clip.copyWith(pinned: pinned);
+  }
+
+  @override
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async => null;
+  @override
+  Future<void> saveFile(String id, String destinationPath) async {
+    savedIds.add(id);
+    if (exportFails) throw StateError('Export failed');
+    await File(destinationPath).writeAsBytes([1, 2, 3, 4]);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}

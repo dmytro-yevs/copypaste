@@ -1,0 +1,1078 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
+use tracing::debug;
+
+use super::dial::resolve;
+use super::pairing::{
+    LocalDecision, PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus,
+    PAIRING_CONFIRM_TIMEOUT,
+};
+use super::{placeholder_name, Node, NodeError};
+use crate::group::PairAdmissions;
+use crate::peers::{Peer, MAX_PAIRINGS};
+use crate::protocol::{MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_LISTEN_ADDR_BYTES};
+use crate::sync::SyncSource;
+use crate::transport::{Endpoint, PairingToken, Session, TransportError, TOKEN_LEN};
+use crate::transport::{PairingCandidate, PairingCode};
+use crate::DeviceProfile;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PairingMessage {
+    Hello {
+        protocol_version: u32,
+        device_id: String,
+        device_name: String,
+        profile: DeviceProfile,
+        listen_addr: Option<String>,
+    },
+    Decision {
+        accept: bool,
+        admissions: Option<PairAdmissions>,
+    },
+    Stored {
+        ok: bool,
+    },
+}
+
+const PAIRING_PROTOCOL_VERSION: u32 = 3;
+
+impl Node {
+    pub fn pair_create_invite(&self) -> Result<PairingInvite, NodeError> {
+        if self.peers.len() >= MAX_PAIRINGS {
+            return Err(NodeError::TooManyPairings);
+        }
+        let invite = self.pairing.create_invite(self.listen_addr())?;
+        self.relay.reset_invitation_failures();
+        self.republish();
+        Ok(invite)
+    }
+
+    pub async fn pair_join<S: SyncSource>(
+        self: &Arc<Self>,
+        code: &str,
+        addr: &str,
+        source: &S,
+    ) -> Result<PairingStatus, NodeError> {
+        self.pair_start(Some(code), addr, source).await
+    }
+
+    pub async fn pair_nearby<S: SyncSource>(
+        self: &Arc<Self>,
+        addr: &str,
+        source: &S,
+    ) -> Result<PairingStatus, NodeError> {
+        self.pair_start(None, addr, source).await
+    }
+
+    async fn pair_start<S: SyncSource>(
+        self: &Arc<Self>,
+        code: Option<&str>,
+        addr: &str,
+        source: &S,
+    ) -> Result<PairingStatus, NodeError> {
+        self.prepare_group(source)?;
+        let short_code = code.and_then(|code| PairingCode::parse(code).ok());
+        let legacy_token = if code.is_some() && short_code.is_none() {
+            let code = code.ok_or(NodeError::BadCode)?;
+            Some(PairingToken::parse(code).map_err(|_| NodeError::BadCode)?)
+        } else {
+            None
+        };
+        let pairing_id = legacy_token
+            .as_ref()
+            .map(PairingToken::pairing_id)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+        if self.peers.get(&pairing_id).is_none() && self.peers.len() >= MAX_PAIRINGS {
+            return Err(NodeError::TooManyPairings);
+        }
+        let lan = if addr.trim().is_empty() {
+            None
+        } else {
+            resolve(addr).await
+        };
+        // A short code can also be redeemed through the relay, for devices
+        // that have never shared a network.
+        let relay = short_code
+            .as_ref()
+            .and_then(|code| self.relay.invitation_route(code));
+        if lan.is_none() && relay.is_none() {
+            return Err(NodeError::BadAddress);
+        }
+        let control = self.pairing.begin_join(pairing_id.clone())?;
+        let connected = match (lan, short_code, legacy_token) {
+            (Some(addr), None, None) => Session::connect_nearby(addr).await,
+            (lan, Some(code), _) => {
+                let mut connected = Err(TransportError::Handshake);
+                if let Some(addr) = lan {
+                    connected = Session::connect_pairing(&Endpoint::Tcp(addr), &code).await;
+                }
+                if let (Err(_), Some(route)) = (&connected, relay) {
+                    connected = Session::connect_pairing(&Endpoint::Relay(route), &code).await;
+                }
+                connected
+            }
+            (Some(addr), None, Some(token)) => Session::connect(addr, &token.psk())
+                .await
+                .map(|session| (session, token)),
+            (None, None, _) => Err(TransportError::Handshake),
+        };
+        let (session, token) = connected.map_err(|_| {
+            self.pairing.finish(
+                &pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::Handshake),
+            );
+            NodeError::Handshake
+        })?;
+        let actual_id = token.pairing_id();
+        self.pairing.bind_join_id(&pairing_id, &actual_id)?;
+        let pairing_id = actual_id;
+        let identity = local_identity(self, source, session.local_addr());
+        let (session, peer, shown) = match establish(
+            session,
+            identity,
+            pairing_id.clone(),
+            token.psk(),
+            PairingRole::Initiator,
+        )
+        .await
+        {
+            Ok(established) => established,
+            Err(error) => {
+                self.pairing
+                    .finish(&pairing_id, PairingPhase::Failed, Some(error));
+                return Err(error);
+            }
+        };
+        if self.peers.contains_device(&shown.device_id, &pairing_id) {
+            self.pairing.finish(
+                &pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::AlreadyPaired),
+            );
+            let _ = session.close().await;
+            return Err(NodeError::AlreadyPaired);
+        }
+        self.pairing
+            .awaiting(&pairing_id, session.pairing_sas(), shown);
+        let node = Arc::clone(self);
+        tokio::spawn(async move {
+            node.complete_pairing(session, peer, control).await;
+        });
+        Ok(self.pairing.progress())
+    }
+
+    pub fn pair_progress(&self) -> PairingStatus {
+        let was_active = self.pairing.is_active();
+        let status = self.pairing.progress();
+        if was_active && !self.pairing.is_active() {
+            self.republish();
+        }
+        status
+    }
+
+    /// The transport can advance an inbound ceremony without an IPC request.
+    /// Adapters subscribe to this signal and publish their normal peer-change
+    /// event so every product reaches the protected confirmation promptly.
+    pub fn subscribe_pairing_changes(&self) -> watch::Receiver<()> {
+        self.pairing.changes()
+    }
+
+    pub fn pair_confirm(&self, accept: bool) -> Result<PairingStatus, NodeError> {
+        self.pairing.confirm(accept)
+    }
+
+    pub fn pair_cancel(&self) -> PairingStatus {
+        let status = self.pairing.cancel();
+        self.republish();
+        status
+    }
+
+    pub(super) fn pairing_candidate(&self) -> Option<PairingCandidate> {
+        let was_active = self.pairing.is_active();
+        let candidate = self.pairing.invitation_candidate();
+        if was_active && candidate.is_none() && !self.pairing.is_active() {
+            self.republish();
+        }
+        candidate
+    }
+
+    pub(super) async fn accept_pairing<S: SyncSource>(
+        self: &Arc<Self>,
+        session: Session,
+        pairing_id: &str,
+        source: &S,
+    ) -> Result<(), NodeError> {
+        self.prepare_group(source)?;
+        let (psk, control) = self.pairing.begin_responder(pairing_id)?;
+        let identity = local_identity(self, source, session.local_addr());
+        let established = establish(
+            session,
+            identity,
+            pairing_id.to_string(),
+            *psk,
+            PairingRole::Responder,
+        )
+        .await;
+        let (session, peer, shown) = match established {
+            Ok(established) => established,
+            Err(error) => {
+                self.pairing
+                    .finish(pairing_id, PairingPhase::Failed, Some(error));
+                self.republish();
+                return Err(error);
+            }
+        };
+        if self.peers.contains_device(&shown.device_id, pairing_id) {
+            self.pairing.finish(
+                pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::AlreadyPaired),
+            );
+            self.republish();
+            let _ = session.close().await;
+            return Err(NodeError::AlreadyPaired);
+        }
+        self.pairing
+            .awaiting(pairing_id, session.pairing_sas(), shown);
+        self.complete_pairing(session, peer, control).await;
+        Ok(())
+    }
+
+    async fn complete_pairing(
+        &self,
+        mut session: Session,
+        peer: Peer,
+        control: watch::Receiver<LocalDecision>,
+    ) {
+        let pairing_id = peer.pairing_id.clone();
+        let proposal = (|| {
+            Ok::<_, NodeError>(PairAdmissions {
+                local: self
+                    .peers
+                    .desired_group_admission(None)
+                    .map_err(|_| NodeError::PeerStore)?,
+                remote: self
+                    .peers
+                    .desired_group_admission(peer.device_id.as_deref())
+                    .map_err(|_| NodeError::PeerStore)?,
+            })
+        })();
+        let Ok(proposal) = proposal else {
+            self.pairing.finish(
+                &pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::PeerStore),
+            );
+            let _ = session.close().await;
+            return;
+        };
+        let decision = tokio::time::timeout(
+            PAIRING_CONFIRM_TIMEOUT,
+            exchange_decisions(&mut session, control, proposal),
+        )
+        .await;
+        let (phase, error) = match decision {
+            Err(_) => (PairingPhase::TimedOut, None),
+            Ok(Err(DecisionEnd::Rejected)) => (PairingPhase::Rejected, None),
+            Ok(Err(DecisionEnd::Cancelled)) => (PairingPhase::Cancelled, None),
+            Ok(Err(DecisionEnd::TimedOut)) => (PairingPhase::TimedOut, None),
+            Ok(Err(DecisionEnd::Failed)) => (PairingPhase::Failed, Some(NodeError::Session)),
+            Ok(Ok(_)) if !self.pairing.begin_commit(&pairing_id) => (PairingPhase::Cancelled, None),
+            Ok(Ok(admissions)) => {
+                match persist_bilaterally(self, &mut session, &peer, admissions).await {
+                    Commit::Both => match self.confirm_group_admission(&pairing_id) {
+                        Ok(()) => (PairingPhase::Confirmed, None),
+                        Err(_) => (PairingPhase::Failed, Some(NodeError::PeerStore)),
+                    },
+                    Commit::PeerSilent => (PairingPhase::TimedOut, Commit::PeerSilent.error()),
+                    other => (PairingPhase::Failed, other.error()),
+                }
+            }
+        };
+        self.pairing.finish(&pairing_id, phase, error);
+        self.republish();
+        let _ = session.close().await;
+    }
+}
+
+struct LocalIdentity {
+    device_id: String,
+    device_name: String,
+    profile: DeviceProfile,
+    listen_addr: Option<String>,
+}
+
+fn local_identity<S: SyncSource>(
+    node: &Node,
+    source: &S,
+    local_addr: Option<std::net::SocketAddr>,
+) -> LocalIdentity {
+    LocalIdentity {
+        device_id: source.device_id(),
+        device_name: source.device_name(),
+        profile: DeviceProfile::current(),
+        listen_addr: node.session_listen_addr(local_addr),
+    }
+}
+
+async fn establish(
+    mut session: Session,
+    local: LocalIdentity,
+    pairing_id: String,
+    psk: [u8; TOKEN_LEN],
+    role: PairingRole,
+) -> Result<(Session, Peer, PairingPeer), NodeError> {
+    session
+        .send(&PairingMessage::Hello {
+            protocol_version: PAIRING_PROTOCOL_VERSION,
+            device_id: local.device_id.clone(),
+            device_name: local.device_name,
+            profile: local.profile,
+            listen_addr: local.listen_addr,
+        })
+        .await
+        .map_err(|_| NodeError::Session)?;
+    let hello = tokio::time::timeout(Duration::from_secs(10), session.recv::<PairingMessage>())
+        .await
+        .map_err(|_| NodeError::Timeout)?
+        .map_err(|_| NodeError::Session)?
+        .ok_or(NodeError::Session)?;
+    let PairingMessage::Hello {
+        protocol_version,
+        device_id,
+        device_name,
+        profile,
+        listen_addr,
+    } = hello
+    else {
+        return Err(NodeError::Session);
+    };
+    if protocol_version != PAIRING_PROTOCOL_VERSION
+        || device_id.is_empty()
+        || device_id.len() > MAX_ID_BYTES
+        || device_id == local.device_id
+        || device_name.len() > MAX_DEVICE_NAME_BYTES
+        || listen_addr
+            .as_ref()
+            .is_some_and(|addr| addr.len() > MAX_LISTEN_ADDR_BYTES)
+        || crate::protocol::validate_device_profile(&profile).is_err()
+    {
+        return Err(NodeError::Handshake);
+    }
+    // The peer's own claim about where to dial it, kept only when it is a
+    // usable target — see [`crate::netif::is_dialable`]. The initiator falls
+    // back to the socket it actually reached, which is an observation rather
+    // than a claim.
+    let advertised = listen_addr
+        .and_then(|addr| addr.parse::<std::net::SocketAddr>().ok())
+        .filter(crate::netif::is_dialable);
+    let addr = advertised.or_else(|| {
+        (role == PairingRole::Initiator)
+            .then(|| session.direct_peer_addr())
+            .flatten()
+    });
+    let name = placeholder_name(&device_name);
+    let peer = Peer {
+        pairing_id: pairing_id.clone(),
+        device_id: Some(device_id.clone()),
+        name: name.clone(),
+        psk,
+        last_addr: addr,
+        last_seen_ms: crate::now_ms(),
+        profile: Some(profile),
+        profile_observed_at_ms: crate::now_ms(),
+    };
+    let shown = PairingPeer {
+        pairing_id,
+        device_id,
+        name,
+        addr,
+    };
+    Ok((session, peer, shown))
+}
+
+enum DecisionEnd {
+    Rejected,
+    Cancelled,
+    TimedOut,
+    Failed,
+}
+
+async fn exchange_decisions(
+    session: &mut Session,
+    mut local: watch::Receiver<LocalDecision>,
+    proposal: PairAdmissions,
+) -> Result<PairAdmissions, DecisionEnd> {
+    let mut agreed = proposal;
+    let mut local_accepted = false;
+    let mut remote_accepted = false;
+    while !local_accepted || !remote_accepted {
+        tokio::select! {
+            changed = local.changed() => {
+                if changed.is_err() {
+                    return Err(DecisionEnd::Failed);
+                }
+                let decision = *local.borrow_and_update();
+                match decision {
+                    LocalDecision::Pending => {}
+                    LocalDecision::Accept => {
+                        if !local_accepted {
+                            session.send(&PairingMessage::Decision { accept: true, admissions: Some(proposal) })
+                                .await.map_err(|_| DecisionEnd::Failed)?;
+                            local_accepted = true;
+                        }
+                    }
+                    LocalDecision::Reject => {
+                        let _ = session.send(&PairingMessage::Decision { accept: false, admissions: None }).await;
+                        return Err(DecisionEnd::Rejected);
+                    }
+                    LocalDecision::Cancel => {
+                        let _ = session.send(&PairingMessage::Decision { accept: false, admissions: None }).await;
+                        return Err(DecisionEnd::Cancelled);
+                    }
+                    LocalDecision::Expire => return Err(DecisionEnd::TimedOut),
+                }
+            }
+            message = session.recv::<PairingMessage>() => {
+                match message {
+                    Ok(Some(PairingMessage::Decision { accept: true, admissions: Some(remote) })) => {
+                        agreed = proposal.agree(remote).map_err(|_| DecisionEnd::Failed)?;
+                        remote_accepted = true;
+                    }
+                    Ok(Some(PairingMessage::Decision { accept: false, .. })) => {
+                        return Err(DecisionEnd::Rejected);
+                    }
+                    _ => return Err(DecisionEnd::Failed),
+                }
+            }
+        }
+    }
+    Ok(agreed)
+}
+
+/// The commit exchange is the one place a silent peer costs more than a
+/// session.
+///
+/// By then the ceremony holds the commit lock, the ceremony slot and (on the
+/// responder) an inbound session permit, and [`PAIRING_CONFIRM_TIMEOUT`] covers
+/// only the decisions *before* it. With no deadline here a peer that accepted
+/// and then stopped writing kept all three for good: no cancel, no new invite,
+/// no pairing again without a restart.
+///
+/// Short on purpose: the far side has already decided.
+const PAIRING_COMMIT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Store the peer on both devices, or on neither.
+///
+/// `false` rolls this side back — an unacknowledged pairing is worse than no
+/// pairing, because the other device will not answer a key it never kept.
+async fn persist_bilaterally(
+    node: &Node,
+    session: &mut Session,
+    peer: &Peer,
+    admissions: PairAdmissions,
+) -> Commit {
+    let mut slot = node.peers.snapshot(&peer.pairing_id);
+    let stored = node
+        .peers
+        .upsert_from_admission(&mut slot, peer.clone(), Some(admissions))
+        .is_ok();
+    let acknowledged = tokio::time::timeout(PAIRING_COMMIT_TIMEOUT, async {
+        session
+            .send(&PairingMessage::Stored { ok: stored })
+            .await
+            .map_err(|_| ())?;
+        match session.recv::<PairingMessage>().await {
+            Ok(Some(PairingMessage::Stored { ok })) => Ok(ok),
+            _ => Err(()),
+        }
+    })
+    .await;
+
+    let outcome = match (stored, &acknowledged) {
+        (true, Ok(Ok(true))) => Commit::Both,
+        (_, Err(_)) => Commit::PeerSilent,
+        (false, _) => Commit::LocalStoreFailed,
+        (true, _) => Commit::PeerRefused,
+    };
+    if outcome == Commit::PeerSilent {
+        debug!(
+            pairing_id = %peer.pairing_id,
+            "a peer accepted the pairing and then stopped answering; rolling it back"
+        );
+    }
+    // Rolled back on every outcome but agreement, through the conditional
+    // restore rather than a bare `remove`: an established pairing this ceremony
+    // replaced has to come back (B5), and a concurrent session's write must not
+    // be discarded to do it. A rollback that could not be written is a failure
+    // of its own — the key is out of the candidate list, but the file still
+    // names it, and saying "the peer timed out" would hide that (B4).
+    if stored && outcome != Commit::Both {
+        if let Err(e) = node.peers.restore(&slot) {
+            tracing::warn!(
+                pairing_id = %peer.pairing_id,
+                error = ?e,
+                "a pairing rollback could not be written"
+            );
+            return Commit::RollbackFailed;
+        }
+    }
+    outcome
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Commit {
+    Both,
+    /// The peer accepted and then stopped writing, or the channel broke.
+    PeerSilent,
+    PeerRefused,
+    LocalStoreFailed,
+    /// The pairing was rolled back in memory but the file still names it.
+    RollbackFailed,
+}
+
+impl Commit {
+    /// The failure a user is shown. `Timeout` rather than `PeerStore` for a
+    /// silent peer: nothing is wrong with this device's storage, and the two
+    /// need different sentences on the pairing screen. A rollback that did not
+    /// reach the disk *is* this device's storage failing, and reporting the
+    /// peer's outcome instead would leave the user with no reason to look.
+    fn error(self) -> Option<NodeError> {
+        match self {
+            Self::Both => None,
+            Self::PeerSilent => Some(NodeError::Timeout),
+            Self::PeerRefused | Self::LocalStoreFailed | Self::RollbackFailed => {
+                Some(NodeError::PeerStore)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use tokio::net::TcpListener;
+
+    use super::*;
+    use crate::discovery::Discovery;
+    use crate::node::listen;
+    use crate::peers::PeerStore;
+    use crate::sync::testutil::TestSource;
+    use crate::SyncOutcome;
+
+    fn node(dir: &tempfile::TempDir, name: &str) -> Arc<Node> {
+        Arc::new(Node::new(
+            PeerStore::open(
+                &dir.path().join(format!("{name}-peers.json")),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
+            None::<Discovery>,
+            0,
+            true,
+        ))
+    }
+
+    async fn start_listener(
+        node: Arc<Node>,
+        source: Arc<TestSource>,
+    ) -> (SocketAddr, watch::Sender<bool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown, receiver) = watch::channel(false);
+        tokio::spawn(listen(
+            node,
+            listener,
+            source,
+            |_: &str, _: &SyncOutcome| {},
+            |_| {},
+            receiver,
+        ));
+        (addr, shutdown)
+    }
+
+    #[tokio::test]
+    async fn nearby_pairs_without_invitation_only_after_both_confirm() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = node(&dir, "nearby-a");
+        let b = node(&dir, "nearby-b");
+        let (addr, shutdown) = start_listener(
+            Arc::clone(&b),
+            Arc::new(TestSource::new("nearby-b", vec![])),
+        )
+        .await;
+        let initiated = a
+            .pair_nearby(&addr.to_string(), &TestSource::new("nearby-a", vec![]))
+            .await
+            .unwrap();
+        let received = wait_for(&b, PairingPhase::AwaitingConfirmation).await;
+        assert_eq!(initiated.sas, received.sas);
+        assert_eq!(initiated.pairing_id, received.pairing_id);
+        assert_eq!(received.role, Some(PairingRole::Responder));
+        assert_eq!(received.peer.as_ref().unwrap().device_id, "nearby-a");
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        a.pair_confirm(true).unwrap();
+        tokio::task::yield_now().await;
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        b.pair_confirm(true).unwrap();
+        wait_for(&a, PairingPhase::Confirmed).await;
+        wait_for(&b, PairingPhase::Confirmed).await;
+        let left = a.peers().list().pop().unwrap();
+        let right = b.peers().list().pop().unwrap();
+        assert_eq!(left.psk, right.psk);
+        assert_eq!(left.device_id.as_deref(), Some("nearby-b"));
+        assert_eq!(right.device_id.as_deref(), Some("nearby-a"));
+        let _ = shutdown.send(true);
+    }
+
+    #[tokio::test]
+    async fn nearby_rejection_persists_nothing_and_releases_the_ceremony() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = node(&dir, "reject-a");
+        let b = node(&dir, "reject-b");
+        let (addr, shutdown) = start_listener(
+            Arc::clone(&b),
+            Arc::new(TestSource::new("reject-b", vec![])),
+        )
+        .await;
+        a.pair_nearby(&addr.to_string(), &TestSource::new("reject-a", vec![]))
+            .await
+            .unwrap();
+        wait_for(&b, PairingPhase::AwaitingConfirmation).await;
+        b.pair_confirm(false).unwrap();
+        wait_for(&a, PairingPhase::Rejected).await;
+        wait_for(&b, PairingPhase::Rejected).await;
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        assert!(
+            b.pairing.nearby_candidate().is_none(),
+            "unsolicited requests are rate limited"
+        );
+        b.pair_create_invite().unwrap();
+        let _ = shutdown.send(true);
+    }
+
+    /// Sleeps rather than yielding: under `start_paused` the clock only moves
+    /// when the runtime has nothing to run, so a `yield_now` spin would keep it
+    /// busy and the deadline under test would never arrive.
+    async fn wait_for(node: &Node, phase: PairingPhase) -> PairingStatus {
+        tokio::time::timeout(PAIRING_CONFIRM_TIMEOUT * 4, async {
+            loop {
+                let status = node.pair_progress();
+                if status.phase == phase {
+                    return status;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("pairing did not reach {phase:?}"))
+    }
+
+    /// The pairing protocol driven by hand, so the far side can be left
+    /// waiting at exactly the message this test is about.
+    ///
+    /// Returns after the hello exchange, which is what puts the responder into
+    /// `AwaitingConfirmation`. Nothing here reads the far side's messages: they
+    /// are a handful of bytes and sit in the socket buffer, and a read would
+    /// make this a peer that is still answering.
+    async fn handshake_by_hand(addr: SocketAddr, code: &str) -> Session {
+        let code = PairingCode::parse(code).unwrap();
+        let (mut session, _) = Session::connect_pairing(&Endpoint::Tcp(addr), &code)
+            .await
+            .unwrap();
+        session
+            .send(&PairingMessage::Hello {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                device_id: "silent-device".into(),
+                device_name: "silent".into(),
+                profile: DeviceProfile::current(),
+                listen_addr: None,
+            })
+            .await
+            .unwrap();
+        session.recv::<PairingMessage>().await.unwrap();
+        session
+    }
+
+    #[tokio::test]
+    async fn pairing_rejects_an_oversized_authenticated_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), source).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let code = PairingCode::parse(&invite.code).unwrap();
+        let (mut session, _) = Session::connect_pairing(&Endpoint::Tcp(addr), &code)
+            .await
+            .unwrap();
+        session
+            .send(&PairingMessage::Hello {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                device_id: "oversized-device".into(),
+                device_name: "oversized".into(),
+                profile: DeviceProfile {
+                    model: Some("x".repeat(129)),
+                    ..DeviceProfile::default()
+                },
+                listen_addr: None,
+            })
+            .await
+            .unwrap();
+        let _ = session.recv::<PairingMessage>().await;
+
+        let failed = wait_for(&responder, PairingPhase::Failed).await;
+        assert_eq!(failed.error, Some(NodeError::Handshake));
+        assert!(responder.peers().is_empty());
+        let _ = session.close().await;
+        let _ = shutdown.send(true);
+    }
+
+    #[tokio::test]
+    async fn pairing_the_same_stable_device_twice_is_refused_without_replacing_trust() {
+        let initiator_dir = tempfile::tempdir().unwrap();
+        let responder_dir = tempfile::tempdir().unwrap();
+        let initiator = node(&initiator_dir, "initiator");
+        let responder = node(&responder_dir, "responder");
+        let initiator_source = Arc::new(TestSource::new("initiator-device-id", Vec::new()));
+        let responder_source = Arc::new(TestSource::new("responder-device-id", Vec::new()));
+        let (addr, shutdown) =
+            start_listener(Arc::clone(&responder), Arc::clone(&responder_source)).await;
+
+        let first = responder.pair_create_invite().unwrap();
+        initiator
+            .pair_join(&first.code, &addr.to_string(), initiator_source.as_ref())
+            .await
+            .unwrap();
+        wait_for(&initiator, PairingPhase::AwaitingConfirmation).await;
+        wait_for(&responder, PairingPhase::AwaitingConfirmation).await;
+        initiator.pair_confirm(true).unwrap();
+        responder.pair_confirm(true).unwrap();
+        wait_for(&initiator, PairingPhase::Confirmed).await;
+        wait_for(&responder, PairingPhase::Confirmed).await;
+
+        let initiator_pairing = initiator.peers().list().pop().expect("initiator peer");
+        let responder_pairing = responder.peers().list().pop().expect("responder peer");
+        assert_eq!(
+            initiator_pairing.device_id.as_deref(),
+            Some("responder-device-id")
+        );
+        assert_eq!(
+            responder_pairing.device_id.as_deref(),
+            Some("initiator-device-id")
+        );
+
+        let second = responder.pair_create_invite().unwrap();
+        assert_eq!(
+            initiator
+                .pair_join(&second.code, &addr.to_string(), initiator_source.as_ref())
+                .await,
+            Err(NodeError::AlreadyPaired)
+        );
+        let refused = wait_for(&responder, PairingPhase::Failed).await;
+        assert_eq!(refused.error, Some(NodeError::AlreadyPaired));
+
+        assert_eq!(initiator.peers().len(), 1);
+        assert_eq!(responder.peers().len(), 1);
+        assert!(initiator
+            .peers()
+            .get(&initiator_pairing.pairing_id)
+            .is_some());
+        assert!(responder
+            .peers()
+            .get(&responder_pairing.pairing_id)
+            .is_some());
+        assert!(initiator.peers().get(&second.pairing_id).is_none());
+        assert!(responder.peers().get(&second.pairing_id).is_none());
+
+        let _ = shutdown.send(true);
+    }
+
+    /// Both sides accept, and then this one stops writing before the commit
+    /// exchange — the shape that left the responder committing for good.
+    async fn accept_then_go_silent(responder: &Node, session: &mut Session) {
+        wait_for(responder, PairingPhase::AwaitingConfirmation).await;
+        responder.pair_confirm(true).unwrap();
+        session
+            .send(&PairingMessage::Decision {
+                accept: true,
+                admissions: Some(PairAdmissions::default()),
+            })
+            .await
+            .unwrap();
+        loop {
+            match session.recv::<PairingMessage>().await {
+                Ok(Some(PairingMessage::Stored { .. })) => break,
+                Ok(Some(PairingMessage::Decision { accept: true, .. })) => {}
+                other => panic!("the responder never reached the commit exchange: {other:?}"),
+            }
+        }
+        tokio::time::pause();
+    }
+
+    #[tokio::test]
+    async fn peer_cannot_certify_an_overflowing_local_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "generation-responder");
+        let source = Arc::new(TestSource::new("generation-responder", vec![]));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        wait_for(&responder, PairingPhase::AwaitingConfirmation).await;
+        responder.pair_confirm(true).unwrap();
+        peer.send(&PairingMessage::Decision {
+            accept: true,
+            admissions: Some(PairAdmissions {
+                local: 0,
+                remote: u64::MAX,
+            }),
+        })
+        .await
+        .unwrap();
+        wait_for(&responder, PairingPhase::Failed).await;
+        assert!(responder.peers().list().is_empty());
+        let snapshot = responder.prepare_group(source.as_ref()).unwrap();
+        assert_eq!(snapshot.roster.members["generation-responder"].admission, 0);
+        assert!(snapshot.roster.removed.is_empty());
+        let _ = shutdown.send(true);
+    }
+
+    /// The whole of the defect. A peer that accepts and then stops writing had
+    /// no deadline against it: the responder sat in `persist_bilaterally`
+    /// forever, holding the commit lock (so `pair_cancel` refused), the
+    /// ceremony slot (so no new invitation could be minted) and the inbound
+    /// session permit. The device could not pair again without a restart.
+    #[tokio::test]
+    async fn a_peer_that_stops_answering_after_accepting_releases_the_ceremony() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+
+        let invite = responder.pair_create_invite().unwrap();
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        accept_then_go_silent(&responder, &mut peer).await;
+
+        // Bounded, and reported as a peer timeout rather than as this device's
+        // storage failing.
+        let done = wait_for(&responder, PairingPhase::TimedOut).await;
+        assert_eq!(done.error, Some(NodeError::Timeout));
+
+        // Nothing half-written: no peer row, and so no pre-shared key left in
+        // the listener's candidates for a pairing the other side never kept.
+        assert!(responder.peers().list().is_empty());
+        assert!(responder.peers().psks().is_empty());
+
+        // And the device can pair again, without a restart.
+        assert_eq!(responder.pair_cancel().phase, PairingPhase::TimedOut);
+        let fresh = responder.pair_create_invite().expect("PairingBusy leaked");
+        assert_ne!(fresh.pairing_id, invite.pairing_id);
+
+        drop(peer);
+        let _ = shutdown.send(true);
+    }
+
+    /// The inbound session permit is the second thing the stall held. Four
+    /// concurrent sessions is the whole budget, so one stuck ceremony that
+    /// never returns is a quarter of the device's ability to serve peers, for
+    /// good.
+    #[tokio::test]
+    async fn a_stalled_ceremony_gives_its_inbound_session_permit_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+
+        let invite = responder.pair_create_invite().unwrap();
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        accept_then_go_silent(&responder, &mut peer).await;
+        wait_for(&responder, PairingPhase::TimedOut).await;
+
+        let permits = Arc::clone(&responder.sessions);
+        tokio::time::timeout(PAIRING_CONFIRM_TIMEOUT, async {
+            while permits.available_permits() < crate::node::MAX_CONCURRENT_PEER_SESSIONS {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a stalled ceremony kept its inbound session permit");
+
+        drop(peer);
+        let _ = shutdown.send(true);
+    }
+
+    /// The tentative record is on disk. Until it is, blocking the file would
+    /// only fail the write the rollback is meant to undo.
+    async fn wait_for_tentative_write(node: &Node) {
+        tokio::time::timeout(PAIRING_CONFIRM_TIMEOUT, async {
+            while node.peers().psks().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the ceremony never wrote its peer");
+    }
+
+    #[tokio::test]
+    async fn a_tentative_pairing_cannot_admit_a_second_connection_before_stored_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), source).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let code = PairingCode::parse(&invite.code).unwrap();
+        let (mut session, token) = Session::connect_pairing(&Endpoint::Tcp(addr), &code)
+            .await
+            .unwrap();
+        session
+            .send(&PairingMessage::Hello {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                device_id: "silent-device".into(),
+                device_name: "silent".into(),
+                profile: DeviceProfile::current(),
+                listen_addr: None,
+            })
+            .await
+            .unwrap();
+        session.recv::<PairingMessage>().await.unwrap();
+        accept_then_go_silent(&responder, &mut session).await;
+        wait_for_tentative_write(&responder).await;
+        assert!(Session::connect(addr, &token.psk()).await.is_err());
+        assert_eq!(
+            responder
+                .peers()
+                .stored_group()
+                .unwrap()
+                .roster
+                .members
+                .len(),
+            1
+        );
+        session
+            .send(&PairingMessage::Stored { ok: false })
+            .await
+            .unwrap();
+        wait_for(&responder, PairingPhase::Failed).await;
+        assert!(responder.peers().is_empty());
+        let _ = shutdown.send(true);
+    }
+
+    /// Renaming over a directory fails on every platform, and the parent still
+    /// exists, so the write path cannot recreate its way out of it.
+    fn block(path: &std::path::Path) {
+        let _ = std::fs::remove_file(path);
+        std::fs::create_dir(path).expect("block the path");
+    }
+
+    /// B4. The rollback could not be written, so the file still names the
+    /// pre-shared key this ceremony repudiated. The key is out of the
+    /// listener's candidates immediately — that is what fail-closed means here
+    /// — but reporting the peer's timeout would leave the user with nothing to
+    /// act on while a live credential sat on disk.
+    #[tokio::test]
+    async fn a_rollback_that_cannot_be_written_fails_the_pairing_rather_than_timing_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+
+        let invite = responder.pair_create_invite().unwrap();
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        accept_then_go_silent(&responder, &mut peer).await;
+        wait_for_tentative_write(&responder).await;
+        block(&dir.path().join("responder-peers.json"));
+
+        let done = wait_for(&responder, PairingPhase::Failed).await;
+        assert_eq!(
+            done.error,
+            Some(NodeError::PeerStore),
+            "a rollback that did not reach the disk must not read as a peer timeout"
+        );
+        assert!(
+            responder.peers().psks().is_empty(),
+            "the repudiated key is still an authentication candidate"
+        );
+
+        drop(peer);
+        let _ = shutdown.send(true);
+    }
+
+    /// B5. Re-pairing a device that is already stored writes over its record
+    /// before the other side has agreed. Losing that exchange used to delete the
+    /// pairing outright — the working device, its key and all — which is the
+    /// data-loss outcome the privacy contract rules out. The pre-ceremony record must come
+    /// back, and the tentative key must not.
+    #[tokio::test]
+    async fn a_failed_re_pair_restores_the_device_that_was_already_paired() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+
+        let invite = responder.pair_create_invite().unwrap();
+        let established = Peer {
+            pairing_id: invite.pairing_id.clone(),
+            device_id: None,
+            name: "the device the user already has".to_string(),
+            psk: PairingToken::generate().psk(),
+            last_addr: None,
+            last_seen_ms: crate::now_ms(),
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        let established_psk = established.psk;
+        responder.peers().upsert(established).unwrap();
+
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        accept_then_go_silent(&responder, &mut peer).await;
+        wait_for(&responder, PairingPhase::TimedOut).await;
+
+        let back = responder
+            .peers()
+            .get(&invite.pairing_id)
+            .expect("the established pairing was deleted by a failed re-pair");
+        assert_eq!(back.name, "the device the user already has");
+        assert!(back.psk_matches(&established_psk));
+        let candidates = responder.peers().psks();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].psk, established_psk);
+
+        drop(peer);
+        let _ = shutdown.send(true);
+    }
+
+    /// A peer may claim any `listen_addr` it likes over an authenticated
+    /// channel, and the claim is written into the peer file as the address
+    /// every later round dials. `0.0.0.0:0` is storable and not dialable.
+    #[test]
+    fn a_peer_advertised_address_that_cannot_be_dialled_is_not_stored() {
+        for hostile in [
+            "0.0.0.0:47654",
+            "127.0.0.1:0",
+            "255.255.255.255:47654",
+            "224.0.0.1:47654",
+            "169.254.1.1:47654",
+            "[::]:47654",
+            "[ff02::1]:47654",
+        ] {
+            let addr: SocketAddr = hostile.parse().unwrap();
+            assert!(
+                !crate::netif::is_dialable(&addr),
+                "{hostile} would have replaced an address that worked"
+            );
+        }
+        assert!(crate::netif::is_dialable(
+            &"192.168.1.9:47654".parse().unwrap()
+        ));
+        // Loopback stays dialable: two daemons on one host is a supported
+        // topology and `127.0.0.1` is the address they exchange.
+        assert!(crate::netif::is_dialable(
+            &"127.0.0.1:47654".parse().unwrap()
+        ));
+    }
+}

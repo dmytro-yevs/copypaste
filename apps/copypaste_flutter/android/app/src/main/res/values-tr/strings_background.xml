@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">Yakalama duraklatıldı</string>
+    <string name="background_status_capturing">Kopyalar kaydediliyor</string>
+    <string name="background_status_syncing">Arka planda senkronize ediliyor</string>
+    <string name="background_status_last_sync">Son senkronizasyon %1$s</string>
+    <string name="background_status_last_saved">Son kayıt %1$s</string>
+    <string name="background_action_pause">Duraklat</string>
+    <string name="background_action_resume">Sürdür</string>
+    <string name="background_action_send">Panoyu gönder</string>
+    <string name="background_action_open">Aç</string>
+    <string name="shortcut_send_clipboard">Panoyu gönder</string>
+    <string name="shortcut_transform_clipboard">Panoyu dönüştür</string>
+</resources>

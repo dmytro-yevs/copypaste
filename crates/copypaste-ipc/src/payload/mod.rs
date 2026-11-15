@@ -1,0 +1,897 @@
+//! The typed payloads a reply can carry.
+//!
+//! Split from the envelope in `lib.rs` only for size. Their distinct wire
+//! wrappers live on [`crate::ResponseData`].
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+fn deserialize_optional_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u32::deserialize(deserializer).map(Some)
+}
+
+mod cloud;
+mod device;
+
+pub use cloud::{CloudStatusData, CloudSyncData};
+pub use device::{
+    DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
+    DevicePresenceObservation, DeviceProfileObservation, ExternalNetworkObservation,
+};
+
+use crate::health::SettingsHealth;
+
+/// The ordering used by a full-history query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySort {
+    Newest,
+    Oldest,
+    /// FTS relevance. This is meaningful only with a text query.
+    Relevance,
+}
+
+/// Server-side filters and ordering for a lazily loaded history view.
+///
+/// The daemon applies every filter before pagination. A client must pass the
+/// opaque `ItemPage::next_cursor` back unchanged with the same query; applying
+/// filters to already loaded pages would leave matching history undiscovered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryQuery {
+    /// Text to find through the encrypted store's FTS index. Empty means no
+    /// text constraint. Only text clips are searchable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
+    /// Empty means every content class. Multiple classes are combined with OR.
+    #[serde(default)]
+    pub content_classes: Vec<crate::ContentClass>,
+    /// Empty means every semantic kind. Multiple kinds are combined with OR.
+    /// When content classes are also present, both filters must match.
+    #[serde(default)]
+    pub semantic_kinds: Vec<crate::SemanticKind>,
+    #[serde(default)]
+    pub pinned_only: bool,
+    /// Exact origin device id when known. Local captures have no stored origin
+    /// id, so clients use this only for a metadata value returned by a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_device_id: Option<String>,
+    /// Exact stable bundle/package id of the application that captured a clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_app_bundle_id: Option<String>,
+    /// Inclusive lower bound and exclusive upper bound, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_from_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_before_ms: Option<i64>,
+    /// Selected tag ids match with OR. Tag filtering only returns pinned clips.
+    #[serde(default)]
+    pub tag_ids: Vec<String>,
+    #[serde(default)]
+    pub untagged_only: bool,
+    #[serde(default = "default_history_sort")]
+    pub sort: HistorySort,
+}
+
+fn default_history_sort() -> HistorySort {
+    HistorySort::Newest
+}
+
+impl Default for HistoryQuery {
+    fn default() -> Self {
+        Self {
+            search: None,
+            content_classes: Vec::new(),
+            semantic_kinds: Vec::new(),
+            pinned_only: false,
+            origin_device_id: None,
+            source_app_bundle_id: None,
+            captured_from_ms: None,
+            captured_before_ms: None,
+            tag_ids: Vec::new(),
+            untagged_only: false,
+            sort: HistorySort::Newest,
+        }
+    }
+}
+
+/// One selectable origin-device filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryDeviceFacet {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub device_class: DeviceClass,
+}
+
+/// One selectable source-application filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistorySourceAppFacet {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_id: Option<String>,
+}
+
+/// Filter values derived from the complete retained history, rather than from
+/// whichever lazy pages a client has loaded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HistoryFacets {
+    pub origin_devices: Vec<HistoryDeviceFacet>,
+    pub source_apps: Vec<HistorySourceAppFacet>,
+    #[serde(default)]
+    pub tags: Vec<crate::HistoryTag>,
+}
+
+/// Most ranges one [`crate::Method::HistoryCounts`] request may name.
+pub const MAX_HISTORY_COUNT_RANGES: usize = 256;
+
+/// One group of unpinned clips a client displays: `[from_ms, before_ms)` in
+/// Unix milliseconds. The client owns the calendar and time-zone rules that
+/// produced the instants; the runtime only counts between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryCountRange {
+    pub from_ms: i64,
+    pub before_ms: i64,
+}
+
+/// Exact sizes of the groups a filtered History list shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryGroupCounts {
+    /// Pinned clips matching the query.
+    pub pinned: u64,
+    /// Unpinned clips matching the query in each requested range, in request
+    /// order.
+    pub ranges: Vec<u64>,
+}
+
+/// One page of history, and how much of it could not be shown.
+///
+/// `skipped_undecryptable` is on the wire because the alternative
+/// shipped: a page silently one item shorter, with the reason only in the
+/// daemon's log (`CopyPaste-00zz`). A client that reads it can say "3 items
+/// could not be read"; a client that ignores it is no worse off than before.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemPage {
+    pub items: Vec<Item>,
+    pub skipped_undecryptable: u32,
+    /// Where to resume, or `None` at the end of the list.
+    ///
+    /// Pass it back as [`crate::Method::List`]'s `cursor`. **The only correct
+    /// end-of-list test**: a short page is not one, because
+    /// `skipped_undecryptable` rows were read and dropped, and stopping on a
+    /// short page would hide the rest of the history behind a handful of
+    /// corrupt rows.
+    ///
+    /// Always `None` from `Search`, which is not paged — see
+    /// [`crate::Method::Search`].
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+/// Metadata for one file clip after its authenticated payload was opened.
+///
+/// A file clip holds one or more native file references copied together. The
+/// top-level name, type and reference describe the first file; `files` lists
+/// every member of a multi-file clip and is empty for a single file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    #[serde(default)]
+    pub source_available: bool,
+    pub size_bytes: u64,
+    pub file_count: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<FileMember>,
+}
+
+/// One member of a multi-file clip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMember {
+    pub filename: String,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+}
+
+/// Original metadata for one authenticated image payload.
+///
+/// This is absent from paged previews and populated only when a client opens
+/// the complete item, avoiding image-header work across the whole history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageDetails {
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+}
+
+/// A bounded PNG thumbnail generated from a stored image on demand.
+///
+/// The original encrypted clipboard payload never crosses the UI boundary.
+/// `png_base64` is only a small, decoded preview suitable for an `<img>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagePreview {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Physical-pixel bounds for an aspect-preserving image preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImagePreviewBounds {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// One item in an export, and the unit an import consumes.
+///
+/// Deliberately not [`Item`]: an item's id is bound into its ciphertext as
+/// associated data, so an imported item is necessarily a *new* item with a new
+/// id. Carrying the old one would invite a client to expect it back.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportItem {
+    /// Older exports omit privacy; new exports preserve explicit classification.
+    #[serde(default, skip_serializing_if = "crate::ClipboardPrivacy::is_empty")]
+    pub privacy: crate::ClipboardPrivacy,
+    pub content: String,
+    pub content_type: String,
+    /// Milliseconds since the Unix epoch. Preserved across an import, so a
+    /// restored history keeps its order and its ages.
+    pub created_at: i64,
+    pub pinned: bool,
+}
+
+/// What an export contains, and everything it left out.
+///
+/// The three skip counts are always present, including when they are zero. A
+/// count that only appears when it is non-zero is one nobody knows to look for,
+/// and a silent export that dropped items is worse than one that says so.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportData {
+    pub items: Vec<ExportItem>,
+    /// Items whose `content_type` is not text.
+    pub skipped_non_text: u32,
+    pub skipped_undecryptable: u32,
+}
+
+/// One interim frame of [`crate::Method::ExportStream`]: the next exported
+/// items and how far the read has come.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportChunk {
+    pub items: Vec<ExportItem>,
+    pub progress: TransferProgress,
+}
+
+/// How far a streamed operation has come. `processed` never exceeds `total`.
+///
+/// Export counts live history rows, skipped ones included; backup counts
+/// database pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferProgress {
+    pub processed: u64,
+    pub total: u64,
+}
+
+/// What an import did.
+///
+/// `skipped` is the compatibility total and is always the sum of the three
+/// reason counts in replies from a current daemon. The reason fields are
+/// additive and default to zero so a current client can still decode a reply
+/// from an earlier v2 daemon. In that case `skipped` can be non-zero while the
+/// reason counts are zero, and the client must describe the reason as
+/// unavailable rather than assuming those rows were duplicates.
+///
+/// A malformed batch is refused whole, before anything is written. These
+/// counts cover only individually recoverable rows inside an accepted batch.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ImportData {
+    pub inserted: u32,
+    pub skipped: u32,
+    /// Items deduplicated against something the store already held.
+    #[serde(default)]
+    pub skipped_duplicate: u32,
+    /// Empty or whitespace-only items, which the ingest path cannot store.
+    #[serde(default)]
+    pub skipped_empty: u32,
+    /// Items larger than the user's configured per-item size limit.
+    #[serde(default)]
+    pub skipped_too_large: u32,
+    /// Items that landed but whose pinned state could not be written.
+    ///
+    /// Reported rather than logged: an import that answered success with a pin
+    /// missing lost user state silently (DMY-156). Non-zero means the rows are
+    /// there and unpinned; re-running the same import is the repair, because a
+    /// duplicate still carries the pin the file named.
+    #[serde(default)]
+    pub pins_failed: u32,
+}
+
+/// A completed backup. No path: the client supplied it and already knows it,
+/// and echoing one back is how it ends up in a log (the privacy contract).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct BackupData {
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredData {
+    pub devices: Vec<DiscoveredDevice>,
+}
+
+/// A device seen on the LAN.
+///
+/// Presence is not trust: everything here is what an unauthenticated mDNS
+/// record claimed, and only the Noise handshake proves any of it. `paired` is
+/// resolved locally by comparing advertised pairing ids with this device's
+/// own pairing list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredDevice {
+    /// Opaque mDNS candidate id. This is not a pairing credential or a device
+    /// identity; it only de-duplicates announcements in the client.
+    pub discovery_id: String,
+    pub name: String,
+    /// `host:port` to hand to `pair join`.
+    pub addr: String,
+    pub last_seen_ms: i64,
+    pub paired: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<DeviceDetails>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingRole {
+    Initiator,
+    Responder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingState {
+    Idle,
+    WaitingForPeer,
+    Handshaking,
+    AwaitingConfirmation,
+    Confirmed,
+    Rejected,
+    Cancelled,
+    TimedOut,
+    Failed,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PairingInviteData {
+    /// Secret QR payload input. Product adapters must render it without
+    /// returning the text to the application UI (manifest 06, INV-13).
+    pub code: String,
+    pub pairing_id: String,
+    pub listen_addr: Option<String>,
+    pub expires_in_secs: u64,
+}
+
+impl std::fmt::Debug for PairingInviteData {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PairingInviteData")
+            .field("pairing_id", &self.pairing_id)
+            .field("code", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingProgressData {
+    pub pairing_id: Option<String>,
+    pub role: Option<PairingRole>,
+    pub state: PairingState,
+    /// Monotonic time remaining in the current Rust-owned pairing phase.
+    /// Native watchdogs may request a fresh progress read when this reaches
+    /// zero, but must not derive a terminal state themselves.
+    pub expires_in_ms: Option<u64>,
+    /// Present only after the authenticated handshake and before a terminal
+    /// state. Six ASCII digits, display-only.
+    pub sas: Option<String>,
+    pub peer_device_id: Option<String>,
+    pub peer_name: Option<String>,
+    pub peer_addr: Option<String>,
+    /// Present only after bilateral confirmation and durable persistence.
+    pub known_device: Option<PeerInfo>,
+    pub error_code: Option<crate::ErrorCode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PeerInfo {
+    pub pairing_id: String,
+    /// The peer's device id once a session has authenticated it; the key of
+    /// its sync policy.
+    pub device_id: Option<String>,
+    pub name: String,
+    pub last_addr: Option<String>,
+    pub last_seen_ms: i64,
+    /// True when the peer is currently visible on the network. Discovery is a
+    /// convenience, so `false` means "not seen", never "unreachable".
+    pub online: bool,
+    pub details: Option<DeviceDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResult {
+    pub pairing_id: String,
+    pub name: String,
+    pub sent: u32,
+    pub received: u32,
+    /// Locally withheld outgoing items whose payload exceeds the P2P limit.
+    /// Missing means the daemon did not report the count; a present zero is a
+    /// known zero.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_u32"
+    )]
+    pub skipped_too_large: Option<u32>,
+    /// Requested versions still unavailable after a completed session. Their
+    /// source data is preserved and a later session may transfer them.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_u32"
+    )]
+    pub skipped_unavailable: Option<u32>,
+    /// End-to-end duration of this sync session. This is not an ICMP ping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Present when this peer failed; the rest of the run still reports.
+    pub error: Option<String>,
+    /// Machine-readable counterpart to `error`.
+    ///
+    /// Additive within protocol v1: older daemons omit it, so a current client
+    /// treats absence as an unknown failure without reconstructing a code from
+    /// the English sentence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<crate::ErrorCode>,
+}
+
+/// What the daemon has refused, missed or deleted since it started.
+///
+/// Every one of these was already counted somewhere and readable nowhere, which
+/// is the whole reason the struct exists: an oversized copy that was dropped and
+/// a daemon that has stopped capturing look identical to a user, and the
+/// difference was only ever in the daemon's own stderr.
+///
+/// **Counts, and nothing else.** No ids, no timestamps of individual events, no
+/// text. A diagnostics report built from this cannot carry clipboard content
+/// because there is none here to carry (the privacy contract).
+///
+/// Cumulative since the process started and never reset, so `uptime_secs` is
+/// the only thing they can honestly be read against.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosticCounters {
+    /// Clipboard changes dropped for exceeding the read gate.
+    pub rejected_too_large: u64,
+    /// Clipboard values that were overwritten before the poll could observe
+    /// them. `changeCount` is lossy; a delta above 1 is irrecoverable.
+    pub lost_intermediates: u64,
+    pub uptime_secs: u64,
+}
+
+/// Capability names shared by native adapters, status IPC and diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformCapability {
+    ClipboardCapture,
+    ClipboardReadWrite,
+    SourceAttribution,
+    PrivacyEnforcement,
+    GlobalShortcuts,
+    QuickPaste,
+    SecureStorage,
+    DesktopIntegration,
+    Updates,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityState {
+    Available,
+    NeedsPermission,
+    NeedsCompanion,
+    Unsupported,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityGuarantee {
+    None,
+    BestEffort,
+    Verified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityStatus {
+    pub state: CapabilityState,
+    pub backend: Option<String>,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    pub guarantee: CapabilityGuarantee,
+    /// Clipboard formats this adapter can read and write. Empty for other capabilities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mime_types: Vec<String>,
+    /// Maximum accepted payload size in bytes; settings may impose a lower limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusData {
+    /// Whether the opt-in runtime watch carries transfer progress.
+    #[serde(default)]
+    pub runtime_watch: bool,
+    /// Whether all capture state changes are delivered by the runtime watch.
+    #[serde(default)]
+    pub capture_watch: bool,
+    /// Monotonic within one runtime instance; clients resync after reconnect.
+    #[serde(default)]
+    pub capture_revision: u64,
+    /// Current platform probes. Empty means an older daemon did not report them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platform_capabilities: BTreeMap<PlatformCapability, CapabilityStatus>,
+    #[serde(default)]
+    pub sync_status: crate::SyncStatus,
+    #[serde(default)]
+    pub device_name: String,
+    /// Stable local device identity. It is unrelated to a peer pairing id and
+    /// omitted by older backends that do not expose it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    pub version: String,
+    pub protocol_version: u32,
+    /// Address of the peer listener that is actually running, when routable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_details: Option<DeviceDetails>,
+    pub item_count: u64,
+    pub capture_running: bool,
+    /// Whether the clipboard transport is currently ready to receive and
+    /// publish system clipboard data.
+    #[serde(default)]
+    pub clipboard_available: bool,
+    /// Which clipboard backend is live — the real pasteboard or the fake used
+    /// on non-macOS hosts and in tests. Surfaced so a demo cannot be mistaken
+    /// for the real thing.
+    pub clipboard_backend: String,
+    /// Persisted capture gate. Present on status so a lightweight poller and
+    /// the tray converge without a second settings round-trip.
+    #[serde(default)]
+    pub private_mode: bool,
+    /// CopyPaste-48k0: lets pollers detect intervening private-mode writes.
+    pub private_mode_epoch: u64,
+
+    /// What has been refused, missed or deleted since the daemon started.
+    ///
+    /// On `status` rather than behind a method of its own because every one of
+    /// these numbers is only meaningful beside the flags above it: "3 copies
+    /// refused" reads differently against a running capture loop than against a
+    /// stopped one, and a client that had to make two calls could show them
+    /// disagreeing.
+    ///
+    /// `#[serde(default)]` for the same reason as the field above.
+    #[serde(default)]
+    pub counters: DiagnosticCounters,
+
+    /// Set when the persisted settings did not read back cleanly.
+    ///
+    /// `None` is the healthy case and the only one a client may render
+    /// silently. Anything else means the daemon is running on values the user
+    /// did not choose, and the failure it exists for is a private-mode user
+    /// never told that capture stopped following their setting.
+    #[serde(default)]
+    pub settings_health: Option<SettingsHealth>,
+}
+
+/// The private capture gate's authoritative value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PrivateModeData {
+    pub private_mode: bool,
+    pub private_mode_epoch: u64,
+}
+
+/// An item as seen by clients. Content is plaintext here: it is decrypted by
+/// the daemon on the way out, and the socket is `0600`.
+fn default_content_class() -> crate::ContentClass {
+    crate::ContentClass::Text
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Item {
+    #[serde(default, skip_serializing_if = "crate::ClipboardPrivacy::is_empty")]
+    pub privacy: crate::ClipboardPrivacy,
+    pub id: String,
+    pub content: String,
+    pub content_type: String,
+    /// Closed presentation class for the open `content_type` vocabulary.
+    #[serde(default = "default_content_class")]
+    pub content_class: crate::ContentClass,
+    /// Derived only for textual payloads. Older clients may ignore it and newer
+    /// clients can still fall back to the content class when it is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_kind: Option<crate::SemanticKind>,
+    /// Packed as `0xRRGGBBAA` when `semantic_kind` is `color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_rgba: Option<u32>,
+    /// Milliseconds since the Unix epoch.
+    pub created_at: i64,
+    pub pinned: bool,
+    /// Tags of a pinned clip in a History page, ordered by name and bounded by
+    /// [`crate::MAX_ITEM_TAG_IDS`]. Search and single-item responses omit them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tag_ids: Vec<String>,
+    /// Present only for authenticated file payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_details: Option<FileDetails>,
+    /// Present only for an authenticated image payload in a full item response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_details: Option<ImageDetails>,
+    /// Which device first captured this item.
+    ///
+    /// Never empty: an item with no recorded origin was captured here, and the
+    /// daemon substitutes its own device id rather than sending a blank —
+    /// "unknown" and "this one" are different answers and a client should not
+    /// have to guess which it got.
+    ///
+    /// An opaque UUID, not a name. It is stable across renames and it is what
+    /// the merge tie-break orders on, so it is the right thing to *group* and
+    /// *filter* by; [`Item::origin_device_name`] is the right thing to show.
+    #[serde(default)]
+    pub origin_device_id: String,
+
+    /// What that device calls itself, when this device has ever been told.
+    ///
+    /// `None` for a device that has never completed a sync session here — the
+    /// cloud path carries an origin id but no name, so an item that arrived
+    /// through an account from a third device has an id and no name until that
+    /// device is paired directly. A client should fall back to a short form of
+    /// the id rather than claiming the item is local.
+    ///
+    /// Peer-supplied and cosmetic. It is not trusted for anything, and two
+    /// devices may well report the same name.
+    #[serde(default)]
+    pub origin_device_name: Option<String>,
+
+    /// Typed form factor of the origin when it is known.
+    #[serde(default)]
+    pub origin_device_class: DeviceClass,
+
+    /// Application bundle that owned the foreground clipboard when this item
+    /// was captured. This is local, cosmetic attribution, so synced items may
+    /// not have one and clients must use a neutral fallback in that case.
+    #[serde(default)]
+    pub source_app_bundle_id: Option<String>,
+
+    /// Platform-resolved display name for [`Self::source_app_bundle_id`].
+    /// Cosmetic only: application identity and exclusion rules use the stable
+    /// bundle/package id, never this mutable label.
+    #[serde(default)]
+    pub source_app_name: Option<String>,
+
+    /// Shared icon asset identity, independent of the clipboard item id.
+    #[serde(default)]
+    pub source_app_icon_id: Option<String>,
+
+    /// This item exceeds the sync size limit, so sync refuses it before sending
+    /// it to another device.
+    ///
+    /// A property of the item and the cap, not of any particular round: it is
+    /// true before the first sync attempt and stays true, which is the point —
+    /// `CopyPaste-f72f` requires a row warning precisely so that an
+    /// item that will silently never arrive does not look like one that is
+    /// still on its way.
+    ///
+    /// Local history remains preserved while sync refuses over-limit items.
+    /// [`CloudSyncData::skipped_too_large`] is the per-round half.
+    #[serde(default)]
+    pub too_large_to_sync: bool,
+
+    #[serde(default)]
+    pub truncated: bool,
+
+    /// Line-feed separated lines of the whole trimmed text, so it holds when
+    /// `content` is a cut preview. Only textual, non-secret items carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<u32>,
+    /// Rule, expiry, integration visibility and provenance state. Absent when nothing applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ItemAnnotations>,
+}
+
+/// An empty text item; producers set what they know with struct update
+/// syntax, so adding a field does not touch every construction site.
+impl Default for Item {
+    fn default() -> Self {
+        Self {
+            privacy: crate::ClipboardPrivacy::default(),
+            id: String::new(),
+            content: String::new(),
+            content_type: crate::content_type::TEXT.to_string(),
+            content_class: default_content_class(),
+            semantic_kind: None,
+            color_rgba: None,
+            created_at: 0,
+            pinned: false,
+            tag_ids: Vec::new(),
+            file_details: None,
+            image_details: None,
+            origin_device_id: String::new(),
+            origin_device_name: None,
+            origin_device_class: DeviceClass::default(),
+            source_app_bundle_id: None,
+            source_app_name: None,
+            source_app_icon_id: None,
+            too_large_to_sync: false,
+            truncated: false,
+            line_count: None,
+            annotations: None,
+        }
+    }
+}
+
+/// Longest provenance string (pipeline name, clip id), in chars.
+pub const MAX_PROVENANCE_TEXT_CHARS: usize = 64;
+/// Most transform steps a provenance snapshot records.
+pub const MAX_PROVENANCE_STEPS: usize = 16;
+/// Longest module id a provenance names, in chars.
+pub const MAX_PROVENANCE_MODULE_CHARS: usize = 96;
+/// Longest label a module gives its write, in chars.
+pub const MAX_PROVENANCE_LABEL_CHARS: usize = 80;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceKind {
+    Manual,
+    Edited,
+    Transformed,
+    /// Written to the clipboard by an optional module (`module_id`, `label`).
+    Module,
+}
+
+/// One transform identity and version; parameters are never stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransformStamp {
+    pub transform_id: String,
+    pub version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipProvenance {
+    pub kind: ProvenanceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_clip_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transform_snapshot: Vec<TransformStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_id: Option<String>,
+    /// What the module says the write was, shown with its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Per-clip state outside the authenticated payload metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemAnnotations {
+    /// Wall-clock deadline in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    #[serde(default)]
+    pub hidden_from_integrations: bool,
+    /// A rule masks this clip on this device.
+    #[serde(default)]
+    pub rule_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ClipProvenance>,
+    /// Bounded by [`crate::MAX_ITEM_TAG_IDS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_tag_ids: Vec<String>,
+    #[serde(default)]
+    pub keep: bool,
+}
+
+fn bound_text(value: &mut Option<String>) {
+    bound_chars(value, MAX_PROVENANCE_TEXT_CHARS);
+}
+
+fn bound_chars(value: &mut Option<String>, max: usize) {
+    if let Some((cut, _)) = value
+        .as_deref()
+        .and_then(|text| text.char_indices().nth(max))
+    {
+        if let Some(text) = value.as_mut() {
+            text.truncate(cut);
+        }
+    }
+}
+
+impl ItemAnnotations {
+    /// Clamp every list and string to its wire bound.
+    #[must_use]
+    pub fn bounded(mut self) -> Self {
+        self.rule_tag_ids.truncate(crate::MAX_ITEM_TAG_IDS);
+        if let Some(provenance) = self.provenance.as_mut() {
+            provenance.transform_snapshot.truncate(MAX_PROVENANCE_STEPS);
+            for stamp in &mut provenance.transform_snapshot {
+                let mut id = Some(std::mem::take(&mut stamp.transform_id));
+                bound_text(&mut id);
+                stamp.transform_id = id.unwrap_or_default();
+            }
+            bound_text(&mut provenance.from_clip_id);
+            bound_text(&mut provenance.pipeline_name);
+            bound_chars(&mut provenance.module_id, MAX_PROVENANCE_MODULE_CHARS);
+            bound_chars(&mut provenance.label, MAX_PROVENANCE_LABEL_CHARS);
+        }
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyncResult;
+    use serde_json::json;
+
+    fn result(value: serde_json::Value) -> Result<SyncResult, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+
+    fn base() -> serde_json::Value {
+        json!({
+            "pairing_id": "peer-1",
+            "name": "Phone",
+            "sent": 1,
+            "received": 2,
+            "duration_ms": null,
+            "error": null,
+            "error_code": null,
+        })
+    }
+
+    #[test]
+    fn sync_size_refusal_count_distinguishes_missing_and_known_values() {
+        assert_eq!(result(base()).unwrap().skipped_too_large, None);
+
+        let mut zero = base();
+        zero["skipped_too_large"] = json!(0);
+        assert_eq!(result(zero).unwrap().skipped_too_large, Some(0));
+
+        let mut positive = base();
+        positive["skipped_too_large"] = json!(7);
+        let decoded = result(positive).unwrap();
+        assert_eq!(decoded.skipped_too_large, Some(7));
+        let encoded = serde_json::to_value(decoded).unwrap();
+        assert_eq!(encoded["skipped_too_large"], json!(7));
+    }
+
+    #[test]
+    fn sync_size_refusal_count_rejects_non_u32_values() {
+        for value in [
+            json!(null),
+            json!(-1),
+            json!(1.5),
+            json!("1"),
+            json!(4_294_967_296u64),
+        ] {
+            let mut invalid = base();
+            invalid["skipped_too_large"] = value;
+            assert!(result(invalid).is_err());
+        }
+    }
+}

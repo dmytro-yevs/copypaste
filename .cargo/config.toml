@@ -1,0 +1,5 @@
+# rustc's own symbol stripping (the release profile's `strip`) can leave a
+# misaligned LINKEDIT string pool in Mach-O output, which dyld on macOS 27
+# refuses to load. On Apple targets the system linker drops local symbols.
+[target.'cfg(target_vendor = "apple")']
+rustflags = ["-C", "strip=none", "-C", "link-arg=-Wl,-x"]

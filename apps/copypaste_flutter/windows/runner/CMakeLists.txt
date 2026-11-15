@@ -1,0 +1,71 @@
+cmake_minimum_required(VERSION 3.14)
+project(runner LANGUAGES CXX)
+
+# Define the application target. To change its name, change BINARY_NAME in the
+# top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
+# work.
+#
+# Any new source files that you add to the application should be added here.
+add_executable(${BINARY_NAME} WIN32
+  "application_instance.cpp"
+  "app_update_channel.cpp"
+  "app_update_verifier.cpp"
+  "device_authentication.cpp"
+  "flutter_window.cpp"
+  "memory_pressure_monitor.cpp"
+  "screenshot_protection.cpp"
+  "startup_channel.cpp"
+  "main.cpp"
+  "utils.cpp"
+  "win32_window.cpp"
+  "window_material.cpp"
+  "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+  "Runner.rc"
+  "runner.exe.manifest"
+)
+
+# Apply the standard set of build settings. This can be removed for applications
+# that need different build settings.
+apply_standard_settings(${BINARY_NAME})
+
+# Add preprocessor definitions for the build version.
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTTER_VERSION_MINOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
+
+# Disable Windows macros that collide with C++ standard library functions.
+target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+
+# Add dependency libraries and include directories. Add any application-specific
+# dependencies here.
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "advapi32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "bcrypt.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "wintrust.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "runtimeobject.lib")
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../crates/copypaste-flutter-bridge/include"
+)
+
+# Run the Flutter tool portions of the build. This must not be removed.
+add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# The updater must run outside the bundle while its files are replaced. Keep it
+# independent of Flutter and ship the CRT statically so a temporary copy starts.
+add_executable(copypaste-update-helper WIN32
+  "app_update_helper.cpp"
+  "app_update_verifier.cpp"
+)
+apply_standard_settings(copypaste-update-helper)
+target_compile_definitions(copypaste-update-helper PRIVATE "NOMINMAX")
+set_property(TARGET copypaste-update-helper PROPERTY MSVC_RUNTIME_LIBRARY
+  "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_link_libraries(copypaste-update-helper PRIVATE
+  "shell32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib")
+add_dependencies(${BINARY_NAME} copypaste-update-helper)

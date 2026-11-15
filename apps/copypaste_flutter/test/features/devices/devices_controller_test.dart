@@ -1,0 +1,1239 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:copypaste_flutter/features/devices/devices.dart';
+import 'package:copypaste_flutter/platform/camera/system_pairing_scanner.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  late _FakeDevicesGateway gateway;
+  late _CaptureProtection captureProtection;
+  late DevicesController controller;
+
+  setUp(() {
+    gateway = _FakeDevicesGateway();
+    captureProtection = _CaptureProtection();
+    controller = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+    );
+  });
+
+  tearDown(() => controller.dispose());
+
+  test(
+    'adopts an incoming request through runtime events with no manual code',
+    () async {
+      await controller.start();
+      gateway.session._ceremony = const PairingCeremony(
+        id: 'incoming',
+        state: PairingState.awaitingConfirmation,
+      );
+      gateway.incoming = gateway.session;
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.pairingEntryMode, PairingEntryMode.nearby);
+      expect(controller.incomingPairing, isTrue);
+      expect(controller.verificationCode, '123456');
+      expect(controller.canConfirmPairing, isTrue);
+      expect(gateway.joinedCodes, isEmpty);
+      expect(captureProtection.values.first, isTrue);
+    },
+  );
+
+  test(
+    'Nearby connects to the selected address without asking for a code',
+    () async {
+      gateway.session._ceremony = const PairingCeremony(
+        id: 'outgoing',
+        state: PairingState.awaitingConfirmation,
+      );
+      await controller.connectNearby(
+        DiscoveredDevice(
+          id: 'remote',
+          name: 'Remote',
+          address: '192.0.2.8:1234',
+          paired: false,
+          lastSeen: DateTime.utc(2026),
+        ),
+      );
+      expect(gateway.nearbyAddress, '192.0.2.8:1234');
+      expect(gateway.joinedCodes, isEmpty);
+      expect(controller.pairingEntryMode, PairingEntryMode.nearby);
+      expect(controller.incomingPairing, isFalse);
+    },
+  );
+
+  test(
+    'switches an invitation to code entry while keeping protection',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+
+      final switching = controller.openCodeEntry(address: '192.0.2.10:47654');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.canChangePairingMode, isFalse);
+      expect(controller.canClosePairing, isFalse);
+      expect(controller.pairingInspectorOpen, isTrue);
+      expect(controller.invitation?.qrPng, isNull);
+      await controller.openQrScanner();
+      expect(controller.pairingEntryMode, PairingEntryMode.invite);
+
+      cancellation.complete();
+      await switching;
+      expect(gateway.session.cancelCalls, 1);
+      expect(gateway.session.disposeCalls, 1);
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(controller.pendingAddress, '192.0.2.10:47654');
+      expect(controller.pairing, isNull);
+      expect(controller.canChangePairingMode, isTrue);
+      expect(captureProtection.values, [true]);
+    },
+  );
+
+  test('discards a verification code returned after switching modes', () async {
+    await controller.openInvitation();
+    final code = Completer<String>();
+    gateway.session.sasPending = code;
+    gateway.session.emit(
+      const PairingCeremony(state: PairingState.awaitingConfirmation),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(gateway.session.revealSasCalls, 1);
+
+    await controller.openCodeEntry();
+    code.complete('123456');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+    expect(controller.verificationCode, isNull);
+    expect(controller.canConfirmPairing, isFalse);
+  });
+
+  test(
+    'old pairing cleanup cannot unprotect a newly opened inspector',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+      final closing = controller.closePairing();
+      await Future<void>.delayed(Duration.zero);
+      await controller.openCodeEntry();
+      cancellation.complete();
+      await closing;
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(captureProtection.values, [true]);
+      await controller.closePairing();
+      expect(captureProtection.values, [true, false]);
+    },
+  );
+
+  test('late capture protection cannot reopen closed pairing', () async {
+    final enabled = Completer<bool>();
+    captureProtection.pendingEnable = enabled;
+    final opening = controller.openCodeEntry();
+    await Future<void>.delayed(Duration.zero);
+    await controller.closePairing();
+    enabled.complete(true);
+    await opening;
+    expect(controller.pairingInspectorOpen, isFalse);
+    expect(captureProtection.values, [true, false]);
+  });
+
+  test(
+    'system QR scanning protects the surface and submits only its result',
+    () async {
+      controller.dispose();
+      final scanner = _SystemScanner();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        systemScanner: scanner,
+      );
+      final scan = controller.openQrScanner();
+      await Future<void>.delayed(Duration.zero);
+      expect(captureProtection.values, [true]);
+      expect(controller.systemScanInFlight, isTrue);
+      expect(controller.pairingInspectorOpen, isFalse);
+      scanner.result.complete('copypaste://pair/v1?test=invitation');
+      await scan;
+      expect(gateway.joinedUris, ['copypaste://pair/v1?test=invitation']);
+      expect(controller.systemScanInFlight, isFalse);
+      expect(controller.pairingInspectorOpen, isTrue);
+    },
+  );
+
+  test(
+    'cancelling the system scanner releases pairing and permits details',
+    () async {
+      controller.dispose();
+      final scanner = _SystemScanner();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        systemScanner: scanner,
+      );
+      final scan = controller.openQrScanner();
+      await Future<void>.delayed(Duration.zero);
+      scanner.result.complete(null);
+      await scan;
+      expect(controller.pairingInspectorOpen, isFalse);
+      expect(controller.errorMessage, isNull);
+      expect(captureProtection.values, [true, false]);
+      controller.openThisDeviceDetails();
+      expect(controller.deviceDetailsOpen, isTrue);
+    },
+  );
+
+  test('closing pairing discards a late system scanner result', () async {
+    controller.dispose();
+    final scanner = _SystemScanner();
+    controller = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      systemScanner: scanner,
+    );
+    final scan = controller.openQrScanner();
+    await Future<void>.delayed(Duration.zero);
+    await controller.closePairing();
+    scanner.result.complete('copypaste://pair/v1?test=stale');
+    await scan;
+    expect(gateway.joinedUris, isEmpty);
+    expect(controller.pairingInspectorOpen, isFalse);
+  });
+
+  test('unavailable system scanner allows manual code entry', () async {
+    controller.dispose();
+    final scanner = _SystemScanner();
+    controller = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      systemScanner: scanner,
+    );
+    final scan = controller.openQrScanner();
+    await Future<void>.delayed(Duration.zero);
+    scanner.result.completeError(
+      PlatformException(code: 'scanner_unavailable'),
+    );
+    await scan;
+    expect(controller.errorMessage, contains('Enter the pairing code'));
+    expect(controller.pairingInspectorOpen, isFalse);
+    expect(controller.pairingEntryMode, isNull);
+    expect(captureProtection.values, [true, false]);
+    await controller.refresh();
+    expect(controller.errorMessage, contains('Enter the pairing code'));
+    await controller.openCodeEntry();
+    expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+    expect(controller.errorMessage, isNull);
+  });
+
+  test('loads real-contract-shaped peers and discovery results', () async {
+    gateway.snapshot = _snapshot(peers: [_peer('trusted')]);
+
+    await controller.start();
+
+    expect(controller.loadState, DevicesLoadState.ready);
+    expect(controller.snapshot!.peers.single.name, 'trusted');
+    expect(controller.snapshot!.discovered.single.name, 'Nearby device');
+  });
+
+  test('refreshes when the Rust watch signal changes', () async {
+    await controller.start();
+    gateway.snapshot = _snapshot(peers: [_peer('Updated peer')]);
+
+    gateway.emitChange();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.snapshot!.peers.single.name, 'Updated peer');
+  });
+
+  test(
+    'coalesces overlapping refreshes without retaining an older snapshot',
+    () async {
+      final first = Completer<DevicesSnapshot>();
+      final second = Completer<DevicesSnapshot>();
+      gateway.pendingLoads.addAll([first, second]);
+
+      final initialLoad = controller.start();
+      await Future<void>.delayed(Duration.zero);
+      final overlappingRefresh = controller.refresh();
+      first.complete(_snapshot(peers: [_peer('Older peer')]));
+      await Future.wait([initialLoad, overlappingRefresh]);
+      await Future<void>.delayed(Duration.zero);
+
+      second.complete(_snapshot(peers: [_peer('Newest peer')]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(gateway.loadCalls, 2);
+      expect(controller.snapshot!.peers.single.name, 'Newest peer');
+    },
+  );
+
+  test(
+    'closes selected peer details when an external refresh removes the peer',
+    () async {
+      gateway.snapshot = _snapshot(peers: [_peer('Trusted peer')]);
+      await controller.start();
+      controller.openPeerDetails('peer-id');
+
+      gateway.snapshot = _snapshot();
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.deviceDetailsTarget, isNull);
+    },
+  );
+
+  test(
+    'reveals the invitation only after the explicit Pair device action',
+    () async {
+      await controller.openInvitation();
+
+      expect(gateway.session.revealInviteCalls, 1);
+      expect(controller.pairing!.state, PairingState.waitingForPeer);
+      expect(gateway.session.revealSasCalls, 0);
+      expect(controller.invitation?.qrPng, isNotNull);
+    },
+  );
+
+  test(
+    'allows decisions only while Rust reports confirmation is pending',
+    () async {
+      await controller.openInvitation();
+
+      await controller.confirmPairing(accept: true);
+      expect(gateway.session.confirmations, isEmpty);
+
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verificationCode, '123456');
+      await controller.confirmPairing(accept: true);
+
+      expect(gateway.session.confirmations, [true]);
+    },
+  );
+
+  for (final accept in [true, false]) {
+    test(
+      'automatically shows SAS once before an explicit decision: $accept',
+      () async {
+        await controller.openInvitation();
+        final code = Completer<String>();
+        gateway.session.sasPending = code;
+        for (var update = 0; update < 3; update++) {
+          gateway.session.emit(
+            const PairingCeremony(state: PairingState.awaitingConfirmation),
+          );
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(gateway.session.revealSasCalls, 1);
+        expect(controller.canConfirmPairing, isFalse);
+        await controller.confirmPairing(accept: accept);
+        expect(gateway.session.confirmations, isEmpty);
+
+        code.complete('123456');
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.verificationCode, '123456');
+        expect(gateway.session.confirmations, isEmpty);
+        await controller.confirmPairing(accept: accept);
+        expect(gateway.session.confirmations, [accept]);
+      },
+    );
+  }
+
+  test(
+    'automatically shows SAS from an already ready joined session',
+    () async {
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await controller.joinPairingUri('copypaste://pair/v1?test=invitation');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verificationCode, '123456');
+      expect(gateway.session.revealSasCalls, 1);
+      expect(gateway.session.confirmations, isEmpty);
+    },
+  );
+
+  test(
+    'pairing progress follows an invitation to a rejection it does not attribute',
+    () async {
+      expect(controller.pairingProgress, isNull);
+      await controller.openInvitation();
+      var progress = controller.pairingProgress!;
+      expect(progress.steps.first, PairingStep.invite);
+      expect(progress.statusOf(0), PairingStepStatus.current);
+
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.statusOf(2), PairingStepStatus.current);
+      expect(progress.localDecision, PairingLocalDecision.undecided);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+
+      // A confirmation that never left this device must not count as sent.
+      gateway.session.confirmError = StateError('offline');
+      await controller.confirmPairing(accept: true);
+      expect(
+        controller.pairingProgress!.localDecision,
+        PairingLocalDecision.undecided,
+      );
+
+      gateway.session.confirmError = null;
+      await controller.confirmPairing(accept: true);
+      progress = controller.pairingProgress!;
+      expect(progress.localDecision, PairingLocalDecision.confirmed);
+      expect(progress.peerDecision, PairingPeerDecision.waiting);
+
+      gateway.session.emit(const PairingCeremony(state: PairingState.rejected));
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.outcome, PairingState.rejected);
+      expect(progress.statusOf(2), PairingStepStatus.failed);
+      expect(progress.statusOf(3), PairingStepStatus.upcoming);
+      expect(progress.localDecision, PairingLocalDecision.confirmed);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+      expect(progress.endedUnattributed, isTrue);
+
+      await controller.closePairing();
+      expect(controller.pairingProgress, isNull);
+    },
+  );
+
+  test(
+    'pairing progress places a failure and a local rejection where they happened',
+    () async {
+      await controller.connectNearby(
+        DiscoveredDevice(
+          id: 'remote',
+          name: 'Remote',
+          address: '192.0.2.8:1234',
+          paired: false,
+          lastSeen: DateTime.utc(2026),
+        ),
+      );
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.handshaking),
+      );
+      await Future<void>.delayed(Duration.zero);
+      gateway.session.emit(const PairingCeremony(state: PairingState.failed));
+      await Future<void>.delayed(Duration.zero);
+      var progress = controller.pairingProgress!;
+      expect(progress.steps.first, PairingStep.request);
+      expect(progress.statusOf(0), PairingStepStatus.completed);
+      expect(progress.statusOf(1), PairingStepStatus.failed);
+      expect(progress.localDecision, isNull);
+
+      // A new attempt starts from its own observations.
+      await controller.openCodeEntry();
+      expect(
+        controller.pairingProgress!.statusOf(0),
+        PairingStepStatus.current,
+      );
+      gateway.session._ceremony = const PairingCeremony(
+        state: PairingState.awaitingConfirmation,
+      );
+      await controller.joinFromProtectedInput(
+        code: 'A1B2C3D4',
+        address: '192.0.2.1:47654',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await controller.confirmPairing(accept: false);
+      gateway.session.emit(const PairingCeremony(state: PairingState.rejected));
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.statusOf(2), PairingStepStatus.failed);
+      expect(progress.localDecision, PairingLocalDecision.rejected);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+      expect(progress.endedUnattributed, isFalse);
+    },
+  );
+
+  test('discards an automatic SAS result after confirmation expires', () async {
+    await controller.openInvitation();
+    final code = Completer<String>();
+    gateway.session.sasPending = code;
+    gateway.session.emit(
+      const PairingCeremony(state: PairingState.awaitingConfirmation),
+    );
+    await Future<void>.delayed(Duration.zero);
+    gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+    await Future<void>.delayed(Duration.zero);
+    code.complete('123456');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.verificationCode, isNull);
+    expect(controller.canConfirmPairing, isFalse);
+  });
+
+  test(
+    'preserves a joined ceremony timeout until dismissed and cleans the session',
+    () async {
+      await controller.openCodeEntry();
+      await controller.joinFromProtectedInput(
+        code: 'A1B2C3D4',
+        address: '192.0.2.1:47654',
+      );
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.pairing!.state, PairingState.timedOut);
+      expect(gateway.session.disposeCalls, 1);
+
+      await controller.closePairing();
+      expect(controller.pairing, isNull);
+    },
+  );
+
+  test(
+    'an expired invitation confirmation starts fresh without reusing its SAS',
+    () async {
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.addAll([gateway.session, replacement]);
+      await controller.openInvitation();
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verificationCode, '123456');
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(controller.pairing?.state, PairingState.waitingForPeer);
+      expect(controller.verificationCode, isNull);
+      expect(controller.canConfirmPairing, isFalse);
+      expect(gateway.session.confirmations, isEmpty);
+    },
+  );
+
+  test(
+    'renews an expired waiting invitation without exposing a timeout',
+    () async {
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.add(replacement);
+      // The first request uses the original session.
+      gateway.nextInvitations.insert(0, gateway.session);
+      final states = <PairingState?>[];
+      controller.addListener(() => states.add(controller.pairing?.state));
+      await controller.openInvitation();
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(gateway.session.disposeCalls, 1);
+      expect(controller.pairing?.state, PairingState.waitingForPeer);
+      expect(controller.invitation, isNotNull);
+      expect(states, isNot(contains(PairingState.timedOut)));
+      expect(captureProtection.values, [true]);
+    },
+  );
+
+  test(
+    'renews before expiry and cancels renewal when the inspector closes',
+    () async {
+      controller.dispose();
+      final timers = _FreshnessTimerFactory();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        freshnessTimerFactory: timers.schedule,
+      );
+      gateway.session.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration(seconds: 120),
+        ),
+      );
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.addAll([gateway.session, replacement]);
+      await controller.openInvitation();
+      expect(timers.timers.last.delay, const Duration(seconds: 119));
+      timers.timers.last.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(gateway.session.cancelCalls, 1);
+      expect(controller.invitation, isNotNull);
+      replacement.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration(seconds: 120),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final pending = timers.timers.last;
+      await controller.closePairing();
+      pending.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(controller.pairingInspectorOpen, isFalse);
+    },
+  );
+
+  test('cancels an unfinished session during disposal', () async {
+    await controller.openInvitation();
+
+    controller.dispose();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gateway.session.cancelCalls, 1);
+    expect(gateway.session.disposeCalls, 1);
+  });
+
+  test(
+    'closing during invitation renewal prevents a replacement session',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+      gateway.session.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration.zero,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await controller.closePairing();
+      cancellation.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 1);
+      expect(controller.invitation, isNull);
+      expect(controller.pairingInspectorOpen, isFalse);
+    },
+  );
+
+  test(
+    'keeps unpair and permanent revoke as distinct backend actions',
+    () async {
+      await controller.unpair('peer-id');
+      await controller.revoke('peer-id');
+
+      expect(gateway.unpairedIds, ['peer-id']);
+      expect(gateway.revokedIds, ['peer-id']);
+    },
+  );
+
+  test('prevents duplicate device mutations while one is pending', () async {
+    final pending = Completer<void>();
+    gateway.rescanPending = pending;
+
+    final first = controller.rescan();
+    final second = controller.rescan();
+
+    expect(gateway.rescanCalls, 1);
+    expect(controller.actionInFlight, isTrue);
+    pending.complete();
+    await Future.wait([first, second]);
+    expect(controller.actionInFlight, isFalse);
+  });
+
+  test(
+    'while hidden only adopts incoming pairing and reloads once on show',
+    () async {
+      final clock = _TestClock(DateTime.utc(2026, 11, 15, 12));
+      final scheduler = _FreshnessTimerFactory();
+      gateway.snapshot = _snapshot(
+        peers: [_observedPeer(clock.now.add(const Duration(seconds: 15)))],
+      );
+      final hidden = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        now: () => clock.now,
+        freshnessTimerFactory: scheduler.schedule,
+      )..setPresentationActive(false);
+      addTearDown(hidden.dispose);
+
+      await hidden.start();
+      expect(gateway.loadCalls, 1);
+      expect(scheduler.timers, isEmpty);
+
+      gateway.session._ceremony = const PairingCeremony(
+        id: 'incoming',
+        state: PairingState.awaitingConfirmation,
+      );
+      gateway.incoming = gateway.session;
+      gateway.emitChange();
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.loadCalls, 1);
+      expect(hidden.incomingPairing, isTrue);
+
+      hidden.setPresentationActive(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.loadCalls, 2);
+      expect(scheduler.timers, hasLength(1));
+    },
+  );
+
+  test('invalidates expired observations without a metadata request', () async {
+    final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
+    final scheduler = _FreshnessTimerFactory();
+    final deadline = clock.now.add(const Duration(seconds: 5));
+    gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
+    final freshnessController = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      now: () => clock.now,
+      freshnessTimerFactory: scheduler.schedule,
+    );
+    addTearDown(freshnessController.dispose);
+
+    await freshnessController.start();
+    final peer = freshnessController.snapshot!.peers.single;
+
+    expect(freshnessController.peerStateLabel(peer), 'Available');
+    expect(freshnessController.peerLatencyLabel(peer), '24 ms');
+    expect(
+      freshnessController.peerStateLabel(_mdnsPeer(deadline)),
+      'Visible now',
+    );
+    expect(freshnessController.peerLatencyLabel(_mdnsPeer(deadline)), '— ms');
+    expect(scheduler.timers, hasLength(1));
+    expect(scheduler.timers.single.delay, const Duration(seconds: 5));
+
+    clock.now = deadline.add(const Duration(milliseconds: 1));
+    expect(freshnessController.peerStateLabel(peer), 'Status unknown');
+    expect(freshnessController.peerLatencyLabel(peer), '— ms');
+
+    scheduler.timers.single.fire();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gateway.loadCalls, 1);
+  });
+
+  test(
+    'keeps confirmed offline through renewal until online evidence',
+    () async {
+      final clock = _TestClock(DateTime.utc(2026, 11, 1, 12));
+      final scheduler = _FreshnessTimerFactory();
+      final deadline = clock.now.add(const Duration(seconds: 10));
+      final peer = DevicePeer(
+        id: 'observed-peer',
+        name: 'Offline peer',
+        lastSeen: clock.now,
+        online: false,
+        details: DeviceDetails(
+          presence: DevicePresenceObservation(
+            state: DevicePresence.offline,
+            lastSeen: clock.now,
+            provenance: DeviceObservationProvenance.measured,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: clock.now,
+            freshUntil: deadline,
+          ),
+        ),
+      );
+      gateway.snapshot = _snapshot(peers: [peer]);
+      final statusController = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        now: () => clock.now,
+        freshnessTimerFactory: scheduler.schedule,
+      );
+      addTearDown(statusController.dispose);
+      await statusController.start();
+      expect(statusController.peerStateLabel(peer), 'Offline');
+
+      clock.now = deadline.add(const Duration(seconds: 5));
+      expect(statusController.peerStateLabel(peer), 'Offline');
+      expect(statusController.peerLatencyLabel(peer), '— ms');
+      expect(scheduler.timers, isEmpty);
+      await statusController.refresh();
+      expect(
+        statusController.peerStateLabel(
+          statusController.snapshot!.peers.single,
+        ),
+        'Offline',
+      );
+
+      gateway.snapshot = _snapshot(
+        peers: [_observedPeer(clock.now.add(const Duration(seconds: 30)))],
+      );
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        statusController.peerStateLabel(
+          statusController.snapshot!.peers.single,
+        ),
+        'Available',
+      );
+    },
+  );
+
+  test('runtime events renew latency without a UI renewal poll', () async {
+    final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
+    final scheduler = _FreshnessTimerFactory();
+    final deadline = clock.now.add(const Duration(seconds: 30));
+    gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
+    final freshnessController = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      now: () => clock.now,
+      freshnessTimerFactory: scheduler.schedule,
+    );
+    addTearDown(freshnessController.dispose);
+    await freshnessController.start();
+    expect(scheduler.timers.single.delay, const Duration(seconds: 30));
+    clock.now = deadline.subtract(const Duration(seconds: 10));
+    gateway.snapshot = _snapshot(
+      peers: [_observedPeer(clock.now.add(const Duration(seconds: 30)))],
+    );
+    gateway.emitChange();
+    await Future<void>.delayed(Duration.zero);
+    expect(scheduler.timers.first._cancelled, isTrue);
+    expect(scheduler.timers.last.delay, const Duration(seconds: 30));
+    expect(gateway.loadCalls, 2);
+    expect(
+      freshnessController.peerLatencyLabel(
+        freshnessController.snapshot!.peers.single,
+      ),
+      '24 ms',
+    );
+  });
+
+  test('displays sub-millisecond RTT as less than one millisecond', () async {
+    final now = DateTime.now().toUtc();
+    final peer = DevicePeer(
+      id: 'peer',
+      name: 'Phone',
+      lastSeen: now,
+      online: true,
+      details: DeviceDetails(
+        latency: DeviceLatency(
+          roundTripLatency: Duration.zero,
+          provenance: DeviceObservationProvenance.measured,
+          trust: DeviceObservationTrust.authenticated,
+          observedAt: now,
+          freshUntil: now.add(const Duration(seconds: 30)),
+        ),
+      ),
+    );
+    expect(controller.peerLatencyLabel(peer), '<1 ms');
+  });
+
+  test(
+    'keeps device details separate from the protected pairing inspector',
+    () async {
+      controller.openThisDeviceDetails();
+      expect(
+        controller.deviceDetailsTarget,
+        const DeviceDetailsTarget.thisDevice(),
+      );
+
+      await controller.openCodeEntry();
+      expect(controller.deviceDetailsTarget, isNull);
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+
+      controller.openPeerDetails('peer-id');
+      expect(controller.deviceDetailsTarget, isNull);
+
+      await controller.closePairing();
+      controller.openPeerDetails('peer-id');
+      expect(
+        controller.deviceDetailsTarget,
+        const DeviceDetailsTarget.peer('peer-id'),
+      );
+    },
+  );
+
+  test(
+    'removing from the space revokes first, then changes the passphrase',
+    () async {
+      controller.dispose();
+      final spaces = _SpaceGateway();
+      controller = DevicesController(
+        gateway: spaces,
+        captureProtection: captureProtection,
+      );
+
+      expect(
+        await controller.removeFromSpace(
+          'peer-id',
+          newPassphrase: 'a new long passphrase',
+          signOutOthers: true,
+        ),
+        isTrue,
+      );
+
+      expect(spaces.revokedIds, ['peer-id']);
+      expect(spaces.calls, ['passphrase', 'sign-out-others']);
+      expect(await controller.leaveSpace(), isTrue);
+      expect(spaces.calls.last, 'leave');
+    },
+  );
+
+  test('closes selected peer details after successful removal', () async {
+    controller.openPeerDetails('peer-id');
+
+    await controller.unpair('peer-id');
+
+    expect(controller.deviceDetailsTarget, isNull);
+  });
+
+  test(
+    'keeps a successful mutation successful when the follow-up refresh fails',
+    () async {
+      await controller.start();
+      controller.openPeerDetails('peer-id');
+      gateway.loadError = StateError('refresh unavailable');
+
+      final succeeded = await controller.unpair('peer-id');
+
+      expect(succeeded, isTrue);
+      expect(controller.deviceDetailsTarget, isNull);
+      expect(controller.errorMessage, 'Something went wrong. Try again.');
+    },
+  );
+
+  test(
+    'passes the backend-required code and address to a manual join',
+    () async {
+      await controller.openCodeEntry();
+
+      await controller.joinFromProtectedInput(
+        code: 'PAIRING-CODE',
+        address: '192.0.2.10:47654',
+      );
+
+      expect(gateway.joinedCodes, ['PAIRING-CODE']);
+      expect(gateway.joinedAddresses, ['192.0.2.10:47654']);
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+    },
+  );
+
+  test(
+    'protects the app surface for the complete inspector lifetime',
+    () async {
+      await controller.openCodeEntry();
+      expect(captureProtection.values, [true]);
+
+      await controller.closePairing();
+      expect(captureProtection.values, [true, false]);
+    },
+  );
+
+  test('does not expose pairing input when capture protection fails', () async {
+    final blocked = DevicesController(
+      gateway: gateway,
+      captureProtection: _CaptureProtection(result: false),
+    );
+    addTearDown(blocked.dispose);
+
+    await blocked.openCodeEntry();
+
+    expect(blocked.pairingEntryMode, isNull);
+    expect(blocked.errorMessage, 'Secure pairing presentation is unavailable.');
+  });
+}
+
+DevicesSnapshot _snapshot({List<DevicePeer> peers = const []}) =>
+    DevicesSnapshot(
+      thisDevice: const ThisDevice(
+        name: 'This device',
+        appVersion: '1.0.0',
+        protocolVersion: 1,
+      ),
+      peers: peers,
+      discovered: [
+        DiscoveredDevice(
+          id: 'nearby',
+          name: 'Nearby device',
+          address: '192.0.2.10:47654',
+          paired: false,
+          lastSeen: DateTime.utc(2026, 10, 3),
+        ),
+      ],
+    );
+
+DevicePeer _peer(String name) => DevicePeer(
+  id: 'peer-id',
+  name: name,
+  lastSeen: DateTime.utc(2026, 10, 3),
+  online: false,
+);
+
+DevicePeer _observedPeer(DateTime deadline) => DevicePeer(
+  id: 'observed-peer',
+  name: 'Observed peer',
+  lastSeen: deadline.subtract(const Duration(seconds: 1)),
+  online: true,
+  details: DeviceDetails(
+    latency: DeviceLatency(
+      roundTripLatency: const Duration(milliseconds: 24),
+      provenance: DeviceObservationProvenance.measured,
+      trust: DeviceObservationTrust.authenticated,
+      observedAt: deadline.subtract(const Duration(seconds: 5)),
+      freshUntil: deadline,
+    ),
+    presence: DevicePresenceObservation(
+      state: DevicePresence.online,
+      lastSeen: deadline.subtract(const Duration(seconds: 1)),
+      provenance: DeviceObservationProvenance.measured,
+      trust: DeviceObservationTrust.authenticated,
+      observedAt: deadline.subtract(const Duration(seconds: 5)),
+      freshUntil: deadline,
+    ),
+  ),
+);
+
+DevicePeer _mdnsPeer(DateTime deadline) => DevicePeer(
+  id: 'mdns-peer',
+  name: 'mDNS peer',
+  lastSeen: deadline.subtract(const Duration(seconds: 1)),
+  online: true,
+  details: DeviceDetails(
+    latency: DeviceLatency(
+      roundTripLatency: const Duration(milliseconds: 24),
+      provenance: DeviceObservationProvenance.observed,
+      trust: DeviceObservationTrust.local,
+      observedAt: deadline.subtract(const Duration(seconds: 5)),
+      freshUntil: deadline,
+    ),
+    presence: DevicePresenceObservation(
+      state: DevicePresence.online,
+      lastSeen: deadline.subtract(const Duration(seconds: 1)),
+      provenance: DeviceObservationProvenance.observed,
+      trust: DeviceObservationTrust.local,
+      observedAt: deadline.subtract(const Duration(seconds: 5)),
+      freshUntil: deadline,
+    ),
+  ),
+);
+
+class _TestClock {
+  _TestClock(this.now);
+
+  DateTime now;
+}
+
+class _FreshnessTimerFactory {
+  final List<_ManualFreshnessTimer> timers = [];
+
+  DevicesFreshnessTimer schedule(Duration delay, void Function() callback) {
+    final timer = _ManualFreshnessTimer(delay, callback);
+    timers.add(timer);
+    return timer;
+  }
+}
+
+class _ManualFreshnessTimer implements DevicesFreshnessTimer {
+  _ManualFreshnessTimer(this.delay, this._callback);
+
+  final Duration delay;
+  final void Function() _callback;
+  bool _cancelled = false;
+
+  @override
+  void cancel() => _cancelled = true;
+
+  void fire() {
+    if (!_cancelled) _callback();
+  }
+}
+
+class _FakeDevicesGateway implements DevicesGateway, NearbyPairingGateway {
+  DevicesPairingSession? incoming;
+  String? nearbyAddress;
+  @override
+  Future<DevicesPairingSession?> incomingPairing() async {
+    final result = incoming;
+    incoming = null;
+    return result;
+  }
+
+  @override
+  Future<DevicesPairingSession> requestNearbyPairing(String address) async {
+    nearbyAddress = address;
+    return session;
+  }
+
+  final StreamController<void> _changes = StreamController<void>.broadcast();
+  final _FakePairingSession session = _FakePairingSession();
+  final List<_FakePairingSession> nextInvitations = [];
+  int createInvitationCalls = 0;
+  final List<String> unpairedIds = [];
+  final List<String> revokedIds = [];
+  final List<String> joinedCodes = [];
+  final List<String> joinedAddresses = [];
+  final List<String> joinedUris = [];
+  Completer<void>? rescanPending;
+  int rescanCalls = 0;
+  int loadCalls = 0;
+  Object? loadError;
+  final List<Completer<DevicesSnapshot>> pendingLoads = [];
+  DevicesSnapshot snapshot = _snapshot();
+
+  @override
+  Stream<void> get changes => _changes.stream;
+
+  @override
+  Future<DevicesPairingSession> createInvitation() async {
+    createInvitationCalls++;
+    return nextInvitations.isEmpty ? session : nextInvitations.removeAt(0);
+  }
+
+  void emitChange() => _changes.add(null);
+
+  @override
+  Future<DevicesPairingSession> joinFromProtectedInput({
+    required String code,
+    required String address,
+  }) async {
+    joinedCodes.add(code);
+    joinedAddresses.add(address);
+    return session;
+  }
+
+  @override
+  Future<DevicesPairingSession> joinPairingUri(String uri) async {
+    joinedUris.add(uri);
+    return session;
+  }
+
+  @override
+  Future<DevicesSnapshot> load() async {
+    loadCalls += 1;
+    if (loadError case final error?) throw error;
+    if (pendingLoads.isNotEmpty) return pendingLoads.removeAt(0).future;
+    return snapshot;
+  }
+
+  @override
+  Future<void> rescan() async {
+    rescanCalls += 1;
+    await rescanPending?.future;
+  }
+
+  @override
+  Future<void> revoke(String peerId) async => revokedIds.add(peerId);
+
+  @override
+  Future<void> setThisDeviceName(String name) async {}
+
+  @override
+  Future<void> setSyncPolicy(String? deviceId, DeviceSyncPolicy policy) async {}
+
+  @override
+  Future<void> sync({String? peerId}) async {}
+
+  @override
+  Future<void> unpair(String peerId) async => unpairedIds.add(peerId);
+}
+
+class _FakePairingSession implements DevicesPairingSession {
+  final StreamController<PairingCeremony> _updates =
+      StreamController<PairingCeremony>.broadcast();
+  final List<bool> confirmations = [];
+  PairingCeremony _ceremony = const PairingCeremony(
+    state: PairingState.waitingForPeer,
+  );
+  int cancelCalls = 0;
+  int disposeCalls = 0;
+  int revealInviteCalls = 0;
+  int revealSasCalls = 0;
+  Completer<void>? cancelPending;
+
+  @override
+  PairingCeremony get ceremony => _ceremony;
+
+  @override
+  Stream<PairingCeremony> get updates => _updates.stream;
+
+  @override
+  Future<void> cancel() async {
+    cancelCalls += 1;
+    await cancelPending?.future;
+  }
+
+  @override
+  Future<void> confirm({required bool accept}) async {
+    if (confirmError case final error?) throw error;
+    confirmations.add(accept);
+  }
+
+  Object? confirmError;
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls += 1;
+  }
+
+  void emit(PairingCeremony ceremony) {
+    _ceremony = ceremony;
+    _updates.add(ceremony);
+  }
+
+  @override
+  Future<PairingInvitation> revealInvitation() async {
+    revealInviteCalls += 1;
+    return PairingInvitation(
+      qrPng: _testPng(),
+      code: 'A1B2C3D4',
+      address: '192.168.50.232:62951',
+    );
+  }
+
+  @override
+  Future<String> revealSas() async {
+    revealSasCalls += 1;
+    return sasPending?.future ?? '123456';
+  }
+
+  Completer<String>? sasPending;
+}
+
+Uint8List _testPng() => base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);
+
+class _CaptureProtection implements PairingCaptureProtection {
+  _CaptureProtection({this.result = true});
+
+  final bool result;
+  final List<bool> values = [];
+  Completer<bool>? pendingEnable;
+
+  @override
+  Future<bool> setEnabled(bool enabled) async {
+    values.add(enabled);
+    if (enabled && pendingEnable != null) return pendingEnable!.future;
+    return result;
+  }
+}
+
+class _SystemScanner implements SystemPairingScanner {
+  final result = Completer<String?>();
+
+  @override
+  Future<String?> scan() => result.future;
+
+  @override
+  Future<void> cancel() async {}
+}
+
+class _SpaceGateway extends _FakeDevicesGateway implements SpaceGateway {
+  final List<String> calls = [];
+
+  @override
+  Future<void> changeSyncPassphrase(String passphrase) async =>
+      calls.add('passphrase');
+
+  @override
+  Future<bool> cloudSignedIn() async => true;
+
+  @override
+  Future<void> leaveSpace() async => calls.add('leave');
+
+  @override
+  Future<void> signOutOtherDevices() async => calls.add('sign-out-others');
+}

@@ -1,0 +1,65 @@
+//! Installation, lifecycle, and command dispatch for first-party optional modules.
+#![deny(unsafe_code)]
+
+mod bridge;
+mod cloud_request;
+mod endpoints;
+mod host;
+#[allow(unsafe_code)]
+mod host_lifetime;
+mod inference;
+mod input;
+mod manager;
+#[allow(unsafe_code)]
+mod native;
+mod package;
+mod preferences;
+mod prompts;
+mod resources;
+mod semantic_search;
+mod services;
+mod staging_cleanup;
+mod sync;
+#[cfg(feature = "test-support")]
+pub mod test_support;
+pub use copypaste_module_sdk::{
+    ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,
+};
+pub use endpoints::{EndpointLink, EndpointSession};
+pub use host::{ModuleCaller, ModuleHost};
+#[cfg(target_os = "android")]
+pub use inference::AndroidInferenceLauncher;
+pub use inference::{
+    run_inference_worker, DesktopInferenceLauncher, InferenceConnection, InferenceLauncher,
+};
+pub use manager::{InstalledModule, ModuleManager};
+pub use prompts::PromptListener;
+pub use services::{HistoryQuery, ModuleHostServices, RecordLimits};
+pub use sync::{CloudFileHost, SyncServices};
+
+/// The release signing identity already used by the application updater.
+/// Developer keys can be supplied only by an explicitly constructed test/tool host.
+pub const MODULE_RELEASE_PUBLIC_KEY: &str =
+    "RWTMQ/XhYw5UIwBo8lWcIsKHs41zRLjTyHwK/RxPw/8uC0vrxFaiPYKx";
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModuleError {
+    #[error("{0}")]
+    Invalid(String),
+    #[error("The module is not installed.")]
+    NotInstalled,
+    #[error("The module is disabled.")]
+    Disabled,
+    #[error("The module package could not be read or stored.")]
+    Storage(#[from] std::io::Error),
+    #[error("The module state is unreadable.")]
+    State,
+    #[error("The module could not be loaded.")]
+    Load,
+}
+
+impl From<String> for ModuleError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}

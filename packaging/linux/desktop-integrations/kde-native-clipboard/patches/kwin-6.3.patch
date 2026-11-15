@@ -1,0 +1,38 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -39,6 +39,7 @@ target_sources(kwin PRIVATE
+     appmenu.cpp
+     client_machine.cpp
+     colors/colordevice.cpp
++    copypasteclipboardbridge.cpp
+     colors/colormanager.cpp
+     compositor.cpp
+     compositor_wayland.cpp
+diff --git a/src/xdgshellwindow.h b/src/xdgshellwindow.h
+--- a/src/xdgshellwindow.h
++++ b/src/xdgshellwindow.h
+@@ -137,0 +138,1 @@ public:
++    QString rawAppId() const;
+diff --git a/src/xdgshellwindow.cpp b/src/xdgshellwindow.cpp
+--- a/src/xdgshellwindow.cpp
++++ b/src/xdgshellwindow.cpp
+@@ -524,0 +525,5 @@ XdgToplevelInterface *XdgToplevelWindow::shellSurface() const
++QString XdgToplevelWindow::rawAppId() const
++{
++    return m_shellSurface->windowClass();
++}
++
+diff --git a/src/wayland_server.cpp b/src/wayland_server.cpp
+--- a/src/wayland_server.cpp
++++ b/src/wayland_server.cpp
+@@ -9,0 +10 @@
++#include "copypasteclipboardbridge.h"
+@@ -379,6 +380,7 @@ bool WaylandServer::init(const QString &socketName)
+     m_display->createShm();
+     m_seat = new SeatInterface(m_display, kwinApp()->session()->seat(), m_display);
+     new PointerGesturesV1Interface(m_display, m_display);
++    new CopyPasteClipboardBridge(this);
+     new PointerConstraintsV1Interface(m_display, m_display);
+     new RelativePointerManagerV1Interface(m_display, m_display);
+     m_dataDeviceManager = new DataDeviceManagerInterface(m_display, m_display);

@@ -1,0 +1,39 @@
+[package]
+name = "copypaste-module-snippets"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Reusable text snippets and templates, synced between devices."
+
+[workspace]
+members = []
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copypaste-module-sdk = { path = "../../crates/copypaste-module-sdk" }
+copypaste-template = { path = "../../crates/copypaste-template" }
+copypaste-transform = { path = "../../crates/copypaste-transform" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+unicode-segmentation = "1"
+icu_casemap = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+argon2 = "0.5"
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+zeroize = { version = "1.7", features = ["derive"] }
+csv = "1.4.0"
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

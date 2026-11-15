@@ -1,0 +1,41 @@
+[package]
+name = "copypaste-modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-sync = { path = "../copypaste-sync" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+zeroize.workspace = true
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
+copypaste-fs = { path = "../copypaste-fs" }
+copypaste-core = { path = "../copypaste-core" }
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+tempfile.workspace = true
+semver = "1"
+libloading = "0.9"
+minisign-verify = "0.3"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+minisign = { version = "0.9", optional = true }
+
+[features]
+# Lets tests trust a developer key and sign packages with it. Never enabled
+# by product builds.
+test-support = ["dep:minisign"]
+
+[dev-dependencies]
+copypaste-p2p = { path = "../copypaste-p2p" }
+wiremock = "=0.6.5"
+minisign = "0.9"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"

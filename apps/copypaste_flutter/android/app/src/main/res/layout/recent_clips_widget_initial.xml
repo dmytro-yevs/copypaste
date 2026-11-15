@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by the launcher before the provider's first update; holds no clip content. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/app_color_card"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="@dimen/app_spacing_lg">
+
+    <ImageView
+        android:layout_width="@dimen/app_icon_size_md"
+        android:layout_height="@dimen/app_icon_size_md"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_lucide_clipboard" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/app_spacing_sm"
+        android:text="@string/quick_access_widget_label"
+        android:textColor="@color/app_color_card_foreground"
+        android:textSize="@dimen/app_text_size_base" />
+</LinearLayout>

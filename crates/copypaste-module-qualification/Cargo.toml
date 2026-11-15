@@ -1,0 +1,27 @@
+[package]
+name = "copypaste-module-qualification"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+copypaste-modules = { path = "../copypaste-modules" }
+copypaste-core = { path = "../copypaste-core" }
+copypaste-sync = { path = "../copypaste-sync" }
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+copypaste-modules = { path = "../copypaste-modules", features = ["test-support"] }
+tempfile.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"

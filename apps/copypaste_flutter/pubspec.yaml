@@ -1,0 +1,69 @@
+name: copypaste_flutter
+description: "CopyPaste Flutter application."
+publish_to: 'none'
+# Generated from config/release.json by scripts/release/version.py.
+version: 0.1.0+50
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  camera_desktop: 2.0.0
+  camera_platform_interface: 2.14.0
+  characters: 1.4.1
+  flutter_rust_bridge: 2.13.0-beta.5
+  flutter_rust_bridge_hooks: 2.13.0-beta.5
+  hotkey_manager: 0.2.3
+  image: 4.10.1
+  intl: 0.20.3
+  re_highlight: 0.0.3
+  shadcn_flutter: 0.0.55
+  screen_retriever: 0.2.2
+  shared_preferences: 2.5.5
+  tray_manager: 0.7.0
+  window_manager: 0.5.2
+  zxing2: 0.2.4
+  path_provider: 2.1.5
+  file_selector: ^1.1.0
+  flutter_local_notifications: ^22.3.1
+  flutter_animate: 4.5.2
+  crypto: 3.0.7
+  cryptography: 2.9.0
+  dbus: 0.7.15
+  pub_semver: 2.2.1
+  desktop_drop: 0.8.4
+  mime: 2.1.0
+  share_plus: 13.3.1
+
+dependency_overrides:
+  hotkey_manager_windows:
+    path: third_party/hotkey_manager_windows
+  hotkey_manager_macos:
+    path: third_party/hotkey_manager_macos
+
+flutter:
+  generate: true
+  assets:
+    - assets/brand/copypaste.png
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: 0.14.4
+
+flutter_launcher_icons:
+  android: true
+  image_path: assets/brand/copypaste.png
+  min_sdk_android: 24
+  windows:
+    generate: true
+    image_path: assets/brand/copypaste.png
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: assets/brand/copypaste.png

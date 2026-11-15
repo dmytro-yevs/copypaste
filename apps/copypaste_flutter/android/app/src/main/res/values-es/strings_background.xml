@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">Captura en pausa</string>
+    <string name="background_status_capturing">Capturando copias</string>
+    <string name="background_status_syncing">Sincronizando en segundo plano</string>
+    <string name="background_status_last_sync">Última sincronización %1$s</string>
+    <string name="background_status_last_saved">Último guardado %1$s</string>
+    <string name="background_action_pause">Pausar</string>
+    <string name="background_action_resume">Reanudar</string>
+    <string name="background_action_send">Enviar portapapeles</string>
+    <string name="background_action_open">Abrir</string>
+    <string name="shortcut_send_clipboard">Enviar portapapeles</string>
+    <string name="shortcut_transform_clipboard">Transformar portapapeles</string>
+</resources>

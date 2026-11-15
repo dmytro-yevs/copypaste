@@ -1,0 +1,203 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/copypaste-module-sdk",
+    "crates/copypaste-modules",
+    "crates/copypaste-module-qualification",
+    "examples/modules/text-tools",
+    "crates/copypaste-clock",
+    "crates/copypaste-feedback",
+    "crates/copypaste-retry",
+    "crates/copypaste-process",
+    "crates/copypaste-fs",
+    "crates/copypaste-ipc",
+    "crates/copypaste-runtime-log",
+    "crates/copypaste-core",
+    "crates/copypaste-payload",
+    "crates/copypaste-source-app",
+    "crates/copypaste-p2p",
+    "crates/copypaste-relay",
+    "crates/copypaste-cloud",
+    "crates/copypaste-sync",
+    "crates/copypaste-daemon",
+    "crates/copypaste-cli",
+    "crates/copypaste-flutter-bridge",
+    "crates/copypaste-runtime",
+    "crates/copypaste-transform",
+    "crates/copypaste-template",
+]
+
+[workspace.package]
+# Generated release identity; edit config/release.json through scripts/release/version.py.
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dmytro-yevs/copypaste"
+
+[workspace.metadata.copypaste]
+android-release-application-id = "com.copypaste.app"
+android-debug-application-id-suffix = ".debug"
+android-release-certificate-sha256 = "2003b2ed9c78e9393131dcfb639499fa8f159400cea1c75e04cd45ca15ec2377"
+# Generated from config/release.json.
+android-release-version-code = 300001110
+
+# Library-first (the dependency policy). Every entry here avoids another local
+# implementation of an established primitive.
+[workspace.dependencies]
+# crypto
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+hkdf = "0.12"
+hmac = "0.12"
+# `asm` is enabled for aarch64 alone, in copypaste-core; this table has no
+# per-target form and the feature builds on neither windows-msvc nor 32-bit x86.
+sha2 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.5"
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup", "functions"] }
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
+# serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# async
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = "0.3"
+# Windows named pipes, including listener instance replacement and owned
+# security descriptors. Target-gated at each consumer.
+interprocess = { version = "2.4", features = ["tokio"] }
+widestring = "1"
+win-security-identifier = "0.2"
+# retry/backoff — one implementation. `backon`, not `backoff`:
+# backoff 0.4 is unmaintained (RUSTSEC-2025-0012, which names this as the
+# replacement) and pulled unmaintained `instant` in with it (RUSTSEC-2024-0384).
+backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
+# P2P secure channel. Noise (NNpsk0) gives a mutually-authenticated, forward-
+# secret channel from the pairing PSK alone: no TLS stack, certificate
+# lifecycle, pinning verifier, or DER parser.
+snow = { version = "0.10", features = ["ring-accelerated"] }
+# mDNS-SD discovery. Convenience only — an explicit address always works.
+mdns-sd = "0.20"
+os_info = { version = "3.15", default-features = false }
+# base32 for the pairing code (case-insensitive, no ambiguous glyphs)
+data-encoding = "2"
+# Cloud sync (Supabase). rustls rather than native-tls so no OpenSSL C build
+# enters the tree.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# Direct peer path across NATs: QUIC over a hole-punched UDP socket. The Noise
+# session runs inside it, so QUIC's TLS only needs a throwaway self-signed
+# certificate (rcgen) and uses the ring provider already in the tree.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# Optional router port mapping for the direct path: UPnP IGD on the hyper stack
+# reqwest already brings. NAT-PMP is left out: its client pulls netlink and
+# SystemConfiguration only to find the gateway.
+igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
+# Passphrase -> sync key. The server must never be able to derive it.
+argon2 = "0.5"
+base64 = "0.22"
+# Image previews use image-rs rather than asking a WebView to decode an
+# unbounded clipboard payload. PNG and TIFF are the formats our capture ports
+# store on macOS and Android.
+image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
+png = "0.18.1"
+resvg = { version = "0.48.1", default-features = false }
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
+url = "2"
+csscolorparser = { version = "0.8.3", default-features = false, features = ["std"] }
+html2text = { version = "0.17.4", default-features = false }
+rclip-rtf = { version = "0.1.0", default-features = false, features = ["codepage"] }
+# errors, logging, cli, misc
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2.5"
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+unicode-segmentation = "1"
+hex = "0.4"
+directories = "5"
+# Scope guards. `guard_on_success` is the unwind policy the retention batch
+# needs — running SQLite in a destructor while a panic unwinds can abort the
+# process — and `into_inner` is how a caller retires one without firing it.
+scopeguard = "1.2"
+# flock(2) for the socket-bind critical section (CopyPaste-ah1m). rustix rather
+# than a libc call: it is already in the tree, is maintained, and covers macOS
+# and Android.
+rustix = { version = "1", features = ["fs"] }
+tempfile = "3"
+comfy-table = "7"
+flutter_rust_bridge = "=2.13.0-beta.5"
+# macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "NSImage"] }
+security-framework = "3.7"
+# Text transforms, templates and content rules. All pure Rust, no network.
+# `regex` is linear-time (no backtracking blow-up on user patterns); callers
+# still set `size_limit` and `dfa_size_limit` on every user-supplied pattern.
+regex = "1.13.1"
+# IANA zones with DST-correct calendar arithmetic. The template renderer is
+# always handed the zone id; the runtime reads it once per expansion through
+# `tz-system` (/etc/localtime, the Windows zone mapped by CLDR, Android's
+# persist.sys.timezone), so every OS resolves the device zone the same way.
+# Zone data comes from zoneinfo on macOS and Linux, the concatenated tzdata on
+# Android, and a bundled copy on Windows only.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
+# One CLDR engine, so a date template and case folding give byte-identical
+# output on every OS. Kept on the 2.2 line that `url` already locks, so the
+# ICU stack is not duplicated. Compiled data only; extras are opt-in.
+icu_datetime = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_calendar = { version = "2.2.1", default-features = false, features = ["compiled_data"] }
+icu_locale = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_casemap = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+# Output trait of ICU4X formatters. A CLDR pattern formatter only implements
+# `TryWriteable`, so the template crate names it. Already locked through ICU.
+writeable = "0.6.3"
+# RFC 4180 with quoted fields that span lines.
+csv = "1.4.0"
+# YAML 1.2 in pure Rust (no C libyaml port and no unsafe parser). Chosen over
+# serde_yaml_ng: that fork sits on unsafe-libyaml, while saphyr keeps a node
+# tree with spans for line:column errors. `encoding` is off: input is UTF-8.
+saphyr = { version = "0.3.3", default-features = false }
+# XML format and minify. quick-xml never resolves external entities. Already
+# locked transitively at this version.
+quick-xml = "0.41.0"
+# Checksum transforms. 0.10 shares the `digest` 0.10 line with sha2.
+md-5 = "0.10.6"
+sha1 = "0.10.7"
+crc32fast = "1.5.0"
+percent-encoding = "2.3.2"
+# HTML5 named character references for the HTML-entity decode transform.
+# Already linked through html2text at this version, so its table adds no code.
+markup5ever = "0.40.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.release.build-override]
+strip = false
+
+# Evidence builds, which test behaviour rather than performance. Trades the
+# runtime speed and size that `codegen-units = 1` and thin LTO buy for the
+# codegen parallelism they forbid. Never use it for an artifact a user installs.
+[profile.evidence]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+[profile.dev]
+# Keep source locations for backtraces without full debug symbols.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

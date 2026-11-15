@@ -1,0 +1,573 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Select required validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.changes.outputs.native }}
+      compositor: ${{ steps.changes.outputs.compositor }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/changes.py
+
+  compositor-runtime-metadata:
+    needs: changes
+    name: Compositor runtime metadata
+    if: needs.changes.outputs.compositor == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      source_run_id: ${{ steps.identity.outputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: identity
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          [[ "$commit" == "${{ github.event.pull_request.head.sha }}" && "$commit" =~ ^[0-9a-f]{40}$ ]]
+          read -r version _ _ _ < <(python3 scripts/release/version.py values)
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "source_run_id=$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+
+  compositor-runtime-producer:
+    name: Compositor runtime producer
+    needs: [changes, compositor-runtime-metadata]
+    if: needs.changes.outputs.compositor == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success')
+    uses: ./.github/workflows/compositor-runtime.yml
+    with:
+      version: ${{ needs.compositor-runtime-metadata.outputs.version }}
+      commit: ${{ needs.compositor-runtime-metadata.outputs.commit }}
+      source_run_id: ${{ needs.compositor-runtime-metadata.outputs.source_run_id }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  rust-and-supabase:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/supabase
+            modules/sms-codes
+            modules/ai-tools
+            modules/snippets
+      - run: ./scripts/ci/install-postgresql-server.sh
+      - run: python3 -m unittest scripts/test_release_safety.py
+      - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_rpm_candidate.py'
+      - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_native_fixture_driver.py'
+      - run: python3 -m unittest discover -s scripts/modules/tests -p 'test_*.py'
+      - run: cargo +1.96 test --workspace --locked
+      - name: SMS module recognition contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/sms-codes/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/sms-codes/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Supabase module contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/supabase/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/supabase/Cargo.toml --locked --all-targets -- -D warnings
+      - name: AI Tools module contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/ai-tools/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/ai-tools/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Snippets module contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/snippets/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/snippets/Cargo.toml --locked --all-targets -- -D warnings
+      - run: ./supabase/dev/verify-schema.sh
+
+  macos-core:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: macOS Rust capabilities
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Create isolated keychain
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
+          state="$RUNNER_TEMP/copypaste-ci-keychain-state"
+          password="$(openssl rand -base64 24)"
+          mkdir -p "$state"
+          security default-keychain -d user > "$state/default"
+          security list-keychains -d user > "$state/search-list"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
+          [[ "$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")" == "hunter2" ]]
+          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain"
+          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
+          echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
+      - name: Preserve Keychain identity across application updates
+        run: python3 -m unittest scripts.release.tests.test_macos_keychain_helper -v
+      - name: Keychain and pasteboard Rust tests
+        run: |
+          set -euo pipefail
+          out="$(cargo +1.96 test -p copypaste-core --locked --release --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+          printf '%s\n' "$out"
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+          if grep -q 'SKIPPED' <<<"$out"; then exit 1; fi
+          if security find-generic-password -s com.copypaste.daemon -a device-secret-key -w "$RUNNER_TEMP/copypaste-ci.keychain-db" >/dev/null 2>&1; then exit 1; fi
+          out="$(cargo +1.96 test -p copypaste-daemon --locked --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+          printf '%s\n' "$out"
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+          if grep -q 'SKIPPED' <<<"$out"; then exit 1; fi
+          cargo +1.96 test -p copypaste-core --locked --release --target aarch64-apple-darwin --lib macos_helper
+      - name: Restore keychain state
+        if: always()
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/copypaste-ci-keychain-state"
+          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
+          restore=0
+          if [[ -f "$state/default" && -f "$state/search-list" ]]; then
+            if ! python3 - "$state/default" "$state/search-list" <<'PY'
+          from pathlib import Path
+          import shlex
+          import subprocess
+          import sys
+          default = shlex.split(Path(sys.argv[1]).read_text(encoding="utf-8"), posix=True)
+          search = shlex.split(Path(sys.argv[2]).read_text(encoding="utf-8"), posix=True)
+          if len(default) != 1 or not search:
+              raise RuntimeError("saved keychain state is invalid")
+          subprocess.run(["security", "default-keychain", "-d", "user", "-s", default[0]], check=True)
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", *search], check=True)
+          PY
+            then restore=1; fi
+          else
+            restore=1
+          fi
+          security delete-keychain "$keychain" || restore=1
+          exit "$restore"
+
+  windows-core:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Windows Rust capabilities
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - shell: bash
+        run: |
+          set -euo pipefail
+          checked() {
+            out="$("$@" 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+            printf '%s\n' "$out"
+            grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+            ! grep -q 'SKIPPED' <<<"$out"
+          }
+          checked cargo +1.96 test -p copypaste-daemon --locked clipboard::windows:: -- --include-ignored --test-threads=1 --nocapture
+          checked cargo +1.96 test -p copypaste-source-app --locked -- --include-ignored --test-threads=1 --nocapture
+          checked cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture
+
+  optional-modules:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Optional modules (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos, platform: macos, runner: macos-15 }
+          - { name: windows, platform: windows, runner: windows-2022 }
+          - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/ocr
+      - name: Module lifecycle and OCR contracts
+        env:
+          OPENSSL_SRC_PERL: ${{ matrix.platform == 'windows' && 'C:\Strawberry\perl\bin\perl.exe' || 'perl' }}
+        run: |
+          cargo test -p copypaste-modules --locked
+          cargo test --manifest-path modules/ocr/Cargo.toml --locked
+          cargo clippy --manifest-path modules/ocr/Cargo.toml --locked --all-targets -- -D warnings
+          rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+          "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+
+  flutter-static:
+    name: Flutter static checks
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - name: Locked dependencies, formatting and analysis
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --no-pub
+
+  flutter-foundation:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Flutter foundation (${{ matrix.name }})
+    env:
+      COPYPASTE_FLUTTER_STATIC_CHECKS: "0"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos, platform: macos, runner: macos-15, target: macos }
+          - { name: android, platform: android, runner: ubuntu-24.04, target: apk }
+          - { name: windows, platform: windows, runner: windows-2022, target: windows }
+          - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04, target: linux }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .flutter-version)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+          profile: debug
+      - name: Install Linux Flutter build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libgtk-3-dev libsecret-1-dev libssl-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev ninja-build pkg-config
+      - run: ./scripts/ci/verify-flutter-foundation.sh
+        env:
+          COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
+          CARGO_BUILD_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  android-unit-tests:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Android Kotlin unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: android
+          profile: debug
+      # The Gradle wrapper is generated by the Flutter tool, not committed.
+      - name: Robolectric unit tests
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build apk --debug --config-only --no-pub
+          cd android
+          ./gradlew --no-daemon :app:testDebugUnitTest
+        env:
+          CARGO_BUILD_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  linux-native-fixtures:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Linux native fixtures (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install native fixture dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core build-essential dbus-x11 gobject-introspection libgirepository1.0-dev \
+            libgtk-3-dev libmutter-14-dev libsecret-1-dev libssl-dev \
+            libx11-dev libxres-dev libxi-dev libxtst-dev nodejs pkg-config ripgrep sway \
+            x11-utils xvfb wl-clipboard
+      - name: Run X11, GNOME bridge, portal, PackageKit, restart, companion, and Wayland fixtures
+        run: ./scripts/ci/test-linux-native-fixtures.sh
+
+  linux-mutter-bridges:
+    if: needs.changes.outputs.compositor == 'true'
+    needs: changes
+    name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mutter: [46]
+        architecture: [x86_64]
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build Mutter 47 in a matching GNOME 47 dependency root
+        if: matrix.mutter == 47
+        run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
+      - name: Install upstream Mutter 46 build dependencies
+        if: matrix.mutter == 46
+        run: |
+          set -euo pipefail
+          sudo python3 - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
+          source, count = re.subn(r'^Types: deb$', 'Types: deb-src', source, flags=re.MULTILINE)
+          if not count:
+              raise ValueError('Ubuntu source repository configuration is unavailable')
+          Path('/etc/apt/sources.list.d/copypaste-mutter.sources').write_text(source)
+          PY
+          sudo apt-get update
+          sudo apt-get build-dep --yes --no-install-recommends mutter
+          sudo apt-get install --yes --no-install-recommends \
+            git meson ninja-build libmutter-14-dev gobject-introspection libgirepository1.0-dev
+      - name: Compile the stock-header shim and introspection metadata
+        if: matrix.mutter == 46
+        run: make -C packaging/linux/desktop-integrations/gnome-shell-extension/native
+      - name: Compile the pinned patched Mutter library
+        if: matrix.mutter == 46
+        working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
+        run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
+
+  linux-pr-release-candidate:
+    needs: changes
+    name: Linux release candidate (${{ matrix.architecture }})
+    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+            appimagetool_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: linux
+          profile: release
+      - name: Install Linux release build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            cpio desktop-file-utils gobject-introspection libgirepository1.0-dev \
+            libgtk-3-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libkeybinder-3.0-dev libmutter-14-dev libsecret-1-dev libssl-dev \
+            libxi-dev libxtst-dev ninja-build pkg-config rpm patchelf \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+      - name: Fetch the pinned AppImageTool
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/appimagetool-${{ matrix.architecture }}.AppImage"
+          curl --fail --location --output "$tool" "${{ matrix.appimagetool_url }}"
+          printf '%s  %s\n' "${{ matrix.appimagetool_sha256 }}" "$tool" | sha256sum --check --status
+          chmod 755 "$tool"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
+          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+      - name: Build the unsigned native Flutter bundle and every package format
+        run: |
+          set -euo pipefail
+          read -r version build_number _ _ < <(python3 scripts/release/version.py values)
+          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
+          scripts/release/build-linux-flutter.sh "$version" "$build_number" "${{ matrix.architecture }}"
+          python3 scripts/release/verify-linux-runtime-baseline.py \
+            --bundle "dist/linux-${{ matrix.architecture }}/bundle" \
+            --architecture "${{ matrix.architecture }}" \
+            --maximum 2.39 \
+            --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
+          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}" --release-scope
+          for extension in AppImage deb rpm; do
+            test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
+          done
+      - name: Install and verify the exact RPM preview on Fedora
+        run: |
+          set -euo pipefail
+          read -r version _ _ _ < <(python3 scripts/release/version.py values)
+          scripts/release/test-linux-rpm.sh "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.rpm" "$version"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 3
+          name: linux-pr-release-candidate-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: |
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.AppImage
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.deb
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.rpm
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
+
+  linux-package-fixtures:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
+    name: Linux package fixtures (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build and extract every Linux package format
+        env:
+          COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
+          COPYPASTE_LINUX_PACKAGE_TEST_OUTPUT: ${{ runner.temp }}/linux-package-fixtures
+        run: scripts/release/test-linux-packages.sh
+      - name: Install and remove the RPM fixture through Fedora DNF
+        run: scripts/release/test-linux-rpm.sh "$RUNNER_TEMP/linux-package-fixtures/CopyPaste-v1.2.3-linux-x86_64.rpm" 1.2.3
+
+  required:
+    name: CI required
+    needs: [changes, flutter-static, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, android-unit-tests, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Require every selected validation job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          NATIVE: ${{ needs.changes.outputs.native }}
+          COMPOSITOR: ${{ needs.changes.outputs.compositor }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: python3 scripts/ci/changes.py --verify

@@ -1,0 +1,676 @@
+//! The clipboard source port — platform I/O ends at this seam.
+//!
+//! The platform adapters do not own change state, so the shared invariants stay
+//! testable without a real pasteboard — which is precisely why several
+//! of them regressed. This module is the fix: one trait ([`ClipboardSource`]),
+//! one real backend, one fake, and the change-detection state machine written
+//! **once** and shared by both, so the rules that used to be untestable are
+//! exercised by ordinary `cargo test` on any host.
+//!
+//! ## Layout
+//!
+//! The split follows that fix rather than the platforms:
+//!
+//! * [`change`] — the change-count cursor and the self-write sentinel. Pure,
+//!   platform-free, and the file both backends run. Every §3.3 and §3.2 test
+//!   lives with it.
+//! * [`fake`] — the test/dev backend, and the acceptance tests of §5 that it
+//!   makes reachable.
+//! * `macos` — `NSPasteboard`, compiled only on macOS. It contains the Cocoa
+//!   spelling and nothing else that could have been tested off a mac.
+//! * `windows` — the same shape against `GetClipboardSequenceNumber`, compiled
+//!   only on Windows.
+//!
+//! This file keeps only what both backends must agree on: the port itself, the
+//! captured value, and the size gate.
+//!
+//! ## What is implemented here
+//!
+//! The capture boundary implements the manifest's privacy and representation
+//! decisions before a payload is copied from the pasteboard:
+//!
+//! - **I-1..I-4** change detection driven by `changeCount`, never by content
+//!   comparison, with the cursor advanced on every drop path.
+//! - **§3.2** burst handling — the manifest's highest-value rule. A burst never
+//!   replaces the content; the surviving clipboard value is always returned.
+//! - **§3.3** the two-sided self-write sentinel, including the *conditional*
+//!   post-stamp (CopyPaste-8yzf) and the reset-on-failure path.
+//! - **§3.9** a short-lived frontmost-app cache, private-mode and explicit
+//!   exclusion gates.
+//! - **I-11** text, RTF, HTML, native PNG/TIFF images, and one local file URL
+//!   are captured in a fixed priority order.
+//! - **I-18** `NSData.length` checked before the bytes are copied out.
+//! - **I-39 / §6.5** rejections are counted and readable, not just logged.
+//! - **§3.12** the invariant UTI strings are built once, not once per tick.
+//! - **I-9** no clipboard content, and no paths, in logs or in errors.
+//!
+//! The shared content-type vocabulary keeps captured, imported, and remote rows
+//! on the same dispatch without routing a path or base64 string through text ingest.
+
+#[cfg(any(target_os = "windows", test))]
+mod cf_html;
+mod change;
+mod fake;
+pub(crate) mod file_capture;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod source_coverage;
+// `test` so the module is exercised off macOS, but only where it compiles:
+// every syscall in it is `rustix::fs`, which has no Windows implementation.
+#[cfg(all(
+    not(feature = "dev-fake-clipboard"),
+    any(target_os = "macos", target_os = "linux", all(test, unix))
+))]
+mod file_materialize;
+pub(crate) mod format;
+pub use copypaste_runtime::WriteOptions;
+/// Windows source-app attribution is crate-visible for platform tests.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod windows_attribution;
+
+/// Decisions that must be made before a clipboard representation is read.
+///
+/// The backend owns the change cursor, so applying these gates here rather
+/// than after `poll` is what acknowledges a skipped value without first
+/// materialising its plaintext.
+#[derive(Debug, Clone, Copy)]
+pub struct CapturePolicy<'a> {
+    pub settings: &'a copypaste_ipc::ConfigData,
+}
+
+impl<'a> CapturePolicy<'a> {
+    pub fn new(settings: &'a copypaste_ipc::ConfigData) -> Self {
+        Self { settings }
+    }
+
+    /// The shared IPC selector applies both the content-specific live setting
+    /// and the current storage/transport hard bound.
+    pub fn limit_bytes(self, content_type: &str) -> u64 {
+        self.settings.capture_limit_bytes(content_type)
+    }
+
+    pub fn allows_materialized(self, capture: &Capture) -> bool {
+        let within_limit = match (
+            capture.content_type.as_str(),
+            capture.binary_content.as_ref(),
+            capture.file_path.as_ref(),
+            capture.file_metadata.as_ref(),
+        ) {
+            (content_type, None, None, None)
+                if !capture.content.is_empty()
+                    && format::supports(content_type)
+                    && copypaste_ipc::content_type::is_text(content_type) =>
+            {
+                capture.content.len() as u64 <= self.limit_bytes(content_type)
+            }
+            (content_type, Some(bytes), None, None)
+                if capture.content.is_empty()
+                    && format::supports(content_type)
+                    && matches!(
+                        copypaste_ipc::content_type::classify(content_type),
+                        copypaste_ipc::ContentClass::Image
+                    ) =>
+            {
+                bytes.len() as u64 <= self.limit_bytes(content_type)
+            }
+            (copypaste_ipc::content_type::FILE, Some(bytes), None, Some(metadata))
+                if capture.content.is_empty() && !bytes.is_empty() && metadata.is_valid() =>
+            {
+                bytes.len() as u64 <= self.limit_bytes(copypaste_ipc::content_type::FILE)
+            }
+            (copypaste_ipc::content_type::FILE, None, Some(_), Some(metadata))
+                if capture.content.is_empty() && metadata.is_valid() =>
+            {
+                true
+            }
+            _ => return false,
+        };
+
+        if !within_limit
+            || !capture.privacy.allows(self.settings)
+            || self.settings.private_mode
+            || !capture.source_policy.allows(
+                &self.settings.excluded_app_bundle_ids,
+                capture.app_bundle_id.as_deref(),
+            )
+        {
+            return false;
+        }
+        // Detected credentials are stored and masked at ingest; only
+        // user settings may keep a capture out of History.
+        true
+    }
+}
+
+#[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]
+mod macos;
+
+#[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
+mod windows;
+
+#[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+mod linux;
+#[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+mod linux_attribution;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+pub use fake::FakeClipboard;
+
+/// Current storage and transport hard bound, in bytes.
+#[cfg(any(test, all(target_os = "macos", not(feature = "dev-fake-clipboard"))))]
+const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum SourcePolicyEvidence {
+    #[default]
+    Legacy,
+    #[cfg(any(target_os = "macos", test))]
+    MacOs(source_coverage::Coverage),
+}
+impl SourcePolicyEvidence {
+    fn allows(&self, excluded: &[String], owner: Option<&str>) -> bool {
+        match self {
+            #[cfg(any(target_os = "macos", test))]
+            Self::MacOs(coverage) => {
+                coverage.allows(excluded)
+                    && !owner.is_some_and(|id| excluded.iter().any(|excluded| excluded == id))
+            }
+            Self::Legacy => {
+                excluded.is_empty()
+                    || owner.is_some_and(|id| !excluded.iter().any(|excluded| excluded == id))
+            }
+        }
+    }
+}
+
+/// One captured clipboard change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Capture {
+    pub privacy: copypaste_ipc::ClipboardPrivacy,
+    /// UTF-8 text captured from the system pasteboard.
+    pub content: String,
+    /// Owned bytes for image or materialized file capture. Text stays in `content`; the fields
+    /// are mutually exclusive so no caller can accidentally feed binary to a
+    /// string-only consumer.
+    pub binary_content: Option<Vec<u8>>,
+    /// Deferred desktop local source. Capture resolves metadata; an explicit
+    /// file transfer opens the body.
+    pub file_path: Option<std::path::PathBuf>,
+    pub file_metadata: Option<copypaste_core::FileMetadata>,
+    /// The other files copied together with `file_path`, in clipboard order,
+    /// each with its absolute path as `source_reference`.
+    pub more_files: Vec<copypaste_core::FileMetadata>,
+    /// One of `copypaste_ipc::content_type`.
+    pub content_type: String,
+    /// Platform-observed identity when the adapter has sufficient evidence.
+    pub app_bundle_id: Option<String>,
+    /// Display name reported by the originating platform. This is metadata,
+    /// never a value inferred from a bundle/package identifier.
+    pub app_name: Option<String>,
+    pub(crate) source_policy: SourcePolicyEvidence,
+}
+
+impl Capture {
+    #[allow(dead_code)]
+    fn text(content: String) -> Self {
+        Self {
+            privacy: Default::default(),
+            content,
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
+            more_files: Vec::new(),
+            content_type: copypaste_ipc::content_type::TEXT.to_string(),
+            app_bundle_id: None,
+            app_name: None,
+            source_policy: SourcePolicyEvidence::Legacy,
+        }
+    }
+}
+
+/// The seam between the daemon and the system clipboard.
+///
+/// `Send` so the poll loop can own one inside a spawned task.
+pub trait ClipboardSource: Send {
+    /// Optional event-driven wakeup for clipboard changes. The sequence or
+    /// equivalent backend state remains authoritative after each wakeup.
+    fn change_signal(&self) -> Option<std::sync::Arc<ChangeSignal>> {
+        None
+    }
+
+    /// Probe results that belong to this transport. Other platform services
+    /// report their own capabilities through the status assembler.
+    fn platform_capabilities(
+        &self,
+    ) -> std::collections::BTreeMap<
+        copypaste_ipc::PlatformCapability,
+        copypaste_ipc::CapabilityStatus,
+    > {
+        std::collections::BTreeMap::new()
+    }
+
+    /// Return `Some(capture)` when the clipboard changed since the last poll.
+    /// Must return `None` when nothing changed — the caller polls on a timer.
+    fn poll(&mut self) -> Option<Capture>;
+
+    /// Apply privacy policy before extracting a clipboard representation.
+    fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture>;
+
+    /// Whether [`ClipboardSource::poll`] has anything to report, without
+    /// consuming it.
+    ///
+    /// The capture loop calls this on the async thread and only hands off to
+    /// the blocking pool when it answers `true`, which is what keeps an idle
+    /// clipboard from costing six thread wakeups every poll.
+    ///
+    /// Defaults to `true`: a backend that cannot answer cheaply must be polled,
+    /// never skipped. It must also answer `true` for a pending self-write —
+    /// only `poll` consumes the sentinel, and one left armed suppresses a later
+    /// genuine copy.
+    fn changed(&mut self) -> bool {
+        true
+    }
+
+    /// Whether an event-driven backend needs a timed retry after a wakeup.
+    /// This includes temporary failure to read its authoritative change marker.
+    fn retry_required(&mut self) -> bool {
+        self.changed()
+    }
+
+    /// A backend may need a pre-read policy requirement to decide whether a
+    /// capability reprobe is required, without reading clipboard data.
+    fn changed_with_requirements(&mut self, _source_attribution_required: bool) -> bool {
+        self.changed()
+    }
+
+    /// Whether the system clipboard transport is currently usable.
+    ///
+    /// Backends without a cheap, authoritative readiness observation retain
+    /// the established available-by-default contract. Linux transports
+    /// override this with their live connection state.
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    /// Whether the clipboard holds no representation, read without touching
+    /// its contents. `None` when the backend cannot tell cheaply.
+    fn is_empty(&self) -> Option<bool> {
+        None
+    }
+
+    /// Write text to the clipboard. Must suppress the resulting self-write so
+    /// the next poll does not re-capture our own content. `options.secret`
+    /// adds the platform's secret marker, the one capture reads as
+    /// `privacy.secret`; `options.transient` adds its do-not-record marker.
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()>;
+
+    /// Write one authenticated history payload without consulting its display
+    /// label. The payload enum is shared with Android's embedded backend, so
+    /// every platform must make the same exhaustive content decision.
+    fn write_payload(
+        &mut self,
+        item_id: &str,
+        payload: &copypaste_core::ClipboardPayload,
+        content_type: &str,
+        options: WriteOptions,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        use copypaste_core::{ClipboardPayload, ClipboardWriteError};
+
+        match payload {
+            ClipboardPayload::Text(text)
+                if matches!(
+                    content_type,
+                    copypaste_ipc::content_type::HTML | copypaste_ipc::content_type::RICH_TEXT
+                ) =>
+            {
+                self.set_binary_contents(item_id, content_type, text.as_bytes(), None, options)
+            }
+            ClipboardPayload::Text(text) => self
+                .set_contents(text, options)
+                .map_err(|_| ClipboardWriteError::Failed),
+            ClipboardPayload::Image {
+                content_type,
+                bytes,
+            } => self.set_binary_contents(item_id, content_type, bytes, None, options),
+            ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
+                item_id,
+                copypaste_ipc::content_type::FILE,
+                bytes,
+                metadata.as_ref(),
+                options,
+            ),
+            ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
+        }
+    }
+
+    /// Write a native binary representation back to the platform pasteboard.
+    /// A backend that cannot do this refuses rather than converting bytes to
+    /// text and corrupting the user's clipboard.
+    fn set_binary_contents(
+        &mut self,
+        _item_id: &str,
+        _content_type: &str,
+        _bytes: &[u8],
+        _metadata: Option<&copypaste_core::FileMetadata>,
+        _options: WriteOptions,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
+    }
+
+    /// Identifies the live backend, surfaced over IPC so a demo cannot be
+    /// mistaken for the real thing.
+    fn backend_name(&self) -> &'static str;
+
+    /// Native adapter size rejections, including macOS File descriptor caps.
+    /// Shared deferred-file and later policy/ingest rejections are not counted.
+    ///
+    /// I-39 and §6.5: the rejection counter is user-visible; otherwise an
+    /// oversized clipboard item is
+    /// dropped in complete silence — indistinguishable from the daemon being
+    /// broken. The counter is on the port so a status response can surface it.
+    /// This is the adapter's counter, not a total of every rejected input.
+    /// Defaults to zero for a backend without this adapter counter.
+    ///
+    /// Read by `AppState::counters` onto [`copypaste_ipc::DiagnosticCounters`].
+    fn rejected_too_large_count(&self) -> u64 {
+        0
+    }
+
+    /// How many clipboard values were overwritten before we could observe them.
+    ///
+    /// §3.1/§3.2: `changeCount` is lossy — a delta above 1 means intermediate
+    /// values existed and are irrecoverable. This is the telemetry side-channel
+    /// the manifest asks for; a burst is *never* modelled as a content value
+    /// (§6.1). Surfaced the same way as the counter above.
+    fn lost_intermediates_count(&self) -> u64 {
+        0
+    }
+}
+
+/// A backend marks the signal unavailable and wakes the waiter if its event
+/// source fails, so the capture loop can fall back to its normal timer.
+pub struct ChangeSignal {
+    pub(crate) notify: tokio::sync::Notify,
+    pub(crate) available: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl Default for ChangeSignal {
+    fn default() -> Self {
+        Self {
+            notify: tokio::sync::Notify::new(),
+            available: std::sync::atomic::AtomicBool::new(true),
+        }
+    }
+}
+
+/// The development fake wins before platform selection, so a demo cannot
+/// instantiate a native clipboard backend by accident.
+#[cfg(any(not(target_os = "linux"), feature = "dev-fake-clipboard"))]
+pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn ClipboardSource>> {
+    #[cfg(feature = "dev-fake-clipboard")]
+    {
+        let _ = data_dir;
+        Ok(Box::new(fake::FakeClipboard::new()))
+    }
+    #[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]
+    {
+        Ok(Box::new(macos::MacOsClipboard::new(data_dir)?))
+    }
+    #[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
+    {
+        Ok(Box::new(windows::WindowsClipboard::with_data_dir(
+            data_dir,
+        )?))
+    }
+    #[cfg(all(
+        not(feature = "dev-fake-clipboard"),
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
+    ))]
+    {
+        let _ = data_dir;
+        Ok(Box::new(FakeClipboard::new()))
+    }
+}
+
+/// Select a startup transport that can satisfy the configured source policy.
+/// Later policy changes still fail closed in each adapter's pre-read gate.
+pub fn new_source_for_settings(
+    data_dir: &std::path::Path,
+    settings: &copypaste_ipc::ConfigData,
+) -> std::io::Result<Box<dyn ClipboardSource>> {
+    #[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+    {
+        Ok(Box::new(linux::LinuxClipboard::new_with_requirements(
+            data_dir,
+            !settings.excluded_app_bundle_ids.is_empty(),
+        )?))
+    }
+    #[cfg(any(not(target_os = "linux"), feature = "dev-fake-clipboard"))]
+    {
+        let _ = settings;
+        new_source(data_dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CapturePolicy, WriteOptions, MAX_CAPTURE_BYTES};
+    use copypaste_ipc::ConfigData;
+
+    #[test]
+    fn policy_selects_each_payload_cap_before_applying_the_hard_bound() {
+        let settings = ConfigData {
+            max_text_size_bytes: 64 * 1024,
+            max_image_size_bytes: 2 * 1024 * 1024,
+            max_file_size_bytes: 3 * 1024 * 1024,
+            ..Default::default()
+        };
+        let policy = CapturePolicy::new(&settings);
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::TEXT),
+            64 * 1024
+        );
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG),
+            2 * 1024 * 1024
+        );
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::FILE),
+            3 * 1024 * 1024
+        );
+    }
+
+    /// And nothing it passes can outgrow a reply frame.
+    #[test]
+    fn text_and_image_read_gates_stay_inside_the_wire_contract() {
+        let settings = ConfigData::default();
+        let policy = CapturePolicy::new(&settings);
+        for content_type in [
+            copypaste_ipc::content_type::TEXT,
+            copypaste_ipc::content_type::IMAGE_PNG,
+        ] {
+            assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
+        }
+    }
+
+    #[test]
+    fn detected_credentials_are_always_captured() {
+        let capture = super::Capture::text("-----BEGIN OPENSSH PRIVATE KEY-----\npartial".into());
+        let settings = ConfigData::default();
+        assert!(settings.skip_secret);
+        assert!(CapturePolicy::new(&settings).allows_materialized(&capture));
+    }
+
+    #[cfg(feature = "dev-fake-clipboard")]
+    #[test]
+    fn development_feature_selects_the_fake_before_native_platforms() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = super::new_source(dir.path()).expect("development fake source");
+        assert_eq!(source.backend_name(), "fake-memory");
+    }
+    #[test]
+    fn ambiguous_known_allowed_evidence_is_independent_of_null_source_metadata() {
+        let mut history = super::source_coverage::ActivationHistory::new(1);
+        history.record(Some("TextEdit".into()));
+        let previous = history.observation();
+        history.record(Some("CopyPaste".into()));
+        let sample = history.observation();
+        let decision = history.decide(Some((10, previous)), 11, sample, None);
+        let mut capture = super::Capture::text("owned".into());
+        capture.source_policy = super::SourcePolicyEvidence::MacOs(decision.coverage);
+        let mut config = ConfigData {
+            excluded_app_bundle_ids: vec!["Safari".into()],
+            ..Default::default()
+        };
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+        assert!(capture.app_bundle_id.is_none());
+        assert!(capture.app_name.is_none());
+        config.excluded_app_bundle_ids = vec!["TextEdit".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        capture.source_policy = super::SourcePolicyEvidence::Legacy;
+        config.excluded_app_bundle_ids = vec!["Safari".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        capture.app_bundle_id = Some("WindowsOwner".into());
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+    }
+    #[test]
+    fn declared_source_can_deny_but_cannot_authorize_a_macos_interval() {
+        let mut history = super::source_coverage::ActivationHistory::new(1);
+        history.record(Some("Editor".into()));
+        let previous = history.observation();
+        let decision = history.decide(Some((10, previous)), 11, previous, None);
+        let mut capture = super::Capture::text("owned".into());
+        capture.source_policy = super::SourcePolicyEvidence::MacOs(decision.coverage);
+        capture.app_bundle_id = Some("DeclaredSource".into());
+        let mut config = ConfigData {
+            excluded_app_bundle_ids: vec!["DeclaredSource".into()],
+            ..Default::default()
+        };
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        config.excluded_app_bundle_ids = vec!["Editor".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        config.excluded_app_bundle_ids.clear();
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+    }
+    #[test]
+    fn materialized_file_shape_is_exclusive_nonempty_valid_and_size_bounded() {
+        let config = ConfigData {
+            max_file_size_bytes: copypaste_ipc::MIN_FILE_SIZE_BYTES,
+            ..Default::default()
+        };
+        let policy = CapturePolicy::new(&config);
+        let mut file = super::Capture::text(String::new());
+        file.content_type = copypaste_ipc::content_type::FILE.into();
+        file.binary_content = Some(vec![1]);
+        file.file_metadata = copypaste_core::FileMetadata::new("file", "application/octet-stream");
+        assert!(policy.allows_materialized(&file));
+        let valid = file.clone();
+        file.file_path = Some("/local/file".into());
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.file_metadata = None;
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.content = "text".into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.binary_content = Some(vec![]);
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.content_type = copypaste_ipc::content_type::IMAGE_PNG.into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.file_metadata.as_mut().unwrap().filename = "../bad".into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid;
+        file.binary_content = Some(vec![1; copypaste_ipc::MIN_FILE_SIZE_BYTES as usize + 1]);
+        assert!(!policy.allows_materialized(&file));
+    }
+
+    #[test]
+    fn locator_file_copy_and_reference_free_native_copy_keep_the_existing_dispatch() {
+        #[derive(Default)]
+        struct Writes {
+            text: Option<String>,
+            binary: Option<Vec<u8>>,
+            options: Option<WriteOptions>,
+        }
+        impl super::ClipboardSource for Writes {
+            fn poll(&mut self) -> Option<super::Capture> {
+                None
+            }
+            fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<super::Capture> {
+                None
+            }
+            fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
+                self.text = Some(text.into());
+                self.options = Some(options);
+                Ok(())
+            }
+            fn set_binary_contents(
+                &mut self,
+                _: &str,
+                _: &str,
+                bytes: &[u8],
+                _: Option<&copypaste_core::FileMetadata>,
+                _: WriteOptions,
+            ) -> Result<(), copypaste_core::ClipboardWriteError> {
+                self.binary = Some(bytes.to_vec());
+                Ok(())
+            }
+            fn backend_name(&self) -> &'static str {
+                "fake-copy"
+            }
+        }
+        use super::ClipboardSource;
+        let mut writes = Writes::default();
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::File {
+                    bytes: vec![7].into(),
+                    metadata: copypaste_core::FileMetadata::with_source_reference(
+                        "file",
+                        "application/octet-stream",
+                        "/old/deleted/file",
+                    ),
+                },
+                copypaste_ipc::content_type::FILE,
+                WriteOptions::default(),
+            )
+            .unwrap();
+        assert!(writes.text.is_none());
+        assert_eq!(writes.binary, Some(vec![7]));
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::File {
+                    bytes: vec![8].into(),
+                    metadata: copypaste_core::FileMetadata::new("file", "application/octet-stream"),
+                },
+                copypaste_ipc::content_type::FILE,
+                WriteOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(writes.binary, Some(vec![8]));
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::Text("secret".to_owned().into()),
+                copypaste_ipc::content_type::TEXT,
+                WriteOptions {
+                    secret: true,
+                    transient: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writes.options,
+            Some(WriteOptions {
+                secret: true,
+                transient: true,
+            }),
+            "a secret transient delivery keeps both markers"
+        );
+    }
+}

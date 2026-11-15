@@ -1,0 +1,134 @@
+{
+  "schema_version": 5,
+  "api_version": 1,
+  "id": "copypaste.supabase",
+  "title": "Supabase Sync",
+  "description": "Sync encrypted clipboard history across macOS, Android, and Windows with your Supabase project.",
+  "version": "0.1.30",
+  "app_versions": ">=0.1.0, <2.0.0",
+  "supported_platforms": [
+    "macos",
+    "android",
+    "windows",
+    "linux"
+  ],
+  "sync_provider": {
+    "command": "provider-tick"
+  },
+  "commands": [
+    {
+      "id": "provider-tick",
+      "title": "Background sync",
+      "description": "Wake the installed sync provider."
+    },
+    {
+      "id": "status",
+      "title": "Account status",
+      "description": "Show account and synchronization status."
+    },
+    {
+      "id": "sign-in",
+      "title": "Sign in",
+      "description": "Use the same sync passphrase on every device. Devices in a space can leave it empty and get the key from your other devices.",
+      "arguments": [
+        {
+          "id": "email",
+          "title": "Email",
+          "kind": "text",
+          "default": "",
+          "required": true
+        },
+        {
+          "id": "password",
+          "title": "Account password",
+          "kind": "text",
+          "default": "",
+          "required": true,
+          "secret": true
+        },
+        {
+          "id": "passphrase",
+          "title": "Sync passphrase",
+          "kind": "text",
+          "default": "",
+          "required": false,
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "sign-up",
+      "title": "Create account",
+      "description": "Use the same sync passphrase on every device. The passphrase never leaves your device.",
+      "arguments": [
+        {
+          "id": "email",
+          "title": "Email",
+          "kind": "text",
+          "default": "",
+          "required": true
+        },
+        {
+          "id": "password",
+          "title": "Account password",
+          "kind": "text",
+          "default": "",
+          "required": true,
+          "secret": true
+        },
+        {
+          "id": "passphrase",
+          "title": "Sync passphrase",
+          "kind": "text",
+          "default": "",
+          "required": true,
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "sync-now",
+      "title": "Sync now",
+      "description": "Upload and download eligible history now."
+    },
+    {
+      "id": "change-passphrase",
+      "title": "Change sync passphrase",
+      "description": "Set a new passphrase for adding devices with the passphrase. Use it after removing a device.",
+      "arguments": [
+        {
+          "id": "passphrase",
+          "title": "New sync passphrase",
+          "kind": "text",
+          "default": "",
+          "required": true,
+          "secret": true
+        }
+      ]
+    },
+    {
+      "id": "sign-out-others",
+      "title": "Sign out other devices",
+      "description": "End the account session on every other device. They need the account password again."
+    },
+    {
+      "id": "sign-out",
+      "title": "Sign out",
+      "description": "Forget the account session and sync key on this device."
+    }
+  ],
+  "preferences": [
+    {
+      "id": "url",
+      "title": "Supabase project URL",
+      "kind": "text",
+      "default": ""
+    },
+    {
+      "id": "anon_key",
+      "title": "Supabase publishable key",
+      "kind": "text",
+      "default": ""
+    }
+  ]
+}

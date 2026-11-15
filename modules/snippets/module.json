@@ -1,0 +1,792 @@
+{
+  "schema_version": 7,
+  "api_version": 1,
+  "id": "copypaste.snippets",
+  "title": "Snippets",
+  "description": "Browse, organize and edit snippets and collections.",
+  "version": "0.1.0",
+  "app_versions": ">=0.1.0, <2.0.0",
+  "supported_platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "android"
+  ],
+  "capabilities": [
+    "snippets",
+    "synced_records",
+    "local_state",
+    "clipboard_read"
+  ],
+  "storage": {
+    "max_records": 50000,
+    "max_value_bytes": 524288,
+    "search_fields": [
+      "title",
+      "abbreviation",
+      "text"
+    ],
+    "keep_conflicts": true
+  },
+  "surfaces": {
+    "settings": {
+      "command": "library",
+      "icon": "notebook_text"
+    },
+    "quick_paste": {
+      "title": "Snippets",
+      "search_command": "search",
+      "activate_command": "use",
+      "mixed_limit": 5
+    },
+    "item_actions": [
+      {
+        "id": "save",
+        "title": "Save as snippet",
+        "command": "save-item",
+        "icon": "file_plus"
+      }
+    ],
+    "tray_actions": [
+      {
+        "id": "new",
+        "title": "New snippet",
+        "command": "new"
+      }
+    ]
+  },
+  "provides": [
+    {
+      "service": "snippets",
+      "command": "serve"
+    }
+  ],
+  "commands": [
+    {
+      "id": "library",
+      "title": "Snippet library",
+      "description": "Browse, organize and edit snippets and collections."
+    },
+    {
+      "id": "new",
+      "title": "New snippet",
+      "description": "Create snippet"
+    },
+    {
+      "id": "browse",
+      "title": "Browse",
+      "description": "Show a scope or search of the library.",
+      "arguments": [
+        {
+          "id": "scope",
+          "title": "Scope",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "query",
+          "title": "Search",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "value",
+          "title": "Choice",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "page",
+          "title": "Page",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "edit",
+      "title": "Edit snippet",
+      "description": "Open the snippet editor.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "collection",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "save",
+      "title": "Save snippet",
+      "description": "Save the snippet editor.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "base",
+          "title": "Revision",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "references",
+          "title": "References",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "preview",
+      "title": "Preview",
+      "description": "Preview the edited snippet.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "delete",
+      "title": "Delete",
+      "description": "Move snippets to Recently Deleted.",
+      "arguments": [
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "restore",
+      "title": "Restore",
+      "description": "Restore snippets from Recently Deleted.",
+      "arguments": [
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "purge",
+      "title": "Delete permanently",
+      "description": "Erase snippets on every device.",
+      "arguments": [
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "pin",
+      "title": "Pin",
+      "description": "Pin or unpin a snippet.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "pinned",
+          "title": "Pinned",
+          "kind": "boolean",
+          "default": false
+        },
+        {
+          "id": "scope",
+          "title": "Scope",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "query",
+          "title": "Search",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "page",
+          "title": "Page",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "reorder",
+      "title": "Reorder",
+      "description": "Move a snippet within its list.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "before",
+          "title": "Before",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "scope",
+          "title": "Scope",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "query",
+          "title": "Search",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "page",
+          "title": "Page",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "move-to",
+      "title": "Move to",
+      "description": "Choose a collection for snippets.",
+      "arguments": [
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "move",
+      "title": "Move",
+      "description": "File snippets in a collection.",
+      "arguments": [
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-edit",
+      "title": "Edit collection",
+      "description": "Open the collection editor.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-save",
+      "title": "Save collection",
+      "description": "Save the collection editor.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-delete-ask",
+      "title": "Delete collection",
+      "description": "Choose what happens to a collection's snippets.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-delete",
+      "title": "Delete collection",
+      "description": "Delete a collection.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "with_snippets",
+          "title": "Delete its snippets",
+          "kind": "boolean",
+          "default": false
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-merge-ask",
+      "title": "Merge collection",
+      "description": "Choose a collection to merge into.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "collection-merge",
+      "title": "Merge collection",
+      "description": "Merge a collection into another.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Collection",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "import",
+      "title": "Import snippets",
+      "description": "Choose a file to import.",
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "import-preview",
+      "title": "Preview import",
+      "description": "Read an import file and show what it would change.",
+      "arguments": [
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "import-commit",
+      "title": "Import",
+      "description": "Import the previewed file.",
+      "arguments": [
+        {
+          "id": "token",
+          "title": "Preview",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "export",
+      "title": "Export snippets",
+      "description": "Choose how to export snippets.",
+      "arguments": [
+        {
+          "id": "scope",
+          "title": "Scope",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "export-run",
+      "title": "Export",
+      "description": "Write the export file.",
+      "arguments": [
+        {
+          "id": "scope",
+          "title": "Scope",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "ids",
+          "title": "Snippets",
+          "kind": "id_list"
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "search",
+      "title": "Search snippets",
+      "description": "Quick Paste results.",
+      "arguments": [
+        {
+          "id": "query",
+          "title": "Search",
+          "kind": "text",
+          "default": "",
+          "max_bytes": 1024
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "use",
+      "title": "Use snippet",
+      "description": "Deliver a snippet or ask for its fields.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "fill",
+      "title": "Insert",
+      "description": "Deliver a template with its fields filled in.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "fill-preview",
+      "title": "Preview",
+      "description": "Preview a template with its fields filled in.",
+      "arguments": [
+        {
+          "id": "id",
+          "title": "Snippet",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "values",
+          "title": "Values",
+          "kind": "values"
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "save-item",
+      "title": "Save as snippet",
+      "description": "Open the snippet editor with a history item's text.",
+      "arguments": [
+        {
+          "id": "item_id",
+          "title": "Item",
+          "kind": "text",
+          "default": ""
+        },
+        {
+          "id": "text",
+          "title": "Text",
+          "kind": "text",
+          "default": "",
+          "max_bytes": 524288
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "serve",
+      "title": "Snippet service",
+      "description": "Answer snippet requests from other modules.",
+      "arguments": [
+        {
+          "id": "request",
+          "title": "Request",
+          "kind": "text",
+          "default": "",
+          "required": true,
+          "max_bytes": 524288
+        }
+      ],
+      "hidden": true
+    }
+  ],
+  "preferences": [
+    {
+      "id": "record-pasted",
+      "title": "Record pasted snippets in History",
+      "kind": "boolean",
+      "default": false,
+      "synced": true
+    },
+    {
+      "id": "require-auth",
+      "title": "Verify before using concealed snippets",
+      "kind": "boolean",
+      "default": false,
+      "synced": true
+    }
+  ],
+  "localizations": {
+    "de": {
+      "title": "Textbausteine",
+      "description": "Textbausteine und Sammlungen durchsuchen, ordnen und bearbeiten.",
+      "commands/library/title": "Textbaustein-Bibliothek",
+      "commands/library/description": "Textbausteine und Sammlungen durchsuchen, ordnen und bearbeiten.",
+      "commands/new/title": "Neuer Textbaustein",
+      "commands/new/description": "Textbaustein erstellen",
+      "preferences/record-pasted/title": "Eingefügte Textbausteine im Verlauf speichern",
+      "preferences/require-auth/title": "Vor verborgenen Textbausteinen bestätigen",
+      "surfaces/quick_paste/title": "Textbausteine",
+      "surfaces/item_actions/save/title": "Als Textbaustein speichern",
+      "surfaces/tray_actions/new/title": "Neuer Textbaustein"
+    },
+    "es": {
+      "title": "Fragmentos",
+      "description": "Explora, organiza y edita fragmentos y colecciones.",
+      "commands/library/title": "Biblioteca de fragmentos",
+      "commands/library/description": "Explora, organiza y edita fragmentos y colecciones.",
+      "commands/new/title": "Nuevo fragmento",
+      "commands/new/description": "Crear fragmento",
+      "preferences/record-pasted/title": "Guardar en el historial los fragmentos pegados",
+      "preferences/require-auth/title": "Verificar antes de usar fragmentos ocultos",
+      "surfaces/quick_paste/title": "Fragmentos",
+      "surfaces/item_actions/save/title": "Guardar como fragmento",
+      "surfaces/tray_actions/new/title": "Nuevo fragmento"
+    },
+    "fr": {
+      "title": "Extraits",
+      "description": "Parcourez, organisez et modifiez extraits et collections.",
+      "commands/library/title": "Bibliothèque d'extraits",
+      "commands/library/description": "Parcourez, organisez et modifiez extraits et collections.",
+      "commands/new/title": "Nouvel extrait",
+      "commands/new/description": "Créer un extrait",
+      "preferences/record-pasted/title": "Enregistrer les extraits collés dans l'historique",
+      "preferences/require-auth/title": "Vérifier avant d'utiliser les extraits masqués",
+      "surfaces/quick_paste/title": "Extraits",
+      "surfaces/item_actions/save/title": "Enregistrer comme extrait",
+      "surfaces/tray_actions/new/title": "Nouvel extrait"
+    },
+    "it": {
+      "title": "Frammenti",
+      "description": "Sfoglia, organizza e modifica frammenti e raccolte.",
+      "commands/library/title": "Libreria dei frammenti",
+      "commands/library/description": "Sfoglia, organizza e modifica frammenti e raccolte.",
+      "commands/new/title": "Nuovo frammento",
+      "commands/new/description": "Crea frammento",
+      "preferences/record-pasted/title": "Registra i frammenti incollati nella cronologia",
+      "preferences/require-auth/title": "Verifica prima di usare frammenti nascosti",
+      "surfaces/quick_paste/title": "Frammenti",
+      "surfaces/item_actions/save/title": "Salva come frammento",
+      "surfaces/tray_actions/new/title": "Nuovo frammento"
+    },
+    "ja": {
+      "title": "スニペット",
+      "description": "スニペットとコレクションを閲覧、整理、編集します。",
+      "commands/library/title": "スニペットライブラリ",
+      "commands/library/description": "スニペットとコレクションを閲覧、整理、編集します。",
+      "commands/new/title": "新しいスニペット",
+      "commands/new/description": "スニペットを作成",
+      "preferences/record-pasted/title": "貼り付けたスニペットを履歴に記録",
+      "preferences/require-auth/title": "非表示スニペットの使用前に本人確認",
+      "surfaces/quick_paste/title": "スニペット",
+      "surfaces/item_actions/save/title": "スニペットとして保存",
+      "surfaces/tray_actions/new/title": "新しいスニペット"
+    },
+    "ko": {
+      "title": "스니펫",
+      "description": "스니펫과 컬렉션을 둘러보고, 정리하고, 편집합니다.",
+      "commands/library/title": "스니펫 라이브러리",
+      "commands/library/description": "스니펫과 컬렉션을 둘러보고, 정리하고, 편집합니다.",
+      "commands/new/title": "새 스니펫",
+      "commands/new/description": "스니펫 만들기",
+      "preferences/record-pasted/title": "붙여 넣은 스니펫을 기록에 저장",
+      "preferences/require-auth/title": "숨김 스니펫 사용 전 본인 확인",
+      "surfaces/quick_paste/title": "스니펫",
+      "surfaces/item_actions/save/title": "스니펫으로 저장",
+      "surfaces/tray_actions/new/title": "새 스니펫"
+    },
+    "pl": {
+      "title": "Fragmenty",
+      "description": "Przeglądaj, porządkuj i edytuj fragmenty oraz kolekcje.",
+      "commands/library/title": "Biblioteka fragmentów",
+      "commands/library/description": "Przeglądaj, porządkuj i edytuj fragmenty oraz kolekcje.",
+      "commands/new/title": "Nowy fragment",
+      "commands/new/description": "Utwórz fragment",
+      "preferences/record-pasted/title": "Zapisuj wklejone fragmenty w historii",
+      "preferences/require-auth/title": "Weryfikuj przed użyciem ukrytych fragmentów",
+      "surfaces/quick_paste/title": "Fragmenty",
+      "surfaces/item_actions/save/title": "Zapisz jako fragment",
+      "surfaces/tray_actions/new/title": "Nowy fragment"
+    },
+    "pt": {
+      "title": "Trechos",
+      "description": "Navegue, organize e edite trechos e coleções.",
+      "commands/library/title": "Biblioteca de trechos",
+      "commands/library/description": "Navegue, organize e edite trechos e coleções.",
+      "commands/new/title": "Novo trecho",
+      "commands/new/description": "Criar trecho",
+      "preferences/record-pasted/title": "Registrar trechos colados no histórico",
+      "preferences/require-auth/title": "Verificar antes de usar trechos ocultos",
+      "surfaces/quick_paste/title": "Trechos",
+      "surfaces/item_actions/save/title": "Salvar como trecho",
+      "surfaces/tray_actions/new/title": "Novo trecho"
+    },
+    "tr": {
+      "title": "Parçacıklar",
+      "description": "Parçacıklara ve koleksiyonlara göz atın, bunları düzenleyin.",
+      "commands/library/title": "Parçacık kitaplığı",
+      "commands/library/description": "Parçacıklara ve koleksiyonlara göz atın, bunları düzenleyin.",
+      "commands/new/title": "Yeni parçacık",
+      "commands/new/description": "Parçacık oluştur",
+      "preferences/record-pasted/title": "Yapıştırılan parçacıkları Geçmiş'e kaydet",
+      "preferences/require-auth/title": "Gizli parçacıkları kullanmadan önce doğrula",
+      "surfaces/quick_paste/title": "Parçacıklar",
+      "surfaces/item_actions/save/title": "Parçacık olarak kaydet",
+      "surfaces/tray_actions/new/title": "Yeni parçacık"
+    },
+    "uk": {
+      "title": "Фрагменти",
+      "description": "Переглядайте, впорядковуйте й редагуйте фрагменти та колекції.",
+      "commands/library/title": "Бібліотека фрагментів",
+      "commands/library/description": "Переглядайте, впорядковуйте й редагуйте фрагменти та колекції.",
+      "commands/new/title": "Новий фрагмент",
+      "commands/new/description": "Створити фрагмент",
+      "preferences/record-pasted/title": "Записувати вставлені фрагменти в історію",
+      "preferences/require-auth/title": "Перевіряти перед використанням прихованих фрагментів",
+      "surfaces/quick_paste/title": "Фрагменти",
+      "surfaces/item_actions/save/title": "Зберегти як фрагмент",
+      "surfaces/tray_actions/new/title": "Новий фрагмент"
+    },
+    "zh": {
+      "title": "片段",
+      "description": "浏览、整理和编辑片段与收藏夹。",
+      "commands/library/title": "片段库",
+      "commands/library/description": "浏览、整理和编辑片段与收藏夹。",
+      "commands/new/title": "新建片段",
+      "commands/new/description": "创建片段",
+      "preferences/record-pasted/title": "在历史记录中记录粘贴的片段",
+      "preferences/require-auth/title": "使用隐藏的片段前验证身份",
+      "surfaces/quick_paste/title": "片段",
+      "surfaces/item_actions/save/title": "存为片段",
+      "surfaces/tray_actions/new/title": "新建片段"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+- Collect copies in the Paste Queue and paste them back in order.
+- Save reusable text as Snippets: templates, abbreviation search, collections, concealed snippets, and encrypted import and export.
+- Transform copied text before pasting: change case, clean up lines, encode, hash, convert JSON, YAML, CSV and XML, strip tracking from links, and more. Chain transforms into pipelines and set per-app defaults for Quick Paste.
+- Edit a clip before pasting it, add clips by hand, or save a clip as a snippet.
+- Content rules mark detected credentials and payment cards as secret. Everything you copy still goes to History and syncs; only your settings keep a copy out.
+- Unlock secret clips with Touch ID, Windows Hello or the Android screen lock.
+- On Android, reach your clips from a keyboard clipboard panel, a Quick Settings tile and a home screen widget.
+- Pick excluded applications and per-app defaults from a list of apps with icons instead of typing identifiers.
+- AI Tools are no longer built into the app and now ship as the optional AI Tools module.
+- Install a module from a package file with the new button on the Modules screen.
+- Navigation and status moved into the window header. Settings show pending changes, confirmations and results; History groups clips by day; export and backup show progress.
+- Copying an image in a browser now saves the image instead of its HTML wrapper.
+- Preview tall PNG screenshots.
+- On macOS 27, pasting back a file from Desktop, Documents or Downloads no longer empties the clipboard.

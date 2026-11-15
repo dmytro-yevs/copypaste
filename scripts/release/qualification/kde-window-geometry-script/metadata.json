@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Id": "copypaste-qualification-window-geometry",
+    "Name": "CopyPaste qualification window geometry",
+    "Description": "Private compositor geometry bridge for the disposable Linux qualification session.",
+    "Version": "1",
+    "License": "MIT"
+  },
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js",
+  "KPackageStructure": "KWin/Script"
+}

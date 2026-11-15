@@ -1,0 +1,361 @@
+//! Safe, bounded thumbnails for binary clipboard images.
+
+use std::io::Cursor;
+use std::sync::Mutex;
+
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
+use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
+
+mod streaming_png;
+
+/// A preview is deliberately much smaller than its source. It is displayed in
+/// a history row, never used to restore an image to the system clipboard.
+pub const DEFAULT_THUMBNAIL_EDGE: u32 = 384;
+pub const MAX_THUMBNAIL_EDGE: u32 = 2_048;
+
+// All callers in a process share decoder admission. A per-image allocation
+// limit alone otherwise multiplies with concurrent IPC preview requests.
+// This bounds decoded overlap, not encoded input sizes, engine images or total RAM.
+static PREVIEW_DECODER: Mutex<()> = Mutex::new(());
+
+// Bound concurrent source reads and decryptions before they enter the blocking
+// pool. The decoder remains separately serialized by PREVIEW_DECODER.
+const PREVIEW_SOURCE_CAPACITY: usize = 1;
+static PREVIEW_SOURCES: Semaphore = Semaphore::const_new(PREVIEW_SOURCE_CAPACITY);
+
+/// Admit one preview source before loading its encrypted payload.
+/// The semaphore is never closed; dropping the permit releases admission.
+pub async fn acquire_preview_source() -> SemaphorePermit<'static> {
+    PREVIEW_SOURCES
+        .acquire()
+        .await
+        .expect("preview source admission is never closed")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageThumbnail {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Error)]
+pub enum ImagePreviewError {
+    #[error("the image could not be decoded")]
+    Decode,
+    #[error("the image exceeds the decoded-memory limit")]
+    TooLarge,
+    #[error("the thumbnail could not be encoded")]
+    Encode,
+}
+
+/// Read original image metadata without decoding the pixel buffer.
+///
+/// This is used only for a selected clip's detail response, so history pages
+/// remain cheap while the inspector can report source dimensions and size.
+pub fn image_metadata(source: &[u8]) -> Result<ImageMetadata, ImagePreviewError> {
+    let reader = ImageReader::new(Cursor::new(source))
+        .with_guessed_format()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let decoder = reader
+        .into_decoder()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
+    Ok(ImageMetadata {
+        width,
+        height,
+        size_bytes: u64::try_from(source.len()).unwrap_or(u64::MAX),
+    })
+}
+
+/// Decode one clipboard image within the user's memory budget and encode a
+/// PNG thumbnail. No source image bytes leave this function.
+/// Optional physical-pixel bounds preserve aspect ratio without changing the source.
+pub fn thumbnail_png(
+    source: &[u8],
+    decoded_memory_mb: u32,
+    max_edge: Option<u32>,
+    bounds: Option<(u32, u32)>,
+) -> Result<ImageThumbnail, ImagePreviewError> {
+    let _decoder = PREVIEW_DECODER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let edge = max_edge
+        .unwrap_or(if bounds.is_some() {
+            MAX_THUMBNAIL_EDGE
+        } else {
+            DEFAULT_THUMBNAIL_EDGE
+        })
+        .clamp(1, MAX_THUMBNAIL_EDGE);
+    let (max_width, max_height) = bounds.unwrap_or((edge, edge));
+    let max_width = max_width.clamp(1, edge);
+    let max_height = max_height.clamp(1, edge);
+    let budget = u64::from(decoded_memory_mb).saturating_mul(1024 * 1024);
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(budget);
+    let mut reader = ImageReader::new(Cursor::new(source))
+        .with_guessed_format()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    if reader.format() == Some(ImageFormat::Png) {
+        if let Some(thumbnail) = streaming_png::thumbnail(source, budget, max_width, max_height)? {
+            return Ok(thumbnail);
+        }
+    }
+    reader.limits(limits.clone());
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let (source_width, source_height) = decoder.dimensions();
+    let limits = decode_limits(
+        source_width,
+        source_height,
+        decoder.total_bytes(),
+        decoder.color_type().bytes_per_pixel(),
+        max_width,
+        max_height,
+        budget,
+    )?;
+    decoder
+        .set_limits(limits)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    let image = DynamicImage::from_decoder(decoder).map_err(|error| {
+        if matches!(error, image::ImageError::Limits(_)) {
+            ImagePreviewError::TooLarge
+        } else {
+            ImagePreviewError::Decode
+        }
+    })?;
+    let thumbnail = image.thumbnail(image.width().min(max_width), image.height().min(max_height));
+    let (width, height) = (thumbnail.width(), thumbnail.height());
+    let mut png = Vec::new();
+    thumbnail
+        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .map_err(|_| ImagePreviewError::Encode)?;
+
+    Ok(ImageThumbnail { png, width, height })
+}
+
+fn decode_limits(
+    source_width: u32,
+    source_height: u32,
+    source_bytes: u64,
+    bytes_per_pixel: u8,
+    max_width: u32,
+    max_height: u32,
+    budget: u64,
+) -> Result<Limits, ImagePreviewError> {
+    if source_width == 0 || source_height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(budget);
+    let (numerator, denominator) = if u64::from(source_width) * u64::from(max_height)
+        > u64::from(source_height) * u64::from(max_width)
+    {
+        (max_width, source_width)
+    } else {
+        (max_height, source_height)
+    };
+    let target_width = u64::from(source_width)
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
+        .min(u64::from(source_width));
+    let target_height = u64::from(source_height)
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
+        .min(u64::from(source_height));
+    let thumbnail_bytes = target_width
+        .saturating_mul(target_height)
+        .saturating_mul(u64::from(bytes_per_pixel));
+    limits
+        .reserve(thumbnail_bytes)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    limits
+        .reserve(source_bytes)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    Ok(limits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let image = ImageBuffer::from_pixel(width, height, Rgba([0x24u8, 0x65, 0xa8, 0xff]));
+        let mut encoded = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
+            .unwrap();
+        encoded
+    }
+
+    #[tokio::test]
+    async fn source_admission_bounds_and_releases_cancelled_waiters() {
+        use std::time::Duration;
+
+        let mut permits = Vec::new();
+        for _ in 0..PREVIEW_SOURCE_CAPACITY {
+            permits.push(acquire_preview_source().await);
+        }
+        let mut waiting = Box::pin(acquire_preview_source());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiting)
+                .await
+                .is_err()
+        );
+        drop(waiting);
+        drop(permits.pop());
+        let replacement = tokio::time::timeout(Duration::from_secs(2), acquire_preview_source())
+            .await
+            .expect("cancelled waiter must not consume a permit");
+        drop(replacement);
+        drop(permits);
+        let mut all = Vec::new();
+        for _ in 0..PREVIEW_SOURCE_CAPACITY {
+            all.push(
+                tokio::time::timeout(Duration::from_secs(2), acquire_preview_source())
+                    .await
+                    .expect("every permit must be released"),
+            );
+        }
+
+        // Cancelling an async requester cannot release admission while its
+        // already-started blocking source loader still owns the permit.
+        let permit = all.pop().unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        let mut waiting = Box::pin(acquire_preview_source());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiting)
+                .await
+                .is_err()
+        );
+        release_tx.send(()).unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(2), &mut waiting)
+            .await
+            .expect("completed blocking loader must release its permit");
+        drop(permit);
+    }
+
+    #[test]
+    fn creates_a_png_thumbnail() {
+        let thumbnail = thumbnail_png(&png(1200, 600), 50, None, None).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (384, 192));
+        assert_eq!(&thumbnail.png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn reads_original_metadata_without_thumbnail_scaling() {
+        let source = png(1_200, 600);
+        assert_eq!(
+            image_metadata(&source).unwrap(),
+            ImageMetadata {
+                width: 1_200,
+                height: 600,
+                size_bytes: source.len() as u64,
+            }
+        );
+    }
+
+    #[test]
+    fn fits_preview_bounds_for_square_wide_and_tall_images() {
+        for (source_size, expected) in [
+            ((1_200, 1_200), (320, 320)),
+            ((1_800, 300), (1_400, 233)),
+            ((300, 1_800), (53, 320)),
+            ((60, 30), (60, 30)),
+        ] {
+            let source = png(source_size.0, source_size.1);
+            let thumbnail = thumbnail_png(&source, 50, None, Some((1_400, 320))).unwrap();
+            assert_eq!((thumbnail.width, thumbnail.height), expected);
+            let decoded = image::load_from_memory(&thumbnail.png).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), expected);
+            assert_eq!(image_metadata(&source).unwrap().width, source_size.0);
+            assert_eq!(image_metadata(&source).unwrap().height, source_size.1);
+        }
+    }
+
+    #[test]
+    fn clamps_preview_bounds_to_the_global_resolution_limit() {
+        let thumbnail = thumbnail_png(&png(2_400, 600), 50, None, Some((u32::MAX, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (1_280, 320));
+        let thumbnail = thumbnail_png(&png(2_400, 600), 50, Some(512), Some((1_400, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (512, 128));
+    }
+
+    #[test]
+    fn refuses_a_decode_over_the_budget() {
+        // A 16-bit source needs the full framebuffer decoder.
+        let image =
+            ImageBuffer::from_pixel(1_200, 1_200, Rgba([0x2465u16, 0x65a8, 0xa824, 0xffff]));
+        let mut full_decode = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut full_decode), ImageFormat::Png)
+            .unwrap();
+        assert!(matches!(
+            thumbnail_png(&full_decode, 1, None, None),
+            Err(ImagePreviewError::TooLarge)
+        ));
+        // A streamed source is still refused when the thumbnail itself does not fit.
+        assert!(matches!(
+            thumbnail_png(&png(1_200, 1_200), 1, Some(1_024), None),
+            Err(ImagePreviewError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn streams_a_tall_png_whose_framebuffer_exceeds_the_budget() {
+        // 1200 x 6000 RGBA decodes to ~27 MiB, far above the 4 MiB budget.
+        let thumbnail = thumbnail_png(&png(1_200, 6_000), 4, None, Some((1_400, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (64, 320));
+    }
+
+    #[test]
+    fn refuses_non_images() {
+        assert!(matches!(
+            thumbnail_png(b"not an image", 50, None, None),
+            Err(ImagePreviewError::Decode)
+        ));
+    }
+
+    #[test]
+    fn high_dpi_edge_does_not_upscale_small_images() {
+        assert_eq!(
+            thumbnail_png(&png(1600, 800), 50, Some(1024), None)
+                .unwrap()
+                .width,
+            1024
+        );
+        assert_eq!(
+            thumbnail_png(&png(120, 60), 50, Some(1024), None)
+                .unwrap()
+                .width,
+            120
+        );
+    }
+
+    #[test]
+    fn tiny_image_with_high_dpi_request_fits_a_small_budget() {
+        let thumbnail = thumbnail_png(&png(2, 2), 1, Some(2048), None).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (2, 2));
+    }
+}

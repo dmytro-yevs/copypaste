@@ -1,0 +1,8 @@
+FROM fedora:41@sha256:f1a3fab47bcb3c3ddf3135d5ee7ba8b7b25f2e809a47440936212a3a50957f3d
+RUN dnf5 --assumeyes --setopt=install_weak_deps=False install \
+    dnf5-plugins fedora-repos git meson ninja-build make gcc pkgconf-pkg-config \
+    mutter-devel gobject-introspection-devel \
+ && dnf5 config-manager setopt fedora-source.enabled=1 updates-source.enabled=1 \
+ && dnf5 builddep --assumeyes --setopt=install_weak_deps=False mutter \
+ && dnf5 clean all
+WORKDIR /workspace

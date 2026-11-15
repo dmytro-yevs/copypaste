@@ -1,0 +1,151 @@
+//! What a node operation can fail with.
+//!
+//! Every variant's `Display` is a fixed sentence with no interpolation. These
+//! reach a peer's log and a user's screen, so none of them may carry a
+//! filesystem path (the privacy contract) and none may describe *how* a pairing
+//! code was wrong — the input is a secret, and saying which part failed is a
+//! hint about what a valid one looks like.
+
+/// A pairing or sync operation that did not complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum NodeError {
+    #[error("that pairing code is not valid")]
+    BadCode,
+    #[error("that address could not be resolved; expected host:port")]
+    BadAddress,
+    #[error("the other device did not accept this pairing code")]
+    Handshake,
+    #[error("another pairing is already in progress")]
+    PairingBusy,
+    #[error("no pairing is awaiting confirmation")]
+    NoPairing,
+    #[error("a device cannot pair with itself")]
+    SelfPairing,
+    #[error("Device is already paired.")]
+    AlreadyPaired,
+    #[error("no such paired device")]
+    NoPeer,
+    #[error(
+        "this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address"
+    )]
+    NoAddress,
+    #[error("the sync session with the other device failed")]
+    Session,
+    #[error("The connection was interrupted before synchronization finished. It will resume when the device reconnects.")]
+    ConnectionLost,
+    #[error("Clipboard history could not be read or saved on this device. Check available storage and try again.")]
+    HistoryUnavailable,
+    #[error("The other device sent invalid synchronization data. Update CopyPaste on both devices and try again.")]
+    InvalidData,
+    #[error(
+        "the two devices are running versions of CopyPaste that cannot sync with each other; update both and try again"
+    )]
+    PeerVersion,
+    #[error("the other device stopped responding")]
+    Timeout,
+    #[error("the paired-device list could not be updated")]
+    PeerStore,
+    #[error("{0}")]
+    Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode),
+    #[error("Synchronization was cancelled.")]
+    Cancelled,
+    /// [`crate::peers::MAX_PAIRINGS`] reached. The user has to decide which
+    /// device to let go; nothing here will decide for them.
+    #[error("this device is already paired with as many devices as it can hold; unpair one first")]
+    TooManyPairings,
+}
+
+impl NodeError {
+    /// Pairing-form errors belong to that operation, not to the background
+    /// synchronization state. An unverified handshake failure proves neither
+    /// an invalid pairing nor protocol incompatibility.
+    pub(super) fn sync_issue(self) -> Option<copypaste_ipc::sync_issue::SyncIssueCode> {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        match self {
+            Self::PeerVersion => Some(Code::VersionMismatch),
+            Self::ConnectionLost => Some(Code::ConnectionLost),
+            Self::Timeout => Some(Code::TimedOut),
+            Self::HistoryUnavailable => Some(Code::HistoryUnavailable),
+            Self::InvalidData => Some(Code::InvalidPeerData),
+            Self::PeerStore => Some(Code::MembershipUnavailable),
+            Self::Session => Some(Code::UnknownFailure),
+            Self::Diagnostic(code) => Some(code),
+            Self::BadCode
+            | Self::BadAddress
+            | Self::Handshake
+            | Self::PairingBusy
+            | Self::NoPairing
+            | Self::SelfPairing
+            | Self::AlreadyPaired
+            | Self::NoPeer
+            | Self::NoAddress
+            | Self::TooManyPairings
+            | Self::Cancelled => None,
+        }
+    }
+    /// Whether the caller can act on it — bad input, or a precondition they
+    /// control — as opposed to something having gone wrong here. Callers map
+    /// this onto their own error taxonomy.
+    ///
+    /// `TooManyPairings` is here rather than with the internal failures on
+    /// purpose: it is a refusal with a remedy the user can carry out, and
+    /// reporting it as an internal error would hide the remedy.
+    #[must_use]
+    pub fn is_client_error(self) -> bool {
+        matches!(
+            self,
+            NodeError::BadCode
+                | NodeError::BadAddress
+                | NodeError::Handshake
+                | NodeError::PairingBusy
+                | NodeError::NoPairing
+                | NodeError::SelfPairing
+                | NodeError::AlreadyPaired
+                | NodeError::TooManyPairings
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every client-visible string this module can produce, asserted pathless.
+    const ALL: &[NodeError] = &[
+        NodeError::BadCode,
+        NodeError::BadAddress,
+        NodeError::Handshake,
+        NodeError::PairingBusy,
+        NodeError::NoPairing,
+        NodeError::SelfPairing,
+        NodeError::AlreadyPaired,
+        NodeError::NoPeer,
+        NodeError::NoAddress,
+        NodeError::Session,
+        NodeError::ConnectionLost,
+        NodeError::HistoryUnavailable,
+        NodeError::InvalidData,
+        NodeError::PeerVersion,
+        NodeError::Timeout,
+        NodeError::PeerStore,
+        NodeError::Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode::VersionMismatch),
+        NodeError::Cancelled,
+        NodeError::TooManyPairings,
+    ];
+
+    #[test]
+    fn client_visible_messages_disclose_no_path() {
+        for err in ALL {
+            let message = err.to_string();
+            assert!(!message.contains('/'), "{message}");
+            assert!(!message.contains('\\'), "{message}");
+        }
+    }
+
+    #[test]
+    fn only_the_callers_own_mistakes_are_client_errors() {
+        assert!(NodeError::BadCode.is_client_error());
+        assert!(!NodeError::PeerStore.is_client_error());
+        assert!(!NodeError::NoPeer.is_client_error());
+    }
+}

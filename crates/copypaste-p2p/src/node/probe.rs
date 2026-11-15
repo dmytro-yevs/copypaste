@@ -1,0 +1,1096 @@
+//! Authenticated, content-free reachability probes for trusted peers.
+//!
+//! Discovery says an mDNS record was recently observed. A probe says a holder
+//! of this pairing's PSK completed a Noise handshake and echoed a nonce over
+//! the encrypted application channel. The latter is the only input to an
+//! authenticated latency value.
+
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use rand::random;
+use tokio::time::timeout;
+
+use super::channel::NoiseChannel;
+use super::{DialCandidateSource, Node, NodeError};
+use crate::peers::Peer;
+use crate::protocol::{SyncMessage, PROTOCOL_VERSION};
+use crate::sync::SyncChannel;
+#[cfg(test)]
+use crate::transport::Session;
+use crate::DeviceProfile;
+
+/// A successful probe remains current only briefly. This avoids presenting an
+/// old successful connection as a live one while keeping ordinary UI polling
+/// from opening a connection for every request.
+pub const PROBE_FRESH_MS: i64 = 30_000;
+
+/// A failure is also rate-limited, but for less time so a device returning to
+/// the LAN is noticed promptly.
+pub const PROBE_FAILURE_FRESH_MS: i64 = 10_000;
+
+/// A probe includes the Noise handshake and one encrypted request/response.
+/// It must not monopolize a probe slot behind a sleeping device.
+const PROBE_TIMEOUT_SECS: u64 = 5;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
+// At most one discovery address and one persisted address are attempted.
+const PROBE_REFRESH_LEAD_MS: i64 = PROBE_TIMEOUT_SECS as i64 * 2 * 1_000;
+/// Renewal batches never start closer together than this.
+const PROBE_BATCH_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// Bounds how late a peer that gains its first dial candidate is noticed.
+const PROBE_IDLE_RECHECK: Duration = Duration::from_millis(PROBE_FRESH_MS as u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeState {
+    Online,
+    Offline,
+    Unknown,
+}
+
+/// An observation made only after a successful Noise handshake for one
+/// pairing. `latency_ms` is populated exclusively for `Online`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedReachability {
+    pub state: ProbeState,
+    pub latency_ms: Option<u64>,
+    pub observed_at_ms: i64,
+    pub fresh_until_ms: Option<i64>,
+}
+
+impl AuthenticatedReachability {
+    #[must_use]
+    pub fn online(latency_ms: Option<u64>, observed_at_ms: i64) -> Self {
+        Self {
+            state: ProbeState::Online,
+            latency_ms,
+            observed_at_ms,
+            fresh_until_ms: Some(observed_at_ms.saturating_add(PROBE_FRESH_MS)),
+        }
+    }
+
+    #[must_use]
+    pub fn offline(observed_at_ms: i64) -> Self {
+        Self {
+            state: ProbeState::Offline,
+            latency_ms: None,
+            observed_at_ms,
+            fresh_until_ms: Some(observed_at_ms.saturating_add(PROBE_FAILURE_FRESH_MS)),
+        }
+    }
+
+    /// Retain a failed observation while it is renewed. Only a current positive
+    /// observation may claim Online; a missing observation remains Unknown.
+    #[must_use]
+    pub fn state_at(&self, now_ms: i64) -> ProbeState {
+        if self.observed_at_ms > now_ms {
+            ProbeState::Unknown
+        } else if self.state == ProbeState::Offline || self.is_current_at(now_ms) {
+            self.state
+        } else {
+            ProbeState::Unknown
+        }
+    }
+
+    #[must_use]
+    pub fn is_current_at(&self, now_ms: i64) -> bool {
+        self.state != ProbeState::Unknown
+            && self.observed_at_ms <= now_ms
+            && matches!(self.fresh_until_ms, Some(fresh_until_ms) if now_ms <= fresh_until_ms)
+    }
+
+    fn should_refresh_at(&self, now_ms: i64) -> bool {
+        let refresh_lead_ms = match self.state {
+            ProbeState::Online => PROBE_REFRESH_LEAD_MS,
+            ProbeState::Offline | ProbeState::Unknown => 0,
+        };
+        (self.state == ProbeState::Online && self.latency_ms.is_none())
+            || !self.is_current_at(now_ms)
+            || matches!(
+                self.fresh_until_ms,
+                Some(fresh_until_ms)
+                    if fresh_until_ms.saturating_sub(now_ms) <= refresh_lead_ms
+            )
+    }
+
+    /// The earliest time at which [`Self::should_refresh_at`] becomes true.
+    fn refresh_due_at(&self, now_ms: i64) -> i64 {
+        if self.should_refresh_at(now_ms) {
+            return now_ms;
+        }
+        let refresh_lead_ms = match self.state {
+            ProbeState::Online => PROBE_REFRESH_LEAD_MS,
+            ProbeState::Offline | ProbeState::Unknown => 0,
+        };
+        self.fresh_until_ms.map_or(now_ms, |fresh_until_ms| {
+            fresh_until_ms.saturating_sub(refresh_lead_ms)
+        })
+    }
+}
+
+impl Node {
+    /// Maintains RTT independently of UI reads for the lifetime of the listener.
+    /// Existing freshness and in-flight guards coalesce every renewal batch.
+    /// The monitor sleeps until the earliest renewal is due or a new
+    /// observation is recorded, instead of waking on a fixed tick.
+    pub(super) async fn monitor_reachability<F>(
+        self: Arc<Self>,
+        on_complete: F,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) where
+        F: Fn(bool) + Send + Sync + Clone + 'static,
+    {
+        let mut next_batch = tokio::time::Instant::now();
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                () = tokio::time::sleep_until(next_batch) => {}
+            }
+            if *shutdown.borrow() {
+                return;
+            }
+            let started = tokio::time::Instant::now();
+            let notify = on_complete.clone();
+            let completion_shutdown = shutdown.clone();
+            self.refresh_reachability(self.peers().list(), move |state_changed| {
+                if !*completion_shutdown.borrow() {
+                    notify(state_changed);
+                }
+            });
+            let due = started + self.next_reachability_refresh_in(crate::now_ms());
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                () = tokio::time::sleep_until(due) => {}
+                () = self.reachability_recorded.notified() => {}
+            }
+            next_batch = started + PROBE_BATCH_MIN_INTERVAL;
+        }
+    }
+
+    /// Time until a peer with a dial candidate next needs renewal. In-flight
+    /// probes record an observation on completion, which wakes the monitor.
+    fn next_reachability_refresh_in(&self, now_ms: i64) -> Duration {
+        let in_flight = self
+            .probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let due_ms = self
+            .peers()
+            .list()
+            .iter()
+            .filter(|peer| !in_flight.contains(&peer.pairing_id))
+            .filter(|peer| !self.sync_activity.version_retry_deferred(&peer.pairing_id))
+            .filter(|peer| !self.dial_candidates(peer).is_empty())
+            .map(|peer| {
+                let due_ms = self
+                    .authenticated_reachability(&peer.pairing_id)
+                    .map_or(now_ms, |observation| observation.refresh_due_at(now_ms));
+                self.probe_retry(&peer.pairing_id)
+                    .map_or(due_ms, |retry_ms| due_ms.max(retry_ms))
+            })
+            .min();
+        due_ms.map_or(PROBE_IDLE_RECHECK, |due_ms| {
+            Duration::from_millis(u64::try_from(due_ms.saturating_sub(now_ms)).unwrap_or(0))
+                .min(PROBE_IDLE_RECHECK)
+        })
+    }
+
+    /// Starts one probe per peer needing renewal and returns immediately.
+    /// `on_complete` runs once after the batch records its observations and
+    /// reports whether any reachability state changed. Discovery addresses
+    /// precede stored addresses; every candidate must pass Noise authentication.
+    ///
+    /// Returns false without a callback when all peers are fresh or probing.
+    pub fn refresh_reachability<F>(
+        self: &Arc<Self>,
+        peers: impl IntoIterator<Item = Peer>,
+        on_complete: F,
+    ) -> bool
+    where
+        F: FnOnce(bool) + Send + 'static,
+    {
+        let now = crate::now_ms();
+        let claimed: Vec<_> = peers
+            .into_iter()
+            .filter(|peer| {
+                !self.dial_candidates(peer).is_empty() && self.claim_probe(&peer.pairing_id, now)
+            })
+            .collect();
+        if claimed.is_empty() {
+            return false;
+        }
+        let remaining = Arc::new(AtomicUsize::new(claimed.len()));
+        let state_changed = Arc::new(AtomicBool::new(false));
+        let completion = Arc::new(Mutex::new(Some(on_complete)));
+        for peer in claimed {
+            let node = Arc::clone(self);
+            let remaining = Arc::clone(&remaining);
+            let state_changed = Arc::clone(&state_changed);
+            let completion = Arc::clone(&completion);
+            tokio::spawn(async move {
+                let _permit = node
+                    .probes
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("probe semaphore is never closed");
+                if node.probe_claimed(&peer).await {
+                    state_changed.store(true, Ordering::Release);
+                }
+                node.release_probe(&peer.pairing_id);
+                if remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    if let Some(callback) = completion
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take()
+                    {
+                        callback(state_changed.load(Ordering::Acquire));
+                    }
+                }
+            });
+        }
+        true
+    }
+
+    /// Probes one known trusted endpoint. This is public for explicit callers;
+    /// the system monitor uses [`Self::refresh_reachability`] for coalescing.
+    pub async fn probe_one(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
+        self.probe(peer).await
+    }
+
+    fn claim_probe(&self, pairing_id: &str, now_ms: i64) -> bool {
+        // An incompatible peer can authenticate but never acknowledge, so it
+        // never gains a measured observation that would end the renewal.
+        if self.sync_activity.version_retry_deferred(pairing_id)
+            || self
+                .probe_retry(pairing_id)
+                .is_some_and(|retry_ms| now_ms < retry_ms)
+            || self
+                .authenticated_reachability(pairing_id)
+                .is_some_and(|observation| !observation.should_refresh_at(now_ms))
+        {
+            return false;
+        }
+        self.probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(pairing_id.to_string())
+    }
+
+    fn probe_retry(&self, pairing_id: &str) -> Option<i64> {
+        self.probe_retry_at
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(pairing_id)
+            .copied()
+    }
+
+    /// Holds the next renewal after an unacknowledged probe; every other
+    /// outcome is governed by the freshness of the observation it records.
+    fn set_probe_retry(&self, pairing_id: &str, retry_ms: Option<i64>) {
+        let mut retries = self
+            .probe_retry_at
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match retry_ms {
+            Some(retry_ms) => retries.insert(pairing_id.to_string(), retry_ms),
+            None => retries.remove(pairing_id),
+        };
+    }
+
+    fn release_probe(&self, pairing_id: &str) {
+        self.probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pairing_id);
+    }
+
+    async fn probe_claimed(&self, peer: &Peer) -> bool {
+        let now = crate::now_ms();
+        let before = self
+            .authenticated_reachability(&peer.pairing_id)
+            .map(|observation| observation.state_at(now));
+        let _ = self.probe(peer).await;
+        let after = self
+            .authenticated_reachability(&peer.pairing_id)
+            .map(|observation| observation.state_at(crate::now_ms()));
+        before != after
+    }
+
+    async fn probe(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
+        let peer = self.current_peer(peer).unwrap_or_else(|| peer.clone());
+        // Probes stay on the LAN: the relay already reports presence, and a
+        // relayed probe every few seconds would be traffic for nothing.
+        let mut candidates = self.dial_candidates_with_sources(&peer, true);
+        candidates.retain(|candidate| candidate.source != DialCandidateSource::Relay);
+        if candidates.is_empty() {
+            return Err(NodeError::NoAddress);
+        }
+        let probe_started = crate::now_ms();
+        let mut last_error = NodeError::Handshake;
+        for candidate in candidates {
+            let result = timeout(
+                PROBE_TIMEOUT,
+                probe_session(self, &candidate.endpoint, &peer),
+            )
+            .await;
+            if let Ok(Ok((latency_ms, profile, current))) = result {
+                let observation =
+                    AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
+                self.set_probe_retry(&peer.pairing_id, None);
+                self.record_authenticated_profile(&current.pairing_id, profile.as_ref());
+                self.touch_peer(
+                    &current,
+                    None,
+                    candidate.addr().map(super::ListenerEndpoint::dialled),
+                    None,
+                );
+                self.record_reachability(&current.pairing_id, observation.clone());
+                return Ok(observation);
+            }
+            if let (DialCandidateSource::Discovery, Some(addr)) =
+                (candidate.source, candidate.addr())
+            {
+                self.record_discovery_candidate_failure(&peer.pairing_id, addr);
+            }
+            last_error = match result {
+                Ok(Err(error)) => error,
+                Err(_) => NodeError::Timeout,
+                Ok(Ok(_)) => unreachable!("successful probe returned above"),
+            };
+        }
+        // A successful authenticated transport followed by an application
+        // protocol failure is an online device with a condition, not Offline.
+        // Its presence stays unmeasured, so it is renewed at the failure
+        // cadence rather than as soon as the monitor wakes.
+        let now = crate::now_ms();
+        if self
+            .sync_activity
+            .authenticated_since(&peer.pairing_id, probe_started)
+        {
+            self.sync_activity.failure(&peer.pairing_id, last_error);
+            self.set_probe_retry(
+                &peer.pairing_id,
+                Some(now.saturating_add(PROBE_FAILURE_FRESH_MS)),
+            );
+            self.record_reachability(
+                &peer.pairing_id,
+                AuthenticatedReachability::online(None, now),
+            );
+        } else {
+            self.set_probe_retry(&peer.pairing_id, None);
+            self.record_reachability(&peer.pairing_id, AuthenticatedReachability::offline(now));
+        }
+        Err(last_error)
+    }
+}
+
+/// Responds to an already decoded authenticated probe. No sync source is
+/// accepted here, which makes transferring clipboard data impossible.
+pub(super) async fn respond(
+    channel: &mut NoiseChannel,
+    protocol_version: u32,
+    nonce: u64,
+) -> Result<(), NodeError> {
+    if protocol_version != PROTOCOL_VERSION {
+        return Err(NodeError::PeerVersion);
+    }
+    channel
+        .send(SyncMessage::ProbeAck {
+            protocol_version: PROTOCOL_VERSION,
+            nonce,
+            profile: Some(crate::DeviceProfile::current()),
+        })
+        .await
+        .map_err(super::dial::session_error)
+}
+
+async fn probe_session(
+    node: &Node,
+    endpoint: &crate::transport::Endpoint,
+    peer: &Peer,
+) -> Result<(u64, Option<crate::DeviceProfile>, Peer), NodeError> {
+    let (session, current) = node.connect_peer(endpoint, peer).await?;
+    let mut channel = NoiseChannel::new(session);
+    let nonce = random::<u64>();
+    let profile = DeviceProfile::current();
+    let started = Instant::now();
+    let result = async {
+        channel
+            .send(SyncMessage::Probe {
+                protocol_version: PROTOCOL_VERSION,
+                nonce,
+                profile: Some(profile),
+            })
+            .await
+            .map_err(super::dial::session_error)?;
+        match channel
+            .recv()
+            .await
+            .map_err(|error| node.first_reply_error(&current.pairing_id, error))?
+        {
+            SyncMessage::ProbeAck {
+                protocol_version,
+                nonce: received,
+                profile,
+            } if protocol_version == PROTOCOL_VERSION && received == nonce => {
+                node.sync_activity.evidence(
+                    &current.pairing_id,
+                    copypaste_ipc::sync_issue::SyncEvidence::CompatibleProtocol,
+                );
+                Ok((
+                    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    profile,
+                    current,
+                ))
+            }
+            SyncMessage::ProbeAck { .. } => Err(NodeError::InvalidData),
+            _ => Err(NodeError::InvalidData),
+        }
+    }
+    .await;
+    channel.close().await;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::{DiscoveredPeer, Discovery};
+    use crate::node::listen;
+    use crate::peers::PeerStore;
+    use crate::sync::testutil::TestSource;
+    use crate::transport::PairingToken;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+    use tokio::sync::{oneshot, watch};
+
+    fn node(dir: &tempfile::TempDir) -> Arc<Node> {
+        Arc::new(Node::new(
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap(),
+            None,
+            0,
+            true,
+        ))
+    }
+
+    fn peer(token: &PairingToken, addr: Option<std::net::SocketAddr>) -> Peer {
+        Peer {
+            pairing_id: token.pairing_id(),
+            device_id: None,
+            name: "trusted peer".into(),
+            psk: token.psk(),
+            last_addr: addr,
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn the_monitor_sleeps_until_the_next_renewal_is_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let now = crate::now_ms();
+        assert_eq!(node.next_reachability_refresh_in(now), PROBE_IDLE_RECHECK);
+
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some("127.0.0.1:9".parse().unwrap()));
+        node.peers().upsert(trusted.clone()).unwrap();
+        assert_eq!(node.next_reachability_refresh_in(now), Duration::ZERO);
+
+        node.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::online(Some(5), now),
+        );
+        let due = Duration::from_millis((PROBE_FRESH_MS - PROBE_REFRESH_LEAD_MS) as u64);
+        assert_eq!(node.next_reachability_refresh_in(now), due);
+    }
+
+    #[test]
+    fn incoming_presence_does_not_erase_or_extend_a_local_rtt() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let now = crate::now_ms();
+        let measured = AuthenticatedReachability::online(Some(24), now);
+        node.record_reachability("peer", measured.clone());
+        node.record_reachability("peer", AuthenticatedReachability::online(None, now + 1));
+        assert_eq!(node.authenticated_reachability("peer"), Some(measured));
+        let unmeasured = AuthenticatedReachability::online(None, now + PROBE_FRESH_MS + 1);
+        node.record_reachability("peer", unmeasured.clone());
+        assert_eq!(
+            node.authenticated_reachability("peer"),
+            Some(unmeasured.clone())
+        );
+        assert!(unmeasured.should_refresh_at(unmeasured.observed_at_ms));
+        node.record_reachability(
+            "peer",
+            AuthenticatedReachability::offline(now + PROBE_FRESH_MS + 2),
+        );
+        assert_eq!(
+            node.authenticated_reachability("peer").unwrap().state,
+            ProbeState::Offline
+        );
+    }
+
+    #[tokio::test]
+    async fn an_incompatible_authenticated_peer_stays_online_and_only_compatibility_evidence_clears_its_version_condition(
+    ) {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let dir = tempfile::tempdir().unwrap();
+        let client = node(&dir);
+        let token = PairingToken::generate();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let trusted = peer(&token, Some(listener.local_addr().unwrap()));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let server = tokio::spawn(async move {
+            for version in [PROTOCOL_VERSION - 1, PROTOCOL_VERSION] {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut session = Session::accept(socket, &token.psk()).await.unwrap();
+                let bytes = session.recv_bytes().await.unwrap().unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                let reply = serde_json::json!({"t": "probe_ack", "protocol_version": version, "nonce": request["nonce"]});
+                session
+                    .send_bytes(zeroize::Zeroizing::new(serde_json::to_vec(&reply).unwrap()))
+                    .await
+                    .unwrap();
+                session.close().await.unwrap();
+            }
+        });
+        assert_eq!(
+            client.probe_one(&trusted).await,
+            Err(NodeError::PeerVersion)
+        );
+        let blocked = client.sync_status(true);
+        assert_eq!(
+            blocked.peers[0].connection,
+            copypaste_ipc::DevicePresence::Online
+        );
+        assert!(blocked.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(client.sync_deferred(&trusted.pairing_id));
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "an incompatible peer must not be re-probed by the monitor"
+        )));
+        client.sync_activity.failure(
+            &trusted.pairing_id,
+            NodeError::Diagnostic(Code::StorageFull),
+        );
+        client.probe_one(&trusted).await.unwrap();
+        assert!(!client.sync_deferred(&trusted.pairing_id));
+        let after = client.sync_status(true);
+        assert!(!after.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(after.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::StorageFull));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_peer_that_never_acknowledges_is_renewed_at_the_failure_cadence() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = node(&dir);
+        let token = PairingToken::generate();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let trusted = peer(&token, Some(listener.local_addr().unwrap()));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut session = Session::accept(socket, &token.psk()).await.unwrap();
+            session.recv_bytes().await.unwrap();
+            session.close().await.unwrap();
+        });
+        assert!(client.probe_one(&trusted).await.is_err());
+        server.await.unwrap();
+        let observation = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert_eq!(observation.state, ProbeState::Online);
+        assert_eq!(observation.latency_ms, None);
+
+        // Further presence from the same peer does not bypass the hold.
+        client.note_authenticated(&trusted.pairing_id);
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "an unacknowledged peer must not be re-probed at the batch floor"
+        )));
+        let wait = client.next_reachability_refresh_in(crate::now_ms());
+        assert!(wait > PROBE_BATCH_MIN_INTERVAL, "{wait:?}");
+        assert!(wait <= Duration::from_millis(PROBE_FAILURE_FRESH_MS as u64));
+        assert!(client.claim_probe(
+            &trusted.pairing_id,
+            crate::now_ms() + PROBE_FAILURE_FRESH_MS
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_monitor_measures_and_renews_without_peer_reads_or_content_sync() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let server = node(&server_dir);
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let source = Arc::new(TestSource::new("server", Vec::new()));
+        let listener_task = tokio::spawn(listen(
+            server,
+            listener,
+            Arc::clone(&source),
+            |_, _| {},
+            |_| {},
+            shutdown_rx.clone(),
+        ));
+        let client = node(&client_dir);
+        let trusted = peer(&token, Some(address));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let (complete_tx, mut complete_rx) = tokio::sync::mpsc::unbounded_channel();
+        let monitor = tokio::spawn(Arc::clone(&client).monitor_reachability(
+            move |_| {
+                complete_tx.send(()).unwrap();
+            },
+            shutdown_rx,
+        ));
+        tokio::time::timeout(Duration::from_secs(1), complete_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let first = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert!(first.latency_ms.is_some());
+        assert!(first.is_current_at(crate::now_ms()));
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "fresh RTT must not be probed twice"
+        )));
+
+        client.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::online(first.latency_ms, crate::now_ms() - PROBE_FRESH_MS),
+        );
+        tokio::time::timeout(Duration::from_secs(2), complete_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let renewed = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert!(renewed.is_current_at(crate::now_ms()));
+        assert!(renewed.latency_ms.is_some());
+        shutdown_tx.send(true).unwrap();
+        monitor.await.unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[test]
+    fn offline_survives_expiry_while_refresh_and_online_freshness_are_preserved() {
+        let online = AuthenticatedReachability::online(Some(12), 100);
+        assert_eq!(online.state_at(100), ProbeState::Online);
+        assert!(!online.should_refresh_at(100));
+        assert!(online.should_refresh_at(100 + PROBE_FRESH_MS - PROBE_REFRESH_LEAD_MS));
+        assert_eq!(
+            online.state_at(100 + PROBE_FRESH_MS + 1),
+            ProbeState::Unknown
+        );
+
+        let offline = AuthenticatedReachability::offline(100);
+        assert_eq!(offline.state_at(100), ProbeState::Offline);
+        assert!(!offline.should_refresh_at(100));
+        assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS));
+        assert!(!offline.is_current_at(100 + PROBE_FAILURE_FRESH_MS + 1));
+        assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS + 1));
+        assert_eq!(
+            offline.state_at(100 + PROBE_FAILURE_FRESH_MS + 1),
+            ProbeState::Offline
+        );
+        assert_eq!(offline.state_at(99), ProbeState::Unknown);
+    }
+
+    #[test]
+    fn probe_debug_output_has_no_pairing_secret() {
+        let observation = AuthenticatedReachability::online(Some(12), 100);
+        let rendered = format!("{observation:?}");
+        assert!(!rendered.contains("psk"), "{rendered}");
+        assert!(!rendered.contains("token"), "{rendered}");
+    }
+
+    #[test]
+    fn probe_wire_carries_no_pairing_secret() {
+        let token = PairingToken::generate();
+        let secret = hex::encode(token.psk());
+        let probe = SyncMessage::Probe {
+            protocol_version: PROTOCOL_VERSION,
+            nonce: 7,
+            profile: None,
+        };
+        let encoded = String::from_utf8(probe.encode().unwrap()).unwrap();
+        assert!(!encoded.contains(&secret), "{encoded}");
+        assert!(!format!("{probe:?}").contains(&secret));
+    }
+
+    #[tokio::test]
+    async fn a_probe_measures_an_authenticated_round_trip_without_syncing_content() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let server = node(&server_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some(addr));
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let source = Arc::new(TestSource::new("server", Vec::new()));
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let probe_notifications = Arc::new(AtomicUsize::new(0));
+        let probe_notifications_callback = Arc::clone(&probe_notifications);
+        let listener_task = tokio::spawn(listen(
+            Arc::clone(&server),
+            listener,
+            Arc::clone(&source),
+            |_, _| {},
+            move |_| {
+                probe_notifications_callback.fetch_add(1, Ordering::Relaxed);
+            },
+            shutdown_rx,
+        ));
+
+        let client = node(&client_dir);
+        client.peers().upsert(trusted.clone()).unwrap();
+        let observation = client.probe_one(&trusted).await.unwrap();
+        assert_eq!(observation.state, ProbeState::Online);
+        assert!(observation.latency_ms.is_some());
+        assert!(source.snapshot().is_empty(), "a probe must not enter sync");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while probe_notifications.load(Ordering::Relaxed) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("an inbound probe invalidates the peer view");
+        assert_eq!(probe_notifications.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            server
+                .authenticated_reachability(&trusted.pairing_id)
+                .unwrap()
+                .state,
+            ProbeState::Online
+        );
+        assert!(
+            client
+                .peers()
+                .get(&trusted.pairing_id)
+                .and_then(|peer| peer.profile.clone())
+                .is_some(),
+            "a nonce-matched authenticated probe persists the responder profile"
+        );
+        assert!(
+            server
+                .peers()
+                .get(&trusted.pairing_id)
+                .and_then(|peer| peer.profile.clone())
+                .is_some(),
+            "an authenticated inbound probe persists the initiator profile"
+        );
+
+        shutdown_tx.send(true).unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_refused_known_endpoint_is_a_fresh_offline_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = closed.local_addr().unwrap();
+        drop(closed);
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some(addr));
+
+        assert_eq!(node.probe_one(&trusted).await, Err(NodeError::Handshake));
+        let observation = node
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert_eq!(
+            observation.state_at(observation.observed_at_ms),
+            ProbeState::Offline
+        );
+        assert_eq!(observation.latency_ms, None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_unverified_discovery_candidate_cools_down_while_persisted_fallback_runs() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let server = node(&server_dir);
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let authenticated_addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server_task = tokio::spawn(listen(
+            Arc::clone(&server),
+            listener,
+            Arc::new(TestSource::new("server", Vec::new())),
+            |_, _| {},
+            |_| {},
+            shutdown_rx,
+        ));
+
+        let spoof = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let spoof_addr = spoof.local_addr().unwrap();
+        let spoof_attempts = Arc::new(AtomicUsize::new(0));
+        let spoof_attempts_task = Arc::clone(&spoof_attempts);
+        let wrong_psk = PairingToken::generate().psk();
+        let spoof_task = tokio::spawn(async move {
+            while let Ok((stream, _)) = spoof.accept().await {
+                spoof_attempts_task.fetch_add(1, Ordering::Relaxed);
+                let psk = wrong_psk;
+                tokio::spawn(async move {
+                    let _ = Session::accept(stream, &psk).await;
+                });
+            }
+        });
+
+        let client = Arc::new(Node::new(
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
+            Some(Discovery::dormant("client", 0).unwrap()),
+            0,
+            true,
+        ));
+        let trusted = peer(&token, Some(authenticated_addr));
+        client.peers().upsert(trusted.clone()).unwrap();
+        client
+            .discovery()
+            .unwrap()
+            .observe_for_test(DiscoveredPeer {
+                group_identity: None,
+                discovery_id: "spoofed-peer".into(),
+                pairing_ids: vec![pairing_id],
+                name: "spoofed".into(),
+                profile: None,
+                addr: spoof_addr,
+                last_seen_ms: crate::now_ms(),
+            });
+
+        client.probe_one(&trusted).await.unwrap();
+        client.probe_one(&trusted).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while spoof_attempts.load(Ordering::Relaxed) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            spoof_attempts.load(Ordering::Relaxed),
+            1,
+            "the cooled discovery endpoint is not retried while the authenticated fallback remains usable"
+        );
+
+        client.clear_discovery_candidate_cooldowns();
+        client.probe_one(&trusted).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while spoof_attempts.load(Ordering::Relaxed) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("rescan budget reset allows one new discovery attempt");
+
+        shutdown_tx.send(true).unwrap();
+        server_task.await.unwrap();
+        spoof_task.abort();
+    }
+
+    #[test]
+    fn unverified_discovery_attempts_are_globally_bounded_and_rescan_reenables_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = Node::new(
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap(),
+            Some(Discovery::dormant("client", 0).unwrap()),
+            0,
+            true,
+        );
+        let mut peers = Vec::new();
+        for index in 0..=4 {
+            let pairing_id = format!("peer-{index}");
+            let peer = Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "spoofed".into(),
+                psk: [(index as u8).saturating_add(1); crate::transport::TOKEN_LEN],
+                last_addr: None,
+                last_seen_ms: 0,
+                profile: None,
+                profile_observed_at_ms: 0,
+            };
+            node.discovery().unwrap().observe_for_test(DiscoveredPeer {
+                group_identity: None,
+                discovery_id: format!("spoof-{index}"),
+                pairing_ids: vec![pairing_id],
+                name: "spoofed".into(),
+                profile: None,
+                addr: format!("127.0.0.1:{}", 40_000 + index).parse().unwrap(),
+                last_seen_ms: crate::now_ms(),
+            });
+            peers.push(peer);
+        }
+
+        for peer in peers.iter().take(4) {
+            assert_eq!(node.dial_candidates_with_sources(peer, true).len(), 1);
+        }
+        let capped = peers.last().unwrap();
+        assert!(node.dial_candidates_with_sources(capped, true).is_empty());
+        node.clear_discovery_candidate_cooldowns();
+        assert_eq!(node.dial_candidates_with_sources(capped, true).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_probe_prefers_a_current_discovery_address_after_dhcp_changes() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let stale_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stale_addr = stale_listener.local_addr().unwrap();
+        drop(stale_listener);
+
+        let server = node(&server_dir);
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let current_addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let listener_task = tokio::spawn(listen(
+            Arc::clone(&server),
+            listener,
+            Arc::new(TestSource::new("server", Vec::new())),
+            |_, _| {},
+            |_| {},
+            shutdown_rx,
+        ));
+
+        let client = Arc::new(Node::new(
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
+            Some(Discovery::dormant("client", 0).unwrap()),
+            0,
+            true,
+        ));
+        let trusted = peer(&token, Some(stale_addr));
+        client.peers().upsert(trusted.clone()).unwrap();
+        client
+            .discovery()
+            .unwrap()
+            .observe_for_test(DiscoveredPeer {
+                group_identity: None,
+                discovery_id: "server-new-address".into(),
+                pairing_ids: vec![pairing_id.clone()],
+                name: "server".into(),
+                profile: None,
+                addr: current_addr,
+                last_seen_ms: crate::now_ms(),
+            });
+
+        let observation = client.probe_one(&trusted).await.unwrap();
+        assert_eq!(observation.state, ProbeState::Online);
+        assert_eq!(
+            client.peers().get(&pairing_id).unwrap().last_addr,
+            Some(current_addr)
+        );
+
+        shutdown_tx.send(true).unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unaddressed_peer_remains_unknown_without_a_probe_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let token = PairingToken::generate();
+        let trusted = peer(&token, None);
+
+        assert_eq!(node.probe_one(&trusted).await, Err(NodeError::NoAddress));
+        assert!(node
+            .authenticated_reachability(&trusted.pairing_id)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_refresh_batch_coalesces_and_notifies_once_after_recording() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let server = node(&server_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some(addr));
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let listener_task = tokio::spawn(listen(
+            Arc::clone(&server),
+            listener,
+            Arc::new(TestSource::new("server", Vec::new())),
+            |_, _| {},
+            |_| {},
+            shutdown_rx,
+        ));
+        let client = node(&client_dir);
+        client.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::offline(
+                crate::now_ms().saturating_sub(PROBE_FAILURE_FRESH_MS + 1),
+            ),
+        );
+        assert_eq!(
+            client
+                .authenticated_reachability(&trusted.pairing_id)
+                .unwrap()
+                .state_at(crate::now_ms()),
+            ProbeState::Offline
+        );
+        let (complete_tx, complete_rx) = oneshot::channel();
+        assert!(
+            client.refresh_reachability([trusted.clone()], move |state_changed| {
+                assert!(state_changed);
+                let _ = complete_tx.send(());
+            })
+        );
+        tokio::time::timeout(Duration::from_secs(1), complete_rx)
+            .await
+            .expect("the completed batch notifies its host")
+            .expect("the completion sender survives");
+        assert_eq!(
+            client
+                .authenticated_reachability(&trusted.pairing_id)
+                .unwrap()
+                .state,
+            ProbeState::Online
+        );
+
+        let (unexpected_tx, mut unexpected_rx) = oneshot::channel::<()>();
+        assert!(!client.refresh_reachability([trusted], move |_| {
+            let _ = unexpected_tx.send(());
+        }));
+        assert!(unexpected_rx.try_recv().is_err());
+
+        shutdown_tx.send(true).unwrap();
+        listener_task.await.unwrap();
+    }
+}

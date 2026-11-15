@@ -1,0 +1,559 @@
+//! The outbound half: consuming a pairing code, and syncing with a peer.
+//!
+//! Both end in [`run_session`], so a pairing proves itself by running exactly
+//! the session every later round runs.
+
+use std::net::SocketAddr;
+
+use tokio::net::lookup_host;
+use tracing::{debug, info, warn};
+
+use super::channel::{NoiseChannel, SESSION_TIMEOUT};
+use super::{DialCandidateSource, Node, NodeError, SyncCycle};
+use crate::peers::Peer;
+use crate::protocol::{ProtocolError, PROTOCOL_VERSION};
+use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
+use crate::transport::Session;
+
+impl Node {
+    /// Sync with one peer, start to finish.
+    ///
+    /// Current discovery is preferred over the last authenticated address so a
+    /// DHCP move heals without re-pairing. Both are hints: Noise is what proves
+    /// who is on the other end before any sync data is exchanged.
+    pub async fn sync_one<S: SyncSource>(
+        &self,
+        peer: &Peer,
+        source: &S,
+    ) -> Result<SyncOutcome, NodeError> {
+        self.sync_one_in_cycle(peer, source, &SyncCycle::new())
+            .await
+    }
+
+    /// Whether scheduled sync should leave this peer alone for now because it
+    /// recently proved to speak another protocol version. An explicit sync
+    /// still dials, so an update on the other device is confirmed at once.
+    #[must_use]
+    pub fn sync_deferred(&self, pairing_id: &str) -> bool {
+        self.sync_activity.version_retry_deferred(pairing_id)
+    }
+
+    pub async fn sync_one_in_cycle<S: SyncSource>(
+        &self,
+        peer: &Peer,
+        source: &S,
+        cycle: &SyncCycle,
+    ) -> Result<SyncOutcome, NodeError> {
+        let observation = self.sync_activity.begin(&peer.pairing_id);
+        let result = self.sync_one_observed(peer, source, cycle).await;
+        match &result {
+            Ok(outcome) => observation.finish(Some(&outcome.stats), None),
+            Err(error) => observation.finish(None, Some(*error)),
+        }
+        result
+    }
+
+    async fn sync_one_observed<S: SyncSource>(
+        &self,
+        peer: &Peer,
+        source: &S,
+        cycle: &SyncCycle,
+    ) -> Result<SyncOutcome, NodeError> {
+        let cancel = cycle.cancel_token();
+        let peer = self.current_peer(peer).unwrap_or_else(|| peer.clone());
+        let candidates = self.dial_candidates_with_sources(&peer, true);
+        if candidates.is_empty() {
+            return Err(NodeError::NoAddress);
+        }
+        let mut session = None;
+        let mut addr = None;
+        let mut authenticated_error = None;
+        for candidate in candidates {
+            let connected = tokio::select! {
+                _ = cancel.cancelled() => return Err(NodeError::Cancelled),
+                result = self.connect_peer(&candidate.endpoint, &peer) => result,
+            };
+            match connected {
+                Ok(connected) => {
+                    session = Some(connected);
+                    addr = Some(candidate.addr());
+                    break;
+                }
+                Err(error) => {
+                    if error.sync_issue().is_some() {
+                        authenticated_error = Some(error);
+                    }
+                    if let (DialCandidateSource::Discovery, Some(addr)) =
+                        (candidate.source, candidate.addr())
+                    {
+                        self.record_discovery_candidate_failure(&peer.pairing_id, addr);
+                    }
+                    debug!(
+                        pairing_id = %peer.pairing_id,
+                        endpoint = ?candidate.endpoint,
+                        error = %error,
+                        "peer candidate did not authenticate"
+                    );
+                }
+            }
+        }
+        let (session, peer, addr) = match (session, addr) {
+            (Some((session, peer)), Some(addr)) => (session, peer, addr),
+            _ => return Err(authenticated_error.unwrap_or(NodeError::Handshake)),
+        };
+        let active = self
+            .begin_active_sync(&peer.pairing_id)
+            .ok_or(NodeError::NoPeer)?;
+
+        let cursor = self.cursors().get(&peer.pairing_id);
+        let outcome = self.run_session(session, source, cursor, &active).await?;
+        #[cfg(test)]
+        cycle.wait_before_commit().await;
+        if outcome.peer_device_id == source.device_id() {
+            // `unpair` serialises against active sessions. This session has
+            // reached its terminal self-pairing check, so release its lease
+            // before taking that same lock.
+            drop(active);
+            self.unpair(&peer.pairing_id)?;
+            return Err(NodeError::SelfPairing);
+        }
+        let committed = cycle.commit(&cancel, || {
+            self.commit_active_sync(&active, || {
+                self.record_cursor(&peer.pairing_id, &outcome);
+                self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
+                self.touch_peer(
+                    &peer,
+                    Some(&outcome.peer_device_id),
+                    outcome
+                        .peer_listen_addr
+                        .and_then(super::ListenerEndpoint::advertised)
+                        .or(addr.map(super::ListenerEndpoint::dialled)),
+                    Some(&outcome.peer_device_name),
+                );
+            })
+        });
+        if committed.flatten().is_none() {
+            return Err(NodeError::Cancelled);
+        }
+        info!(
+            pairing_id = %peer.pairing_id,
+            sent = outcome.stats.sent,
+            received = outcome.stats.received,
+            skipped = outcome.stats.skipped,
+            "synced with a peer"
+        );
+        Ok(outcome)
+    }
+
+    /// Drive the initiating half of one session over an established channel.
+    ///
+    /// The whole session is bounded, on top of the channel's per-read deadline:
+    /// a peer that answers every message on time but never runs out of things
+    /// to say still has to finish inside [`SESSION_TIMEOUT`].
+    async fn run_session<S: SyncSource>(
+        &self,
+        session: Session,
+        source: &S,
+        cursor: SyncCursor,
+        active: &super::ActiveSync<'_>,
+    ) -> Result<SyncOutcome, NodeError> {
+        let listen_addr = self.session_listen_addr(session.local_addr());
+        let activity = std::sync::Arc::clone(&self.sync_activity);
+        let pairing_id = active.pairing_id.clone();
+        let token = active.id;
+        let _transfer = activity.transfer_scope(&pairing_id, token);
+        let mut channel = NoiseChannel::new(session)
+            .on_transfer(move || activity.transferring(&pairing_id, token));
+        let guarded_source = super::ActiveSyncSource {
+            source,
+            state: std::sync::Arc::clone(&active.state),
+        };
+        let active_cancel = active.cancelled();
+        // The wait for the peer's close is inside the same budget on purpose:
+        // see `NoiseChannel::wait_for_close` for why a session is not over when
+        // `run_initiator` returns.
+        let outcome = tokio::select! {
+            _ = active_cancel.cancelled() => None,
+            outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
+                self.initiate_group(&mut channel, source, &active.pairing_id, false)
+                    .await?;
+                let outcome =
+                    run_initiator(&mut channel, &guarded_source, listen_addr.as_deref(), cursor).await.map_err(session_error)?;
+                channel.wait_for_close().await;
+                Ok::<_, NodeError>(outcome)
+            }) => Some(outcome),
+        };
+        channel.close().await;
+
+        let Some(outcome) = outcome else {
+            return Err(NodeError::Cancelled);
+        };
+
+        let result = outcome.unwrap_or(Err(NodeError::Timeout));
+        if let Err(error) = &result {
+            // The runtime log keeps only the message, so the reason goes into
+            // it. Every `NodeError` sentence is fixed and carries no content.
+            warn!(pairing_id = %active.pairing_id, "sync session failed: {error}");
+        }
+        result
+    }
+
+    /// Maps a failure to receive the reply to the first message of an
+    /// authenticated session.
+    ///
+    /// A peer on another protocol version rejects that message when decoding
+    /// it and closes without a reply, so it never says which version it
+    /// speaks. A close at this point from a peer whose current advertisement
+    /// or last authenticated profile names another version is therefore that
+    /// version mismatch, not a lost connection to retry.
+    pub(super) fn first_reply_error(&self, pairing_id: &str, error: SyncError) -> NodeError {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let error = session_error(error);
+        if !matches!(
+            error,
+            NodeError::ConnectionLost | NodeError::Diagnostic(Code::ConnectionLost)
+        ) {
+            return error;
+        }
+        let advertised = self
+            .find(pairing_id)
+            .and_then(|found| found.profile?.protocol_version)
+            .or_else(|| {
+                self.authenticated_profile(pairing_id)?
+                    .profile
+                    .protocol_version
+            });
+        match advertised {
+            Some(version) if version != PROTOCOL_VERSION => NodeError::PeerVersion,
+            _ => error,
+        }
+    }
+}
+
+pub(super) fn session_error(e: SyncError) -> NodeError {
+    use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+    match e {
+        SyncError::Cancelled => NodeError::Cancelled,
+        SyncError::Diagnostic(code) => NodeError::Diagnostic(code),
+        SyncError::Protocol(error) => match error {
+            ProtocolError::VersionMismatch { .. } => NodeError::PeerVersion,
+            ProtocolError::MessageTooLarge { .. }
+            | ProtocolError::TooManyEntries { .. }
+            | ProtocolError::ContentTooLarge { .. }
+            | ProtocolError::BatchTooLarge { .. } => NodeError::Diagnostic(Code::ProtocolLimit),
+            ProtocolError::FieldTooLong { .. }
+            | ProtocolError::FieldEmpty { .. }
+            | ProtocolError::InvalidListenAddr
+            | ProtocolError::NegativeTimestamp { .. }
+            | ProtocolError::InvalidPinState
+            | ProtocolError::Decode(_) => NodeError::InvalidData,
+            ProtocolError::Encode(_) => NodeError::Diagnostic(Code::LocalProtocolError),
+        },
+        SyncError::Channel(_) => NodeError::ConnectionLost,
+        SyncError::Source(_) => NodeError::HistoryUnavailable,
+        SyncError::SelfSync => NodeError::SelfPairing,
+        SyncError::Unexpected { .. } | SyncError::PeerOverran => NodeError::InvalidData,
+        SyncError::TooManySummaryPages => NodeError::Diagnostic(Code::ProtocolLimit),
+    }
+}
+
+/// Resolve `host:port`, preferring IPv4.
+///
+/// A hostname is allowed — `copypaste.local:47654` is exactly what discovery
+/// would have given the user — so this is a real lookup rather than a
+/// `SocketAddr` parse.
+pub(super) async fn resolve(addr: &str) -> Option<SocketAddr> {
+    let resolved: Vec<SocketAddr> = lookup_host(addr).await.ok()?.collect();
+    resolved
+        .iter()
+        .find(|addr| addr.is_ipv4())
+        .or(resolved.first())
+        .copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::{DiscoveredPeer, Discovery};
+    use crate::peers::{Peer, PeerStore};
+    use crate::sync::testutil::{item, TestSource};
+    use crate::transport::PairingToken;
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+    use tokio::sync::watch;
+
+    fn node(dir: &tempfile::TempDir) -> Node {
+        let peers =
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap();
+        Node::new(peers, None, 0, true)
+    }
+
+    /// A peer that has never been reached and is not on the network fails on
+    /// its own account, before any socket is opened.
+    #[tokio::test]
+    async fn a_peer_with_no_known_address_fails_before_it_dials() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let source = TestSource::new("me", Vec::new());
+        let peer = Peer {
+            pairing_id: "ffffffffffffffffffffffffffffffff".into(),
+            device_id: None,
+            name: "unreachable".into(),
+            psk: [3u8; crate::transport::TOKEN_LEN],
+            last_addr: None,
+            last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+
+        let err = node.sync_one(&peer, &source).await.expect_err("no address");
+        assert_eq!(err, NodeError::NoAddress);
+        assert!(!err.is_client_error(), "this is not the caller's mistake");
+    }
+
+    /// A peer on an older protocol version answers a newer first message by
+    /// closing the authenticated channel without a reply. With the peer's own
+    /// word for that version, the close is a version mismatch shown once, and
+    /// the background scheduler and probes stop dialling until something
+    /// changes.
+    #[tokio::test]
+    async fn an_older_peer_closing_without_a_reply_is_a_deferred_version_mismatch() {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let dir = tempfile::tempdir().unwrap();
+        let client = Arc::new(node(&dir));
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            device_id: None,
+            name: "older".into(),
+            psk: token.psk(),
+            last_addr: Some(listener.local_addr().unwrap()),
+            last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        client.peers().upsert(peer.clone()).unwrap();
+        let psk = token.psk();
+        let older_peer = tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut session = Session::accept(socket, &psk).await.unwrap();
+                let _rejected = session.recv_bytes().await;
+                session.close().await.unwrap();
+            }
+        });
+        let source = TestSource::new("me", Vec::new());
+
+        assert_eq!(
+            client.sync_one(&peer, &source).await,
+            Err(NodeError::Diagnostic(Code::ConnectionLost)),
+            "without a version to go on, a close is only a lost connection"
+        );
+        assert!(!client.sync_deferred(&pairing_id));
+
+        client.record_authenticated_profile(
+            &pairing_id,
+            Some(&crate::DeviceProfile {
+                protocol_version: Some(PROTOCOL_VERSION - 1),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            client.sync_one(&peer, &source).await,
+            Err(NodeError::PeerVersion)
+        );
+        let status = client.sync_status(true);
+        assert_eq!(status.peers[0].phase, copypaste_ipc::SyncPhase::Failed);
+        assert!(status.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(client.sync_deferred(&pairing_id));
+        assert!(
+            !client.refresh_reachability([peer], |_| panic!("an incompatible peer was probed")),
+            "the reachability monitor must not re-dial an incompatible peer"
+        );
+        older_peer.abort();
+    }
+
+    #[tokio::test]
+    async fn an_address_without_a_port_does_not_resolve() {
+        assert!(resolve("127.0.0.1").await.is_none());
+        assert_eq!(
+            resolve("127.0.0.1:47654").await,
+            Some("127.0.0.1:47654".parse().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_heals_a_dhcp_move_before_the_persisted_address() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let stale_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stale_addr = stale_listener.local_addr().unwrap();
+        drop(stale_listener);
+
+        let server = Arc::new(node(&server_dir));
+        server
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "client".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let current_addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let listener_task = tokio::spawn(crate::node::listen(
+            Arc::clone(&server),
+            listener,
+            Arc::new(TestSource::new("server", Vec::new())),
+            |_, _| {},
+            |_| {},
+            shutdown_rx,
+        ));
+
+        let discovery = Discovery::dormant("client", 0).unwrap();
+        let client = Node::new(
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
+            Some(discovery),
+            0,
+            true,
+        );
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            device_id: None,
+            name: "server".into(),
+            psk: token.psk(),
+            last_addr: Some(stale_addr),
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        client.peers().upsert(peer.clone()).unwrap();
+        client
+            .discovery()
+            .unwrap()
+            .observe_for_test(DiscoveredPeer {
+                group_identity: None,
+                discovery_id: "server-new-address".into(),
+                pairing_ids: vec![pairing_id.clone()],
+                name: "server".into(),
+                profile: None,
+                addr: current_addr,
+                last_seen_ms: crate::now_ms(),
+            });
+
+        assert_eq!(
+            client.dial_candidates(&peer),
+            vec![current_addr, stale_addr]
+        );
+        client
+            .sync_one(&peer, &TestSource::new("client", Vec::new()))
+            .await
+            .expect("the current discovery endpoint authenticates and syncs");
+        assert_eq!(
+            client.peers().get(&pairing_id).unwrap().last_addr,
+            Some(current_addr),
+            "a successful authenticated discovery candidate replaces the stale address"
+        );
+
+        shutdown_tx.send(true).unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_cycle_never_commits_a_completed_sessions_cursor_or_profile() {
+        let a_dir = tempfile::tempdir().unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let a = Arc::new(node(&a_dir));
+        a.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "b".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let b = node(&b_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            device_id: None,
+            name: "a".into(),
+            psk: token.psk(),
+            last_addr: Some(addr),
+            last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        b.peers().upsert(peer.clone()).unwrap();
+        let source_a = Arc::new(TestSource::new(
+            "a",
+            vec![item("item", 1_000, "payload", "a")],
+        ));
+        let source_b = TestSource::new("b", Vec::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let listener_task = tokio::spawn(crate::node::listen(
+            Arc::clone(&a),
+            listener,
+            source_a,
+            |_pairing_id, _outcome| {},
+            |_| {},
+            shutdown_rx,
+        ));
+        let cycle = SyncCycle::new();
+        let pause = cycle.pause_before_commit();
+        let session_cycle = cycle.clone();
+        let session = async { b.sync_one_in_cycle(&peer, &source_b, &session_cycle).await };
+        tokio::pin!(session);
+        tokio::select! {
+            result = &mut session => panic!("session completed early: {result:?}"),
+            () = pause.wait_entered() => {},
+        }
+
+        assert_eq!(
+            source_b.snapshot().len(),
+            1,
+            "the completed session lost its payload"
+        );
+        cycle.set_enabled(false);
+        pause.release();
+        assert_eq!(session.await, Err(NodeError::Cancelled));
+        assert_eq!(b.cursors().get(&pairing_id), SyncCursor::default());
+        assert!(b.authenticated_profile(&pairing_id).is_none());
+        assert_eq!(b.peers().get(&pairing_id).unwrap().last_seen_ms, 1);
+
+        cycle.set_enabled(true);
+        let replay = b.sync_one_in_cycle(&peer, &source_b, &cycle).await.unwrap();
+        assert_eq!(
+            replay.stats.received, 0,
+            "the applied payload was duplicated"
+        );
+        assert_eq!(source_b.snapshot().len(), 1);
+        assert!(b.cursors().get(&pairing_id).since_ms > 0);
+        let _ = shutdown_tx.send(true);
+        listener_task.await.unwrap();
+    }
+}

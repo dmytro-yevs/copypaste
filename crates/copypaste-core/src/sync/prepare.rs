@@ -1,0 +1,288 @@
+//! Deciding one incoming version and sealing the winner.
+//!
+//! Split from [`super::merge`] by what each half owns. This one is pure: the
+//! comparator, the AEAD and the shape of the row that will be written, with no
+//! store in sight. `merge` owns the store — reading what is there now, and
+//! writing what this returns. They move for different reasons: this changes
+//! when the row shape or the seal changes, `merge` when the write does.
+
+use copypaste_p2p::sync::{merge_decision, MergeDecision};
+use tracing::{debug, warn};
+
+use super::merge::{remote_summary, stored_summary, MergeError, RemoteVersion};
+use crate::storage::{origin_or, IncomingItem, Version};
+use crate::Keyring;
+
+/// One version the merge has decided to take, sealed and ready to write.
+///
+/// Owned rather than borrowed so a page of them can be prepared before the
+/// write transaction opens: the seal is CPU and the write is a lock, and
+/// interleaving them is what made a 500-row page take 500 write locks.
+pub(super) struct Prepared {
+    id: String,
+    content_ciphertext: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    content_type: String,
+    content_hash: String,
+    created_at: i64,
+    deleted: bool,
+    origin_device_id: String,
+    app_bundle_id: Option<String>,
+    app_name: Option<String>,
+    pinned: bool,
+    pin_order: Option<f64>,
+    pin_updated_at: i64,
+    search_text: Option<String>,
+    payload_metadata: Option<String>,
+}
+
+impl Prepared {
+    /// This decision as the comparator would read it back, for a second
+    /// version of the same id later in the same page.
+    pub(super) fn as_version(&self, here: &str) -> Version {
+        Version {
+            id: self.id.clone(),
+            created_at: self.created_at,
+            content_hash: self.content_hash.clone(),
+            deleted: self.deleted,
+            pinned: self.pinned,
+            pin_order: self.pin_order,
+            pin_updated_at: self.pin_updated_at,
+            origin_device_id: origin_or(&self.origin_device_id, here).to_string(),
+        }
+    }
+
+    pub(super) fn as_incoming(&self) -> IncomingItem<'_> {
+        IncomingItem {
+            id: &self.id,
+            content_ciphertext: self.content_ciphertext.as_deref(),
+            nonce: self.nonce.as_deref(),
+            content_type: &self.content_type,
+            content_hash: &self.content_hash,
+            created_at: self.created_at,
+            deleted: self.deleted,
+            origin_device_id: &self.origin_device_id,
+            app_bundle_id: self.app_bundle_id.as_deref(),
+            app_name: self.app_name.as_deref(),
+            pinned: self.pinned,
+            pin_order: self.pin_order,
+            pin_updated_at: self.pin_updated_at,
+            search_text: self.search_text.as_deref(),
+            payload_metadata: self.payload_metadata.as_deref(),
+        }
+    }
+}
+
+/// Run the comparator and seal the winner. `None` means the local copy won and
+/// nothing is to be written (INV-I1).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn prepare_remote_version(
+    keyring: &Keyring,
+    here: &str,
+    incoming: &RemoteVersion<'_>,
+    pin_state: Option<(bool, Option<f64>, i64, bool)>,
+    local: Option<&Version>,
+) -> Result<Option<Prepared>, MergeError> {
+    let organization_text = if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
+        // A tombstone has no content; only a clip note may be one, which
+        // the store checks against what it holds.
+        if incoming.deleted {
+            Some("")
+        } else {
+            incoming
+                .binary_content
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        }
+    } else {
+        Some(incoming.content)
+    };
+    if !organization_text.is_some_and(|text| {
+        crate::storage::organization::valid_wire(
+            incoming.item_id,
+            incoming.content_type,
+            text,
+            incoming.deleted,
+        )
+    }) {
+        return Ok(None);
+    }
+    let content = incoming
+        .binary_content
+        .unwrap_or(incoming.content.as_bytes());
+    if !incoming.deleted && content.len() > copypaste_ipc::MAX_CONTENT_BYTES {
+        return Err(MergeError::TooLarge);
+    }
+    // One digest for a binary payload: the same bytes are both merge key 2 and
+    // the envelope header the seal below writes.
+    let digest = (!incoming.deleted
+        && copypaste_ipc::content_type::is_binary(incoming.content_type))
+    .then(|| crate::binary::content_digest(content));
+
+    // A tombstone with no hash of its own inherits the one it is deleting: the
+    // store keeps `content_hash` on a tombstone deliberately, so inheriting it
+    // makes the delete tie its own live version on keys 1 and 2 and win on key
+    // 3 (`deleted`). Inventing a different hash there would decide the delete
+    // on the wrong key.
+    //
+    // A live version's hash is never taken from the sender (B-2 / security
+    // review F-3): it is merge key 2 and it is the dedup key, and the content
+    // that would prove it is right here. See `RemoteVersion::content_hash`.
+    let computed;
+    let content_hash: &str = match incoming.content_hash {
+        Some(hash) if incoming.deleted => hash,
+        None if incoming.deleted => local.map_or("", |l| l.content_hash.as_str()),
+        _ => {
+            computed = match &digest {
+                Some(digest) => crate::binary::content_hash(digest),
+                None => crate::storage::compute_content_hash(content),
+            };
+            &computed
+        }
+    };
+
+    let remote = remote_summary(
+        incoming,
+        content_hash.to_string(),
+        pin_state.map(|state| (state.0, state.1, state.2)),
+    );
+
+    if let Some(local) = local {
+        let mine = stored_summary(local, here);
+        if merge_decision(
+            &mine,
+            origin_or(&local.origin_device_id, here),
+            &remote,
+            incoming.origin_device_id,
+        ) == MergeDecision::KeepLocal
+        {
+            debug!(id = %incoming.item_id, "local version wins; not applying");
+            return Ok(None);
+        }
+    }
+
+    let sealed = if incoming.deleted {
+        None
+    } else {
+        let key = keyring.item_key();
+        if let Some(digest) = &digest {
+            let ciphertext = (if incoming
+                .item_id
+                .starts_with(crate::binary_reference::IMPORT_ID_PREFIX)
+            {
+                crate::binary_reference::seal(content, digest, &key, incoming.item_id)
+            } else {
+                crate::binary::seal_with_digest(content, digest, &key, incoming.item_id)
+            })
+            .map_err(|e| {
+                warn!(error = ?e, "could not seal incoming binary item");
+                MergeError::Encrypt
+            })?;
+            Some((Vec::new(), ciphertext))
+        } else {
+            Some(
+                crate::encrypt(content, &key, incoming.item_id).map_err(|e| {
+                    warn!(error = ?e, "could not seal an incoming item");
+                    MergeError::Encrypt
+                })?,
+            )
+        }
+    };
+    let (nonce, ciphertext) = match sealed {
+        Some((nonce, ciphertext)) => (Some(nonce), Some(ciphertext)),
+        None => (None, None),
+    };
+    // The P2P wire always supplies both fields. Cloud deliberately does not
+    // carry pin state, so its `None` preserves the receiver's local choice.
+    let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
+        (false, None, 0)
+    } else {
+        match pin_state {
+            Some((pinned, pin_order, pin_updated_at, true)) => (pinned, pin_order, pin_updated_at),
+            Some((_, _, _, false)) | None => local.map_or((false, None, 0), |item| {
+                (item.pinned, item.pin_order, item.pin_updated_at)
+            }),
+        }
+    };
+
+    let payload_metadata = if incoming.deleted {
+        None
+    } else if let Some(privacy) =
+        crate::classify_credentials(incoming.content_type, incoming.content)
+    {
+        let supplied = incoming
+            .payload_metadata
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .unwrap_or_else(|| crate::PayloadMetadata {
+                privacy: incoming
+                    .payload_metadata
+                    .map(crate::PayloadMetadata::privacy_from_json)
+                    .unwrap_or_default(),
+                ..Default::default()
+            });
+        crate::credentials::metadata(privacy, Some(&supplied)).to_json(incoming.content_type)
+    } else if incoming.content_type == copypaste_ipc::content_type::FILE {
+        incoming
+            .payload_metadata
+            .map(|json| with_sealed_reference(json, incoming.binary_content))
+    } else {
+        incoming.payload_metadata.map(str::to_string)
+    };
+
+    Ok(Some(Prepared {
+        id: incoming.item_id.to_string(),
+        content_ciphertext: ciphertext,
+        nonce,
+        content_type: incoming.content_type.to_string(),
+        content_hash: content_hash.to_string(),
+        created_at: incoming.created_at,
+        deleted: incoming.deleted,
+        origin_device_id: incoming.origin_device_id.to_string(),
+        app_bundle_id: incoming.app_bundle_id.map(str::to_string),
+        app_name: incoming.app_name.map(str::to_string),
+        pinned,
+        pin_order,
+        pin_updated_at,
+        search_text: if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
+            organization_text.map(str::to_owned)
+        } else if incoming.deleted || copypaste_ipc::content_type::is_binary(incoming.content_type)
+        {
+            None
+        } else {
+            Some(incoming.content.to_string())
+        },
+        payload_metadata,
+    }))
+}
+
+/// Restores a file's capture path from its sealed descriptor into the local,
+/// encrypted metadata, where history display reads it. Sync metadata never
+/// carries the path in plaintext.
+fn with_sealed_reference(json: &str, descriptor: Option<&[u8]>) -> String {
+    let reference = descriptor
+        .and_then(copypaste_payload::FileDescriptor::from_slice)
+        .and_then(|descriptor| descriptor.source_reference);
+    let Some(reference) = reference else {
+        return json.to_string();
+    };
+    let content_type = copypaste_ipc::content_type::FILE;
+    let Some(mut metadata) = crate::PayloadMetadata::from_json(json, content_type) else {
+        return json.to_string();
+    };
+    if let Some(file) = metadata.file.as_mut() {
+        file.source_reference.get_or_insert(reference);
+    }
+    metadata
+        .to_json(content_type)
+        .unwrap_or_else(|| json.to_string())
+}
+
+#[cfg(test)]
+mod limit_contract_tests {
+    #[test]
+    fn content_limits_match_across_rust_protocols() {
+        assert_eq!(
+            copypaste_ipc::MAX_CONTENT_BYTES,
+            copypaste_p2p::protocol::MAX_CONTENT_BYTES
+        );
+    }
+}

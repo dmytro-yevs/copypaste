@@ -1,0 +1,887 @@
+import Cocoa
+import AVFoundation
+import CoreVideo
+import CoreImage
+import IOSurface
+import FlutterMacOS
+import XCTest
+@testable import CopyPaste_Dev
+
+final class AppDelegateLaunchTests: XCTestCase {
+  func testLaunchDrainsPendingPairingURLsOnce() throws {
+    let delegate = AppDelegate()
+    let url = try XCTUnwrap(URL(string: "copypaste://pair/launch-test"))
+    delegate.application(NSApplication.shared, open: [url])
+    let window = LaunchPairingWindow(
+      contentRect: .zero, styleMask: [], backing: .buffered, defer: true
+    )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    delegate.mainFlutterWindow = window
+
+    let notification = Notification(name: NSApplication.didFinishLaunchingNotification)
+    delegate.applicationDidFinishLaunching(notification)
+    XCTAssertEqual(window.receivedURLs, [url])
+    delegate.applicationDidFinishLaunching(notification)
+    XCTAssertEqual(window.receivedURLs, [url])
+  }
+}
+
+private final class LaunchPairingWindow: MainFlutterWindow {
+  var receivedURLs: [URL] = []
+
+  override func receivePairingURL(_ url: URL) {
+    receivedURLs.append(url)
+  }
+}
+
+final class CaptureProtectedRenderingTests: XCTestCase {
+  func testProtectedFramesPreserveThemeColorsAndAdvertiseSRGB() throws {
+    let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+    let extended = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedSRGB))
+    let context = CIContext()
+    let extent = CGRect(x: 0, y: 0, width: 32, height: 32)
+    let colors: [[CGFloat]] = [
+      [24 / 255, 24 / 255, 24 / 255, 1],
+      [33 / 255, 33 / 255, 33 / 255, 1],
+      [223 / 255, 223 / 255, 223 / 255, 1],
+      [1, 1, 1, 1],
+      [0.7, 0.35, 0.1, 1],
+    ]
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    for pixelFormat in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_40ARGBLEWideGamut] {
+      for components in colors {
+        var original: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 32, 32, pixelFormat,
+          [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &original), kCVReturnSuccess)
+        let originalBuffer = try XCTUnwrap(original)
+        let inputSpace = pixelFormat == kCVPixelFormatType_32BGRA ? srgb : extended
+        let color = try XCTUnwrap(CGColor(colorSpace: srgb, components: components))
+        let image = CIImage(color: CIColor(cgColor: color)).cropped(to: extent)
+        context.render(image, to: originalBuffer, bounds: extent, colorSpace: inputSpace)
+        let surface = try XCTUnwrap(CVPixelBufferGetIOSurface(originalBuffer)?.takeUnretainedValue())
+        IOSurfaceSetValue(surface, kIOSurfaceColorSpace,
+                          pixelFormat == kCVPixelFormatType_32BGRA ? CGColorSpace.sRGB : CGColorSpace.extendedSRGB)
+        // Match production: wrap Flutter's IOSurface in a new untagged pixel buffer.
+        var wrapped: Unmanaged<CVPixelBuffer>?
+        XCTAssertEqual(CVPixelBufferCreateWithIOSurface(kCFAllocatorDefault, surface, nil, &wrapped),
+                       kCVReturnSuccess)
+        let source = try XCTUnwrap(wrapped?.takeRetainedValue())
+        let rendered = try XCTUnwrap(pool.buffer(width: 32, height: 32).1)
+        CaptureProtectedFrameConverter.render(source, to: rendered)
+        XCTAssertEqual(CVPixelBufferLockBaseAddress(rendered, .readOnly), kCVReturnSuccess)
+        let bytes = try XCTUnwrap(CVPixelBufferGetBaseAddress(rendered)).assumingMemoryBound(to: UInt8.self)
+        for (index, component) in [components[2], components[1], components[0], components[3]].enumerated() {
+          XCTAssertEqual(Double(bytes[index]), Double(component * 255), accuracy: 1)
+        }
+        CVPixelBufferUnlockBaseAddress(rendered, .readOnly)
+        var format: CMVideoFormatDescription?
+        XCTAssertEqual(CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+          imageBuffer: rendered, formatDescriptionOut: &format), noErr)
+        let description = try XCTUnwrap(format)
+        XCTAssertEqual(CMFormatDescriptionGetExtension(description,
+          extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String,
+          kCVImageBufferTransferFunction_sRGB as String)
+        XCTAssertEqual(CMFormatDescriptionGetExtension(description,
+          extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String,
+          kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
+      }
+    }
+  }
+
+  func testPoolNeverAllocatesMoreThanThreeRetainedFrames() throws {
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      let (status, frame) = pool.buffer(width: 128, height: 64)
+      XCTAssertEqual(status, kCVReturnSuccess)
+      frames.append(try XCTUnwrap(frame))
+    }
+    for _ in 0..<100 {
+      let (status, frame) = pool.buffer(width: 128, height: 64)
+      XCTAssertEqual(status, kCVReturnWouldExceedAllocationThreshold)
+      XCTAssertNil(frame)
+    }
+    frames.removeLast()
+    let (status, recycled) = pool.buffer(width: 128, height: 64)
+    XCTAssertEqual(status, kCVReturnSuccess)
+    XCTAssertNotNil(recycled)
+  }
+
+  func testReleasedBufferWakesAProducerAfterPoolPressure() throws {
+    let freed = expectation(description: "The pool signals newly available capacity")
+    freed.assertForOverFulfill = false
+    let pool = CaptureProtectedPixelBufferPool(available: { freed.fulfill() })
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      frames.append(try XCTUnwrap(pool.buffer(width: 64, height: 64).1))
+    }
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnWouldExceedAllocationThreshold)
+    frames.removeLast()
+    wait(for: [freed], timeout: 1)
+  }
+
+  func testPoolCanChangeSizeAndResetAfterPressure() throws {
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      frames.append(try XCTUnwrap(pool.buffer(width: 64, height: 64).1))
+    }
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnWouldExceedAllocationThreshold)
+    frames.removeAll()
+    let resized = try XCTUnwrap(pool.buffer(width: 128, height: 32).1)
+    XCTAssertEqual(CVPixelBufferGetWidth(resized), 128)
+    XCTAssertEqual(CVPixelBufferGetHeight(resized), 32)
+    pool.reset()
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnSuccess)
+  }
+
+  func testDeliveryCoalescesChangesAndResumesWithTheLatestFrame() {
+    var queued: [() -> Void] = []
+    var latest = 0
+    var ready = false
+    var rendered: [Int] = []
+    let delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      guard ready else { return false }
+      rendered.append(latest)
+      return true
+    }
+    for frame in 1...100 { latest = frame; delivery.request() }
+    XCTAssertEqual(queued.count, 1)
+    queued.removeFirst()()
+    XCTAssertTrue(rendered.isEmpty)
+    XCTAssertTrue(queued.isEmpty)
+    latest = 101
+    ready = true
+    delivery.request()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, [101])
+  }
+
+  func testSuspensionCancelsPendingWorkEvenAfterReopening() {
+    var queued: [() -> Void] = []
+    var rendered = 0
+    let delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      rendered += 1
+      return true
+    }
+    delivery.request()
+    delivery.suspend()
+    delivery.request()
+    XCTAssertEqual(queued.count, 1)
+    delivery.resume()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 0)
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 1)
+  }
+
+  func testAFrameChangeDuringDeliveryIsNotLost() {
+    var queued: [() -> Void] = []
+    var rendered = 0
+    var delivery: CaptureProtectedFrameDelivery!
+    delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      rendered += 1
+      if rendered == 1 { delivery.request() }
+      return true
+    }
+    delivery.request()
+    queued.removeFirst()()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 2)
+    delivery = nil
+  }
+
+  func testSuspensionKeepsTheOriginalHiddenAndDetachRestoresIt() throws {
+    var buffer: CVPixelBuffer?
+    XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA,
+      [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer), kCVReturnSuccess)
+    let frame = try XCTUnwrap(buffer)
+    let surface = try XCTUnwrap(CVPixelBufferGetIOSurface(frame)?.takeUnretainedValue())
+    let root = CALayer()
+    let source = CALayer()
+    source.opacity = 0.75
+    source.contents = surface
+    root.addSublayer(source)
+    let protection = CaptureProtectedLayerTree(layer: root)
+    let display = try XCTUnwrap(root.sublayers?.compactMap { $0 as? AVSampleBufferDisplayLayer }.first)
+    XCTAssertTrue(display.preventsCapture)
+    XCTAssertEqual(source.opacity, 0)
+    protection.suspend()
+    XCTAssertEqual(source.opacity, 0)
+    protection.resume()
+    XCTAssertEqual(source.opacity, 0)
+    protection.detach()
+    XCTAssertEqual(source.opacity, 0.75)
+    XCTAssertEqual(root.sublayers?.count, 1)
+    XCTAssertTrue(root.sublayers?.first === source)
+  }
+}
+
+final class MacosAppUpdateTests: XCTestCase {
+  private func install(
+    updateStatus: Int = 0,
+    upgradeStatus: Int = 0,
+    installedVersion: String = "1.0.8",
+    listStatus: Int = 0
+  ) throws -> (Bool, [String]) {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("copypaste-update-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let brew = directory.appendingPathComponent("brew")
+    let script = """
+    #!/bin/sh
+    cd "$(dirname "$0")" || exit 2
+    printf '%s\\n' "$*" >> calls
+    case "$1" in
+      update-if-needed) exit \(updateStatus) ;;
+      outdated) printf '%s\\n' '{"casks":[{"current_version":"1.0.8"}]}'; exit 1 ;;
+      upgrade) exit \(upgradeStatus) ;;
+      list) printf '%s\\n' 'copypaste \(installedVersion)'; exit \(listStatus) ;;
+      *) exit 2 ;;
+    esac
+    """
+    try script.write(to: brew, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: brew.path)
+
+    let installed = MacosAppUpdateChannel.installUpdate(using: brew, expectedVersion: "1.0.8")
+    let calls = try String(contentsOf: directory.appendingPathComponent("calls"), encoding: .utf8)
+      .split(separator: "\n").map(String.init)
+    return (installed, calls)
+  }
+
+  func testAvailableUpdateReachesUpgradeAndVerifiesInstalledVersion() throws {
+    let (installed, calls) = try install()
+    XCTAssertTrue(installed)
+    XCTAssertEqual(calls, [
+      "update-if-needed",
+      "upgrade --cask --no-ask --no-quit --require-sha dmytro-yevs/copypaste/copypaste",
+      "list --cask --versions copypaste",
+    ])
+  }
+
+  func testFailedTapUpdateStopsBeforeUpgrade() throws {
+    let (installed, calls) = try install(updateStatus: 1)
+    XCTAssertFalse(installed)
+    XCTAssertEqual(calls, ["update-if-needed"])
+  }
+
+  func testFailedUpgradeDoesNotReportSuccess() throws {
+    let (installed, calls) = try install(upgradeStatus: 1)
+    XCTAssertFalse(installed)
+    XCTAssertEqual(calls.count, 2)
+  }
+
+  func testSuccessRequiresExpectedVersionAndSuccessfulVersionCheck() throws {
+    XCTAssertFalse(try install(installedVersion: "1.0.7").0)
+    XCTAssertFalse(try install(listStatus: 1).0)
+  }
+}
+
+final class MacosApplicationLifecycleTests: XCTestCase {
+  func testRelaunchWaitsForTheOldProcessAndPreservesTheInstalledBundlePath() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("copypaste-relaunch-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let application = directory.appendingPathComponent("Updated CopyPaste ' ;.app")
+    try FileManager.default.createDirectory(at: application, withIntermediateDirectories: true)
+    let receipt = directory.appendingPathComponent("opened")
+    let opener = directory.appendingPathComponent("fake-open")
+    try "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/opened\"\n"
+      .write(to: opener, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: opener.path)
+    let oldProcess = Process()
+    oldProcess.executableURL = URL(fileURLWithPath: "/bin/cat")
+    let input = Pipe()
+    oldProcess.standardInput = input
+    oldProcess.standardOutput = FileHandle.nullDevice
+    oldProcess.standardError = FileHandle.nullDevice
+    try oldProcess.run()
+    defer { if oldProcess.isRunning { oldProcess.terminate() } }
+    let helper = try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: application, processID: oldProcess.processIdentifier, opener: opener
+    )
+    defer { if helper.isRunning { helper.terminate() } }
+    XCTAssertTrue(oldProcess.isRunning)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+    try input.fileHandleForWriting.close()
+    oldProcess.waitUntilExit()
+    let finished = expectation(description: "The relaunch helper exits")
+    DispatchQueue.global().async { helper.waitUntilExit(); finished.fulfill() }
+    wait(for: [finished], timeout: 5)
+    XCTAssertEqual(helper.terminationStatus, 0)
+    XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "-n\n-a\n\(application.path)\n")
+  }
+
+  func testMissingBundleDoesNotScheduleRelaunch() {
+    XCTAssertThrowsError(try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: URL(fileURLWithPath: "/missing-copypaste-\(UUID().uuidString).app"),
+      processID: ProcessInfo.processInfo.processIdentifier
+    ))
+  }
+
+  func testMissingOpenerDoesNotScheduleRelaunch() {
+    XCTAssertThrowsError(try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: FileManager.default.temporaryDirectory,
+      processID: ProcessInfo.processInfo.processIdentifier,
+      opener: URL(fileURLWithPath: "/missing-open-\(UUID().uuidString)")
+    ))
+  }
+}
+
+class RunnerTests: XCTestCase {
+
+  func testTrayMenuOptsIntoAppKitImageVisibility() {
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "Open", action: nil, keyEquivalent: "")
+    item.image = NSImage(size: NSSize(width: 16, height: 16))
+    menu.addItem(item)
+    let separator = NSMenuItem.separator()
+    menu.addItem(separator)
+
+    MacosTrayMenuChannel.showImages(in: menu)
+
+    if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
+      XCTAssertEqual(item.value(forKey: "preferredImageVisibility") as? Int, 1)
+      XCTAssertEqual(separator.value(forKey: "preferredImageVisibility") as? Int, 0)
+    }
+  }
+
+  func testTerminationDoesNotRequireAFlutterWindowOrReply() {
+    let delegate = AppDelegate()
+    delegate.mainFlutterWindow = nil
+    XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateNow)
+    XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateNow)
+    XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+  }
+
+  func testTrafficLightButtonsCenterInTheUnifiedTitlebar() {
+    XCTAssertEqual(
+      MainFlutterWindow.trafficLightButtonOriginY(
+        headerHeight: 48,
+        buttonHeight: 14
+      ),
+      17
+    )
+  }
+
+  func testUnifiedTitlebarContainerPreservesItsTopEdge() {
+    let frame = NSRect(x: 12, y: 20, width: 320, height: 28)
+
+    let resized = MainFlutterWindow.unifiedTitlebarContainerFrame(
+      frame,
+      headerHeight: 48
+    )
+
+    XCTAssertEqual(resized.minX, frame.minX)
+    XCTAssertEqual(resized.maxY, frame.maxY)
+    XCTAssertEqual(resized.width, frame.width)
+    XCTAssertEqual(resized.height, 48)
+
+    let oversized = MainFlutterWindow.unifiedTitlebarContainerFrame(
+      NSRect(x: 12, y: 20, width: 320, height: 64),
+      headerHeight: 48
+    )
+    XCTAssertEqual(oversized.maxY, 84)
+    XCTAssertEqual(oversized.height, 48)
+  }
+
+  func testTitlebarViewFillsTheUnifiedTitlebarContainer() {
+    let frame = MainFlutterWindow.unifiedTitlebarViewFrame(
+      containerBounds: NSRect(x: 0, y: 0, width: 320, height: 48),
+      headerHeight: 48
+    )
+
+    XCTAssertEqual(frame.origin, .zero)
+    XCTAssertEqual(frame.width, 320)
+    XCTAssertEqual(frame.height, 48)
+  }
+
+  func testTrafficLightLayoutIsDisabledOutsideTheUnifiedNonFullscreenWindow() {
+    XCTAssertTrue(
+      MainFlutterWindow.usesUnifiedTrafficLightLayout(
+        styleMask: [.fullSizeContentView]
+      )
+    )
+    XCTAssertFalse(
+      MainFlutterWindow.usesUnifiedTrafficLightLayout(
+        styleMask: [.fullSizeContentView, .fullScreen]
+      )
+    )
+  }
+
+  func testQuickPasteReopeningCancelsDeferredRetirement() {
+    var queued: [() -> Void] = []
+    let retirement = QuickPasteRetirement(enqueue: { queued.append($0) })
+    var releases = 0
+    retirement.schedule(canRetire: { true }, retire: { releases += 1 })
+    XCTAssertEqual(releases, 0)
+    retirement.cancel()
+    queued.removeFirst()()
+    XCTAssertEqual(releases, 0)
+    retirement.schedule(canRetire: { true }, retire: { releases += 1 })
+    queued.removeFirst()()
+    XCTAssertEqual(releases, 1)
+  }
+
+  func testQuickPasteWaitsForPasteCompletionBeforeRetirement() {
+    var queued: [() -> Void] = []
+    let retirement = QuickPasteRetirement(enqueue: { queued.append($0) })
+    var pending = true
+    var released = false
+    retirement.schedule(canRetire: { !pending }, retire: { released = true })
+    queued.removeFirst()()
+    XCTAssertFalse(released)
+    pending = false
+    retirement.schedule(canRetire: { !pending }, retire: { released = true })
+    queued.removeFirst()()
+    XCTAssertTrue(released)
+  }
+
+  func testQuickPasteUsesTheDisplayContainingTheCursor() {
+    let left = QuickPasteDisplay(
+      frame: NSRect(x: -1920, y: 0, width: 1920, height: 1080),
+      visibleFrame: NSRect(x: -1920, y: 24, width: 1920, height: 1056)
+    )
+    let primary = QuickPasteDisplay(
+      frame: NSRect(x: 0, y: 0, width: 2560, height: 1440),
+      visibleFrame: NSRect(x: 0, y: 40, width: 2560, height: 1400)
+    )
+
+    let frame = quickPasteFrame(
+      cursor: NSPoint(x: -1700, y: 900),
+      size: NSSize(width: 520, height: 720),
+      displays: [primary, left]
+    )
+
+    XCTAssertEqual(frame.origin.x, -1700)
+    XCTAssertEqual(frame.maxY, 892)
+    XCTAssertTrue(left.visibleFrame.contains(frame))
+  }
+
+  func testQuickPasteClampsToTheCursorDisplayWorkArea() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: 2560, y: -200, width: 1600, height: 1000),
+      visibleFrame: NSRect(x: 2560, y: -160, width: 1600, height: 940)
+    )
+
+    let frame = quickPasteFrame(
+      cursor: NSPoint(x: 4140, y: -130),
+      size: NSSize(width: 520, height: 720),
+      displays: [display]
+    )
+
+    XCTAssertEqual(frame.maxX, display.visibleFrame.maxX)
+    XCTAssertEqual(frame.minY, display.visibleFrame.minY)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+  }
+
+  func testQuickPastePanelDoesNotActivateTheMainApplication() {
+    XCTAssertTrue(
+      QuickPastePanel.presentationStyleMask.contains(.nonactivatingPanel)
+    )
+  }
+
+  func testNativeTrayPrimaryActivationPreservesContextMenuGestures() {
+    XCTAssertTrue(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [], clickCount: 1))
+    XCTAssertTrue(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [.shift], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [.control], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .rightMouseUp, modifiers: [], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [], clickCount: 2))
+  }
+
+  func testNativeTrayBindingRestoresOnlyItsOwnedTarget() {
+    let button = NSButton(frame: .zero)
+    let original = NSObject()
+    let originalAction = NSSelectorFromString("originalAction:")
+    button.target = original
+    button.action = originalAction
+    let binding = TrayQuickPasteBinding(button: button, activate: { _, _ in })
+    XCTAssertTrue(button.target === binding)
+    binding.detach()
+    XCTAssertTrue(button.target === original)
+    XCTAssertEqual(button.action, originalAction)
+    let replacement = NSObject()
+    let next = TrayQuickPasteBinding(button: button, activate: { _, _ in })
+    button.target = replacement
+    next.detach()
+    XCTAssertTrue(button.target === replacement)
+  }
+
+  func testTrayQuickPasteOpensBelowTheIconWithBoundedHeight() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+      visibleFrame: NSRect(x: 0, y: 40, width: 1920, height: 1016)
+    )
+    let anchor = NSRect(x: 1700, y: 1056, width: 24, height: 24)
+    let frame = quickPasteTrayFrame(
+      anchor: anchor, size: NSSize(width: 448, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.height, 600)
+    XCTAssertEqual(frame.maxX, anchor.maxX)
+    XCTAssertEqual(frame.maxY, anchor.minY - 8)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+  }
+
+  func testTrayQuickPasteFitsAShortSecondaryDisplayAndExpandedInspector() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: -900, y: 0, width: 900, height: 500),
+      visibleFrame: NSRect(x: -900, y: 0, width: 900, height: 476)
+    )
+    let frame = quickPasteTrayFrame(
+      anchor: NSRect(x: -80, y: 476, width: 24, height: 24),
+      size: NSSize(width: 816, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.height, 468)
+    XCTAssertEqual(frame.width, 816)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+    let resized = quickPasteInspectorFrame(current: frame, visible: display.visibleFrame, expanded: false)
+    XCTAssertEqual(resized.height, frame.height)
+  }
+
+  func testTrayQuickPasteCanOpenAboveABottomTray() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+      visibleFrame: NSRect(x: 0, y: 24, width: 1920, height: 1056)
+    )
+    let anchor = NSRect(x: 10, y: 0, width: 24, height: 24)
+    let frame = quickPasteTrayFrame(
+      anchor: anchor, size: NSSize(width: 448, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.minX, 0)
+    XCTAssertEqual(frame.minY, anchor.maxY + 8)
+    XCTAssertEqual(frame.height, 600)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+  }
+
+  func testQuickPasteRetainsItsSizeWhenInstallingAZeroSizedFlutterView() {
+    let size = NSSize(width: 520, height: 720)
+    let panel = QuickPastePanel(
+      contentRect: NSRect(origin: .zero, size: size),
+      styleMask: QuickPastePanel.presentationStyleMask,
+      backing: .buffered,
+      defer: false
+    )
+    panel.isReleasedWhenClosed = false
+    defer { panel.close() }
+    let controller = NSViewController()
+    controller.view = NSView(frame: .zero)
+
+    panel.contentViewController = controller
+
+    XCTAssertEqual(panel.frame.size, size)
+    XCTAssertEqual(controller.view.frame.size, size)
+  }
+
+  func testQuickPasteInspectorClampsToTheDisplayWorkArea() {
+    let visible = NSRect(x: -1920, y: 24, width: 1920, height: 1032)
+    let current = NSRect(x: -300, y: 200, width: 448, height: 800)
+    let expanded = quickPasteInspectorFrame(current: current, visible: visible, expanded: true)
+    XCTAssertEqual(expanded.width, 816)
+    XCTAssertEqual(expanded.maxY, current.maxY)
+    XCTAssertTrue(visible.contains(expanded))
+    let small = NSRect(x: 0, y: 24, width: 640, height: 456)
+    let fitted = quickPasteInspectorFrame(current: current, visible: small, expanded: true)
+    XCTAssertEqual(fitted.size, small.size)
+    XCTAssertTrue(small.contains(fitted))
+  }
+
+}
+
+private final class FakeQuickPasteTarget: QuickPasteApplicationTarget {
+  let processIdentifier: pid_t
+  var bundleIdentifier: String?
+  var isTerminated = false
+  var activationSucceeds = true
+  var activations = 0
+  var onActivate: (() -> Void)?
+  init(_ pid: pid_t) { processIdentifier = pid }
+  func activateForQuickPaste() -> Bool {
+    activations += 1
+    onActivate?()
+    return activationSucceeds
+  }
+}
+
+final class QuickPastePasteSessionTests: XCTestCase {
+  private var foreground: pid_t? = 2
+  private var trusted = true
+  private var constructionSucceeds = true
+  private var submissions = 0
+  private var hidden = 0
+  private var cancellations = 0
+  private var continuation: (() -> Void)?
+  private var results: [Bool] = []
+
+  private func session() -> QuickPastePasteSession {
+    QuickPastePasteSession(
+      ownPID: 1,
+      foreground: { self.foreground },
+      trusted: { self.trusted },
+      prepareInput: {
+        self.constructionSucceeds ? { self.submissions += 1 } : nil
+      },
+      schedule: { callback in
+        self.continuation = callback
+        return { self.cancellations += 1 }
+      }
+    )
+  }
+
+  private func paste(_ session: QuickPastePasteSession, _ id: Int64) {
+    session.paste(id: id, hide: { self.hidden += 1 }, result: { self.results.append($0) })
+  }
+
+  func testDismissThenOwnOrMissingForegroundDoesNotReuseExternalTarget() {
+    for frontmost in [FakeQuickPasteTarget(1), nil] {
+      let owner = session()
+      _ = owner.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)
+      owner.invalidate()
+      let id = owner.begin(frontmost: frontmost, popupActive: false)!
+      paste(owner, id)
+      XCTAssertNil(owner.target)
+    }
+    XCTAssertEqual(results, [false, false])
+    XCTAssertEqual(submissions, 0)
+    XCTAssertEqual(hidden, 0)
+  }
+
+  func testActivePopupReopenPreservesTargetWithFreshIdentity() {
+    let owner = session()
+    let target = FakeQuickPasteTarget(2)
+    let oldID = owner.begin(frontmost: target, popupActive: false)!
+    let id = owner.begin(frontmost: FakeQuickPasteTarget(1), popupActive: true)!
+    XCTAssertGreaterThan(id, oldID)
+    XCTAssertTrue(owner.target === target)
+    paste(owner, oldID)
+    paste(owner, id)
+    continuation?()
+    continuation?()
+    XCTAssertEqual(results, [false, true])
+    XCTAssertEqual(submissions, 1)
+    XCTAssertEqual(target.activations, 0)
+    paste(owner, id)
+    XCTAssertEqual(results, [false, true, false])
+  }
+
+  func testNewExternalForegroundReplacesTargetEvenIfPopupWasActive() {
+    let owner = session()
+    _ = owner.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)
+    let replacement = FakeQuickPasteTarget(3)
+    _ = owner.begin(frontmost: replacement, popupActive: true)
+    XCTAssertTrue(owner.target === replacement)
+  }
+
+  func testDeadTargetAndActivationFailureSubmitNothing() {
+    let owner = session()
+    let target = FakeQuickPasteTarget(2)
+    let id = owner.begin(frontmost: target, popupActive: false)!
+    target.isTerminated = true
+    paste(owner, id)
+    XCTAssertEqual(target.activations, 0)
+    target.isTerminated = false
+    foreground = 3
+    target.activationSucceeds = false
+    let next = owner.begin(frontmost: target, popupActive: false)!
+    paste(owner, next)
+    XCTAssertEqual(target.activations, 1)
+    XCTAssertNil(continuation)
+    XCTAssertEqual(results, [false, false])
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testActivationSuccessStillRequiresFinalExactForeground() {
+    let owner = session()
+    let target = FakeQuickPasteTarget(2)
+    foreground = 3
+    let id = owner.begin(frontmost: target, popupActive: false)!
+    paste(owner, id)
+    XCTAssertEqual(target.activations, 1)
+    continuation?()
+    XCTAssertEqual(results, [false])
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testFocusTargetTrustAndConstructionAreRecheckedAfterHandoff() {
+    for change in [0, 1, 2, 3] {
+      foreground = 2; trusted = true; constructionSucceeds = true
+      let owner = session()
+      let target = FakeQuickPasteTarget(2)
+      let id = owner.begin(frontmost: target, popupActive: false)!
+      paste(owner, id)
+      switch change {
+      case 0: foreground = 3
+      case 1: target.isTerminated = true
+      case 2: trusted = false
+      default: constructionSucceeds = false
+      }
+      continuation?()
+      continuation?()
+    }
+    XCTAssertEqual(results, [false, false, false, false])
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testInvalidationCancelsAndCompletesOnceEvenIfCancelledCallbackRuns() {
+    let owner = session()
+    let target = FakeQuickPasteTarget(2)
+    let id = owner.begin(frontmost: target, popupActive: false)!
+    paste(owner, id)
+    let oldCallback = continuation
+    let next = owner.begin(frontmost: FakeQuickPasteTarget(3), popupActive: false)!
+    oldCallback?()
+    owner.invalidate()
+    oldCallback?()
+    XCTAssertGreaterThan(next, id)
+    XCTAssertEqual(cancellations, 1)
+    XCTAssertEqual(results, [false])
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testOwnerReleaseCancelsPendingResultBeforeLateCallback() {
+    var owner: QuickPastePasteSession? = session()
+    let id = owner!.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)!
+    paste(owner!, id)
+    let callback = continuation
+    owner = nil
+    callback?()
+    XCTAssertEqual(results, [false])
+    XCTAssertEqual(cancellations, 1)
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testReentrantInvalidationDuringActivationStopsBeforeScheduling() {
+    let owner = session()
+    let target = FakeQuickPasteTarget(2)
+    foreground = 3
+    target.onActivate = { owner.invalidate() }
+    let id = owner.begin(frontmost: target, popupActive: false)!
+    paste(owner, id)
+    XCTAssertEqual(results, [false])
+    XCTAssertNil(continuation)
+    XCTAssertEqual(submissions, 0)
+  }
+
+  func testCompleteEventConstructionFailurePostsNoHalfChord() {
+    for failure in [0, 1, 2] {
+      var posts = 0
+      var creations = 0
+      let submit = MacosAccessibility.preparePaste(
+        source: { failure == 0 ? nil : CGEventSource(stateID: .combinedSessionState) },
+        event: { source, down in
+          creations += 1
+          if creations == failure { return nil }
+          return CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down)
+        },
+        post: { _ in posts += 1 }
+      )
+      XCTAssertNil(submit)
+      submit?()
+      XCTAssertEqual(posts, 0)
+    }
+    var posts = 0
+    let submit = MacosAccessibility.preparePaste(post: { _ in posts += 1 })
+    XCTAssertNotNil(submit)
+    submit?()
+    XCTAssertEqual(posts, 2)
+  }
+}
+
+final class QuickPasteOpeningTests: XCTestCase {
+  private func session() -> QuickPastePasteSession {
+    QuickPastePasteSession(ownPID: 1, foreground: { 2 }, trusted: { true },
+                          prepareInput: { nil }, schedule: { _ in {} })
+  }
+
+  func testSupersededShowSuccessAndFailureDoNotHideNewPresentation() {
+    for oldShowSucceeds in [true, false] {
+      let owner = session()
+      let id = owner.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)!
+      let replacement = FakeQuickPasteTarget(3)
+      var newerID: Int64 = 0
+      var hides = 0
+      var opened = 0
+      var positions = 0
+      var newerOpened = 0
+      let shown = presentQuickPaste(
+        id: id, session: owner,
+        position: { positions += 1; return true },
+        show: {
+          newerID = owner.begin(frontmost: replacement, popupActive: false)!
+          XCTAssertTrue(presentQuickPaste(
+            id: newerID, session: owner, position: { true }, show: { true },
+            hide: { hides += 1 }, opened: { newerOpened += 1 }
+          ))
+          return oldShowSucceeds
+        },
+        hide: { hides += 1 }, opened: { opened += 1 }
+      )
+      XCTAssertFalse(shown)
+      XCTAssertEqual(owner.id, newerID)
+      XCTAssertTrue(owner.target === replacement)
+      XCTAssertEqual(positions, 1)
+      XCTAssertEqual(newerOpened, 1)
+      XCTAssertEqual(hides, 0)
+      XCTAssertEqual(opened, 0)
+    }
+  }
+
+  func testSupersededPositionStopsBeforeOldShow() {
+    let owner = session()
+    let id = owner.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)!
+    let replacement = FakeQuickPasteTarget(3)
+    var shows = 0
+    var hides = 0
+    var opened = 0
+    XCTAssertFalse(presentQuickPaste(
+      id: id, session: owner,
+      position: { _ = owner.begin(frontmost: replacement, popupActive: false); return true },
+      show: { shows += 1; return true }, hide: { hides += 1 }, opened: { opened += 1 }
+    ))
+    XCTAssertTrue(owner.target === replacement)
+    XCTAssertEqual(shows, 0)
+    XCTAssertEqual(hides, 0)
+    XCTAssertEqual(opened, 0)
+  }
+
+  func testSameOwnerPartialShowFailureInvalidatesAndHidesOnce() {
+    let owner = session()
+    let id = owner.begin(frontmost: FakeQuickPasteTarget(2), popupActive: false)!
+    var hides = 0
+    var opened = 0
+    XCTAssertFalse(presentQuickPaste(
+      id: id, session: owner, position: { true }, show: { false },
+      hide: { hides += 1 }, opened: { opened += 1 }
+    ))
+    XCTAssertEqual(owner.id, 0)
+    XCTAssertNil(owner.target)
+    XCTAssertEqual(hides, 1)
+    XCTAssertEqual(opened, 0)
+  }
+}
+
+final class MacosForegroundInputTests: XCTestCase {
+  func testForegroundInputNeedsAnExternalTrustedTarget() {
+    func outcome(_ frontmost: pid_t?, trusted: Bool = true, secure: Bool = false) -> String? {
+      MacosForegroundInput.blockedOutcome(
+        frontmost: frontmost, ownPID: 1, trusted: trusted, secureInput: secure)
+    }
+    XCTAssertEqual(outcome(nil), "noTarget")
+    XCTAssertEqual(outcome(1), "noTarget")
+    XCTAssertEqual(outcome(2, trusted: false), "copiedOnly")
+    XCTAssertEqual(outcome(2, secure: true), "copiedOnly")
+    XCTAssertNil(outcome(2))
+  }
+
+  func testCaretMoveSendsArrowsWithoutHeldModifiers() {
+    var posted: [CGEvent] = []
+    let submit = MacosAccessibility.prepareCaretMove(count: 3, post: { posted.append($0) })
+    XCTAssertNotNil(submit)
+    submit?()
+    XCTAssertEqual(posted.count, 6)
+    XCTAssertTrue(posted.allSatisfy { $0.flags == [.maskNumericPad, .maskSecondaryFn] })
+    XCTAssertNil(MacosAccessibility.prepareCaretMove(count: 0))
+  }
+}

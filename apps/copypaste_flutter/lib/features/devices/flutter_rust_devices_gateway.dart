@@ -1,0 +1,770 @@
+import 'dart:async';
+
+import 'package:copypaste_flutter/generated/api.dart' as frb;
+import 'package:copypaste_flutter/generated/api/space.dart' as frb_space;
+import 'package:copypaste_flutter/generated/api/device_sync.dart' as frb;
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
+import '../../shared/error_text.dart';
+import '../../shared/runtime_event_service.dart';
+import 'devices_gateway.dart';
+
+/// Production [DevicesGateway] backed by the generated Rust API.
+///
+/// [changes] contains only backend runtime invalidations for externally
+/// observed peer changes. Local mutations do not synthesize a change event:
+/// their caller awaits the operation and performs one authoritative refresh.
+class FlutterRustDevicesGateway
+    implements
+        DevicesGateway,
+        DisposableDevicesGateway,
+        NearbyPairingGateway,
+        SpaceGateway {
+  FlutterRustDevicesGateway({GeneratedDevicesApi? api})
+    : _api = api ?? FrbGeneratedDevicesApi();
+
+  final GeneratedDevicesApi _api;
+  final StreamController<void> _changes = StreamController<void>.broadcast();
+  StreamSubscription<frb.RuntimeEvent>? _runtimeWatch;
+  Future<void>? _startingRuntimeWatch;
+  BigInt? _runtimeWatchId;
+  bool _disposed = false;
+
+  @override
+  Stream<void> get changes {
+    _startRuntimeWatch();
+    return _changes.stream;
+  }
+
+  @override
+  Future<DevicesSnapshot> load() async {
+    final thisDevice = await _api.thisDeviceName();
+    final peers = await _api.listPeers();
+    final discovered = await _api.listDiscoveredDevices();
+    final space = switch (_api) {
+      final GeneratedSpaceApi api => await api.spaceStatus(),
+      _ => null,
+    };
+    final sync = await _api.deviceSyncPreferences();
+    return DevicesSnapshot(
+      thisDevice: _thisDevice(thisDevice),
+      space: space == null
+          ? null
+          : DeviceSpace(
+              member: space.member,
+              keyEpoch: space.keyEpoch?.toInt(),
+              passphraseRecovery: space.passphraseRecovery,
+              waitingPeerIds: space.waitingPairingIds.toSet(),
+            ),
+      sync: deviceSyncPreferencesOf(sync),
+      peers: peers
+          .map(
+            (peer) => DevicePeer(
+              id: peer.pairingId,
+              deviceId: peer.deviceId,
+              name: peer.name,
+              lastSeen: _fromEpochMilliseconds(peer.lastSeenMs),
+              online: peer.online,
+              details: _deviceDetails(peer.details),
+            ),
+          )
+          .toList(growable: false),
+      discovered: discovered
+          .map(
+            (device) => DiscoveredDevice(
+              id: device.discoveryId,
+              name: device.name,
+              address: device.address,
+              paired: device.paired,
+              lastSeen: _fromEpochMilliseconds(device.lastSeenMs),
+              details: _deviceDetails(device.details),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Future<void> rescan() async {
+    await _api.rescanDevices();
+  }
+
+  GeneratedSpaceApi get _space => switch (_api) {
+    final GeneratedSpaceApi api => api,
+    _ => throw UnsupportedError('This runtime has no device spaces.'),
+  };
+
+  @override
+  Future<void> leaveSpace() async {
+    await _space.leaveSpace();
+  }
+
+  @override
+  Future<bool> cloudSignedIn() => _space.cloudSignedIn();
+
+  @override
+  Future<void> changeSyncPassphrase(String passphrase) async {
+    await _space.cloudChangePassphrase(passphrase);
+  }
+
+  @override
+  Future<void> signOutOtherDevices() async {
+    await _space.cloudSignOutOthers();
+  }
+
+  @override
+  Future<void> setSyncPolicy(String? deviceId, DeviceSyncPolicy policy) async {
+    final runtime = runtimeDeviceSyncPolicy(policy);
+    if (deviceId == null) {
+      await _api.setThisDeviceSync(policy: runtime);
+    } else {
+      await _api.setDeviceSyncPolicy(deviceId: deviceId, policy: runtime);
+    }
+  }
+
+  @override
+  Future<void> sync({String? peerId}) async {
+    final outcomes = await _api.syncDevices(pairingId: peerId);
+    final failed = [
+      for (final outcome in outcomes)
+        if (outcome.errorCode != null) outcome.name,
+    ];
+    if (failed.isNotEmpty) {
+      throw DevicesSyncException(
+        AppStrings.current.devicesSyncFailedWith(failed.join(', ')),
+      );
+    }
+  }
+
+  @override
+  Future<void> unpair(String peerId) async {
+    await _api.unpairDevice(pairingId: peerId);
+  }
+
+  @override
+  Future<void> revoke(String peerId) async {
+    await _api.revokeDevice(pairingId: peerId);
+  }
+
+  @override
+  Future<void> setThisDeviceName(String name) async {
+    await _api.setThisDeviceName(name: name);
+  }
+
+  @override
+  Future<DevicesPairingSession> requestNearbyPairing(String address) async {
+    final api = _api;
+    if (api is! GeneratedNearbyPairingApi) {
+      throw StateError(AppStrings.current.devicesNearbyPairingUnavailable);
+    }
+    final ceremony = await (api as GeneratedNearbyPairingApi)
+        .requestNearbyPairing(address);
+    return FlutterRustPairingSession(api: _api, ceremony: ceremony);
+  }
+
+  @override
+  Future<DevicesPairingSession?> incomingPairing() async {
+    final api = _api;
+    if (api is! GeneratedNearbyPairingApi) return null;
+    final ceremony = await (api as GeneratedNearbyPairingApi)
+        .incomingPairingCeremony();
+    return ceremony == null
+        ? null
+        : FlutterRustPairingSession(api: _api, ceremony: ceremony);
+  }
+
+  @override
+  Future<DevicesPairingSession> createInvitation() async {
+    final ceremony = await _api.createPairingCeremony();
+    return FlutterRustPairingSession(api: _api, ceremony: ceremony);
+  }
+
+  @override
+  Future<DevicesPairingSession> joinPairingUri(String uri) async {
+    final ceremony = await _api.joinPairingUri(uri: uri);
+    return FlutterRustPairingSession(api: _api, ceremony: ceremony);
+  }
+
+  @override
+  Future<DevicesPairingSession> joinFromProtectedInput({
+    required String code,
+    required String address,
+  }) => _join(code: code, address: address);
+
+  Future<DevicesPairingSession> _join({
+    required String code,
+    required String address,
+  }) async {
+    try {
+      final ceremony = await _api.joinPairingCeremony(
+        code: code,
+        address: address,
+      );
+      return FlutterRustPairingSession(api: _api, ceremony: ceremony);
+    } on frb.RuntimeError catch (error) {
+      // No address and no relay to redeem the code through.
+      if (error.code == 'pairing_address') {
+        throw DevicesSyncException(AppStrings.current.pairingAddressMissing);
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    await _startingRuntimeWatch;
+    _startingRuntimeWatch = null;
+    await _runtimeWatch?.cancel();
+    _runtimeWatch = null;
+    final watchId = _runtimeWatchId;
+    if (watchId != null) {
+      await _api.cancelRuntimeWatch(watchId: watchId);
+    }
+    await _changes.close();
+  }
+
+  void _emitExternalPeerChange() {
+    if (!_changes.isClosed) _changes.add(null);
+  }
+
+  void _startRuntimeWatch() {
+    if (_disposed || _runtimeWatch != null || _startingRuntimeWatch != null) {
+      return;
+    }
+    _startingRuntimeWatch = _createRuntimeWatch();
+  }
+
+  Future<void> _createRuntimeWatch() async {
+    if (_api is FrbGeneratedDevicesApi) {
+      _runtimeWatch = RuntimeEventService.instance.events.listen(
+        (event) {
+          if (event.kind == 'peers' || event.kind == 'ready') {
+            _emitExternalPeerChange();
+          }
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!_changes.isClosed) _changes.addError(error, stackTrace);
+        },
+      );
+      return;
+    }
+    final watchId = await _api.allocateRuntimeWatch();
+    if (_disposed) {
+      await _api.cancelRuntimeWatch(watchId: watchId);
+      return;
+    }
+    _runtimeWatchId = watchId;
+    _runtimeWatch = _api
+        .watchRuntime(watchId: watchId)
+        .listen(
+          (event) {
+            if (event.kind == 'peers') _emitExternalPeerChange();
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!_changes.isClosed) _changes.addError(error, stackTrace);
+          },
+        );
+  }
+
+  DateTime _fromEpochMilliseconds(int value) =>
+      DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+
+  ThisDevice _thisDevice(frb.ThisDevice device) => ThisDevice(
+    id: device.deviceId,
+    name: device.name,
+    appVersion: device.appVersion,
+    protocolVersion: device.protocolVersion,
+    listenAddress: device.listenAddress,
+    details: _deviceDetails(device.details),
+  );
+
+  DeviceDetails? _deviceDetails(frb.DeviceDetails? details) {
+    if (details == null) return null;
+    return DeviceDetails(
+      profile: details.profile == null
+          ? null
+          : _deviceProfile(details.profile!),
+      endpoint: details.endpoint == null
+          ? null
+          : _deviceEndpoint(details.endpoint!),
+      latency: details.latency == null
+          ? null
+          : _deviceLatency(details.latency!),
+      presence: details.presence == null
+          ? null
+          : _devicePresence(details.presence!),
+    );
+  }
+
+  DeviceProfile _deviceProfile(frb.DeviceProfile profile) => DeviceProfile(
+    displayName: profile.displayName,
+    appVersion: profile.appVersion,
+    protocolVersion: profile.protocolVersion,
+    platform: _devicePlatform(profile.platform),
+    deviceClass: mapRuntimeDeviceClass(profile.deviceClass),
+    osName: profile.osName,
+    osVersion: profile.osVersion,
+    model: profile.model,
+    provenance: _provenance(profile.provenance),
+    trust: _trust(profile.trust),
+    observedAt: _fromEpochMilliseconds(profile.observedAtMs),
+    freshUntil: profile.freshUntilMs == null
+        ? null
+        : _fromEpochMilliseconds(profile.freshUntilMs!),
+  );
+
+  DeviceEndpoint _deviceEndpoint(frb.DeviceEndpoint endpoint) => DeviceEndpoint(
+    lanEndpoint: endpoint.lanEndpoint,
+    provenance: _provenance(endpoint.provenance),
+    trust: _trust(endpoint.trust),
+    observedAt: _fromEpochMilliseconds(endpoint.observedAtMs),
+    freshUntil: endpoint.freshUntilMs == null
+        ? null
+        : _fromEpochMilliseconds(endpoint.freshUntilMs!),
+  );
+
+  DeviceLatency _deviceLatency(frb.DeviceLatency latency) => DeviceLatency(
+    roundTripLatency: Duration(
+      milliseconds: latency.roundTripLatencyMs.toInt(),
+    ),
+    provenance: _provenance(latency.provenance),
+    trust: _trust(latency.trust),
+    observedAt: _fromEpochMilliseconds(latency.observedAtMs),
+    freshUntil: latency.freshUntilMs == null
+        ? null
+        : _fromEpochMilliseconds(latency.freshUntilMs!),
+  );
+
+  DevicePresenceObservation _devicePresence(frb.DevicePresence presence) =>
+      DevicePresenceObservation(
+        state: _devicePresenceState(presence.state),
+        lastSeen: _fromEpochMilliseconds(presence.lastSeenMs),
+        provenance: _provenance(presence.provenance),
+        trust: _trust(presence.trust),
+        observedAt: _fromEpochMilliseconds(presence.observedAtMs),
+        freshUntil: presence.freshUntilMs == null
+            ? null
+            : _fromEpochMilliseconds(presence.freshUntilMs!),
+      );
+
+  DevicePlatform _devicePlatform(frb.DevicePlatform platform) =>
+      switch (platform) {
+        frb.DevicePlatform.macos => DevicePlatform.macos,
+        frb.DevicePlatform.windows => DevicePlatform.windows,
+        frb.DevicePlatform.android => DevicePlatform.android,
+        frb.DevicePlatform.unknown => DevicePlatform.unknown,
+        frb.DevicePlatform.linux => DevicePlatform.linux,
+      };
+
+  DevicePresence _devicePresenceState(frb.DevicePresenceState state) =>
+      switch (state) {
+        frb.DevicePresenceState.online => DevicePresence.online,
+        frb.DevicePresenceState.offline => DevicePresence.offline,
+        frb.DevicePresenceState.unknown => DevicePresence.unknown,
+      };
+
+  DeviceObservationProvenance _provenance(
+    frb.DeviceObservationProvenance provenance,
+  ) => switch (provenance) {
+    frb.DeviceObservationProvenance.selfReported =>
+      DeviceObservationProvenance.selfReported,
+    frb.DeviceObservationProvenance.observed =>
+      DeviceObservationProvenance.observed,
+    frb.DeviceObservationProvenance.measured =>
+      DeviceObservationProvenance.measured,
+  };
+
+  DeviceObservationTrust _trust(frb.DeviceObservationTrust trust) =>
+      switch (trust) {
+        frb.DeviceObservationTrust.local => DeviceObservationTrust.local,
+        frb.DeviceObservationTrust.unverified =>
+          DeviceObservationTrust.unverified,
+        frb.DeviceObservationTrust.authenticated =>
+          DeviceObservationTrust.authenticated,
+      };
+}
+
+/// [policy] as the runtime takes it.
+frb.DeviceSyncPolicy runtimeDeviceSyncPolicy(DeviceSyncPolicy policy) =>
+    frb.DeviceSyncPolicy(
+      enabled: policy.enabled,
+      paused: policy.paused,
+      content: frb.SyncContentKinds(
+        text: policy.text,
+        images: policy.images,
+        files: policy.files,
+      ),
+    );
+
+/// The runtime's device sync preferences in the feature model.
+DeviceSyncPreferences deviceSyncPreferencesOf(frb.DeviceSyncPreferences value) {
+  DeviceSyncPolicy policy(frb.DeviceSyncPolicy value) => DeviceSyncPolicy(
+    enabled: value.enabled,
+    paused: value.paused,
+    text: value.content.text,
+    images: value.content.images,
+    files: value.content.files,
+  );
+  return DeviceSyncPreferences(
+    thisDevice: policy(value.thisDevice),
+    devices: {
+      for (final entry in value.devices) entry.deviceId: policy(entry.policy),
+    },
+  );
+}
+
+DeviceClass mapRuntimeDeviceClass(frb.DeviceClass deviceClass) =>
+    switch (deviceClass) {
+      frb.DeviceClass.desktop => DeviceClass.desktop,
+      frb.DeviceClass.laptop => DeviceClass.laptop,
+      frb.DeviceClass.phone => DeviceClass.phone,
+      frb.DeviceClass.tablet => DeviceClass.tablet,
+      frb.DeviceClass.unknown => DeviceClass.unknown,
+    };
+
+/// Thin seam around generated free functions for deterministic gateway tests.
+abstract interface class GeneratedDevicesApi {
+  Future<frb.ThisDevice> thisDeviceName();
+  Future<List<frb.Peer>> listPeers();
+  Future<List<frb.DiscoveredDevice>> listDiscoveredDevices();
+  Future<List<frb.DiscoveredDevice>> rescanDevices();
+  Future<List<frb.SyncOutcome>> syncDevices({String? pairingId});
+  Future<void> unpairDevice({required String pairingId});
+  Future<void> revokeDevice({required String pairingId});
+  Future<void> setThisDeviceName({required String name});
+  Future<frb.DeviceSyncPreferences> deviceSyncPreferences();
+  Future<frb.DeviceSyncPreferences> setThisDeviceSync({
+    required frb.DeviceSyncPolicy policy,
+  });
+  Future<frb.DeviceSyncPreferences> setDeviceSyncPolicy({
+    required String deviceId,
+    required frb.DeviceSyncPolicy policy,
+  });
+  Future<frb.PairingCeremony> createPairingCeremony();
+  Future<frb.PairingCeremony> joinPairingCeremony({
+    required String code,
+    required String address,
+  });
+  Future<frb.PairingCeremony> joinPairingUri({required String uri});
+  Future<frb.PairingCeremony> pairingCeremonyStatus({
+    required String ceremonyId,
+  });
+  Future<frb.PairingCeremony> confirmPairingCeremony({
+    required String ceremonyId,
+    required String verificationCode,
+    required bool accept,
+  });
+  Future<frb.PairingInvitation> revealPairingInvitation({
+    required String ceremonyId,
+  });
+  Future<String> revealPairingSas({required String ceremonyId});
+  Future<frb.PairingCeremony> cancelPairingCeremony({
+    required String ceremonyId,
+  });
+  Future<void> disposePairingCeremony({required String ceremonyId});
+  Future<BigInt> allocateRuntimeWatch();
+  Stream<frb.RuntimeEvent> watchRuntime({required BigInt watchId});
+  Future<void> cancelRuntimeWatch({required BigInt watchId});
+}
+
+abstract interface class GeneratedSpaceApi {
+  Future<frb_space.SpaceStatus> spaceStatus();
+  Future<frb_space.SpaceStatus> leaveSpace();
+  Future<bool> cloudSignedIn();
+  Future<void> cloudChangePassphrase(String passphrase);
+  Future<void> cloudSignOutOthers();
+}
+
+abstract interface class GeneratedNearbyPairingApi {
+  Future<frb.PairingCeremony> requestNearbyPairing(String address);
+  Future<frb.PairingCeremony?> incomingPairingCeremony();
+}
+
+class FrbGeneratedDevicesApi
+    implements
+        GeneratedDevicesApi,
+        GeneratedNearbyPairingApi,
+        GeneratedSpaceApi {
+  @override
+  Future<frb_space.SpaceStatus> spaceStatus() => frb_space.spaceStatus();
+  @override
+  Future<frb_space.SpaceStatus> leaveSpace() => frb_space.leaveSpace();
+  @override
+  Future<bool> cloudSignedIn() async =>
+      (await frb.cloudAccountStatus()).signedIn;
+  @override
+  Future<void> cloudChangePassphrase(String passphrase) =>
+      frb_space.cloudChangePassphrase(passphrase: passphrase);
+  @override
+  Future<void> cloudSignOutOthers() => frb_space.cloudSignOutOthers();
+
+  @override
+  Future<frb.PairingCeremony> requestNearbyPairing(String address) =>
+      frb.requestNearbyPairing(address: address);
+  @override
+  Future<frb.PairingCeremony?> incomingPairingCeremony() =>
+      frb.incomingPairingCeremony();
+
+  @override
+  Future<BigInt> allocateRuntimeWatch() => frb.allocateRuntimeWatch();
+
+  @override
+  Future<frb.PairingCeremony> cancelPairingCeremony({
+    required String ceremonyId,
+  }) => frb.cancelPairingCeremony(ceremonyId: ceremonyId);
+
+  @override
+  Future<void> cancelRuntimeWatch({required BigInt watchId}) =>
+      frb.cancelRuntimeWatch(watchId: watchId);
+
+  @override
+  Future<frb.PairingCeremony> confirmPairingCeremony({
+    required String ceremonyId,
+    required String verificationCode,
+    required bool accept,
+  }) => frb.confirmPairingCeremony(
+    ceremonyId: ceremonyId,
+    verificationCode: verificationCode,
+    accept: accept,
+  );
+
+  @override
+  Future<frb.PairingCeremony> createPairingCeremony() =>
+      frb.createPairingCeremony();
+
+  @override
+  Future<frb.PairingCeremony> joinPairingCeremony({
+    required String code,
+    required String address,
+  }) => frb.joinPairingCeremony(code: code, address: address);
+
+  @override
+  Future<frb.PairingCeremony> joinPairingUri({required String uri}) =>
+      frb.joinPairingUri(uri: uri);
+
+  @override
+  Future<void> disposePairingCeremony({required String ceremonyId}) =>
+      frb.disposePairingCeremony(ceremonyId: ceremonyId);
+
+  @override
+  Future<List<frb.DiscoveredDevice>> listDiscoveredDevices() =>
+      frb.listDiscoveredDevices();
+
+  @override
+  Future<List<frb.Peer>> listPeers() => frb.listPeers();
+
+  @override
+  Future<frb.PairingCeremony> pairingCeremonyStatus({
+    required String ceremonyId,
+  }) => frb.pairingCeremonyStatus(ceremonyId: ceremonyId);
+
+  @override
+  Future<List<frb.DiscoveredDevice>> rescanDevices() => frb.rescanDevices();
+
+  @override
+  Future<frb.PairingInvitation> revealPairingInvitation({
+    required String ceremonyId,
+  }) => frb.revealPairingInvitation(ceremonyId: ceremonyId);
+
+  @override
+  Future<String> revealPairingSas({required String ceremonyId}) =>
+      frb.revealPairingSas(ceremonyId: ceremonyId);
+
+  @override
+  Future<void> revokeDevice({required String pairingId}) =>
+      frb.revokeDevice(pairingId: pairingId);
+
+  @override
+  Future<void> setThisDeviceName({required String name}) =>
+      frb.setThisDeviceName(name: name);
+
+  @override
+  Future<frb.DeviceSyncPreferences> deviceSyncPreferences() =>
+      frb.deviceSyncPreferences();
+
+  @override
+  Future<frb.DeviceSyncPreferences> setThisDeviceSync({
+    required frb.DeviceSyncPolicy policy,
+  }) => frb.setThisDeviceSync(policy: policy);
+
+  @override
+  Future<frb.DeviceSyncPreferences> setDeviceSyncPolicy({
+    required String deviceId,
+    required frb.DeviceSyncPolicy policy,
+  }) => frb.setDeviceSyncPolicy(deviceId: deviceId, policy: policy);
+
+  @override
+  Future<List<frb.SyncOutcome>> syncDevices({String? pairingId}) =>
+      frb.syncDevices(pairingId: pairingId);
+
+  @override
+  Future<frb.ThisDevice> thisDeviceName() => frb.thisDeviceName();
+
+  @override
+  Future<void> unpairDevice({required String pairingId}) =>
+      frb.unpairDevice(pairingId: pairingId);
+
+  @override
+  Stream<frb.RuntimeEvent> watchRuntime({required BigInt watchId}) =>
+      frb.watchRuntime(watchId: watchId);
+}
+
+class DevicesSyncException implements UserFacingException {
+  const DevicesSyncException(this.message);
+
+  @override
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class DevicesVerificationCodeRequiredException implements UserFacingException {
+  const DevicesVerificationCodeRequiredException();
+
+  @override
+  String get message => AppStrings.current.pairingVerificationCodeRequired;
+
+  @override
+  String toString() => AppStrings.current.pairingVerificationCodeRequired;
+}
+
+/// Opaque generated ceremony state exposed to the ordinary Devices page.
+///
+/// The generated API intentionally omits QR and SAS material. Their actions
+/// can be completed only after the protected presenter binds this ceremony to
+/// a dedicated native host.
+class FlutterRustPairingSession implements DevicesPairingSession {
+  FlutterRustPairingSession({
+    required GeneratedDevicesApi api,
+    required frb.PairingCeremony ceremony,
+  }) : _api = api,
+       _ceremonyId = ceremony.ceremonyId,
+       _ceremony = _mapCeremony(ceremony);
+
+  final GeneratedDevicesApi _api;
+  final String _ceremonyId;
+  final StreamController<PairingCeremony> _updates =
+      StreamController<PairingCeremony>.broadcast();
+  PairingCeremony _ceremony;
+  Timer? _pollTimer;
+  bool _polling = false;
+  bool _disposed = false;
+  String? _verificationCode;
+
+  @override
+  PairingCeremony get ceremony => _ceremony;
+
+  @override
+  Stream<PairingCeremony> get updates {
+    _pollTimer ??= Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => unawaited(_poll()),
+    );
+    return _updates.stream;
+  }
+
+  @override
+  Future<PairingInvitation> revealInvitation() async {
+    final invitation = await _api.revealPairingInvitation(
+      ceremonyId: _ceremonyId,
+    );
+    return PairingInvitation(
+      qrPng: invitation.qrPng,
+      code: invitation.code,
+      address: invitation.address,
+    );
+  }
+
+  @override
+  Future<String> revealSas() async {
+    final code = await _api.revealPairingSas(ceremonyId: _ceremonyId);
+    _verificationCode = code;
+    return code;
+  }
+
+  @override
+  Future<void> confirm({required bool accept}) async {
+    final verificationCode = _verificationCode;
+    if (verificationCode == null) {
+      throw const DevicesVerificationCodeRequiredException();
+    }
+    final next = await _api.confirmPairingCeremony(
+      ceremonyId: _ceremonyId,
+      verificationCode: verificationCode,
+      accept: accept,
+    );
+    _verificationCode = null;
+    _setCeremony(next);
+  }
+
+  @override
+  Future<void> cancel() async {
+    if (_disposed || _ceremony.state.isTerminal) return;
+    final next = await _api.cancelPairingCeremony(ceremonyId: _ceremonyId);
+    _setCeremony(next);
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    await _updates.close();
+    try {
+      await _api.disposePairingCeremony(ceremonyId: _ceremonyId);
+    } catch (_) {
+      if (!_ceremony.state.isTerminal) rethrow;
+    }
+  }
+
+  void _setCeremony(frb.PairingCeremony next) {
+    _ceremony = _mapCeremony(next);
+    if (_ceremony.state.isTerminal) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
+    if (!_updates.isClosed) _updates.add(_ceremony);
+  }
+
+  Future<void> _poll() async {
+    if (_disposed || _polling || _ceremony.state.isTerminal) return;
+    _polling = true;
+    try {
+      final next = await _api.pairingCeremonyStatus(ceremonyId: _ceremonyId);
+      if (!_disposed) _setCeremony(next);
+    } catch (error, stackTrace) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+      if (!_updates.isClosed) _updates.addError(error, stackTrace);
+    } finally {
+      _polling = false;
+    }
+  }
+
+  static PairingCeremony _mapCeremony(frb.PairingCeremony ceremony) {
+    return PairingCeremony(
+      id: ceremony.ceremonyId,
+      state: switch (ceremony.state) {
+        'idle' => PairingState.idle,
+        'waiting_for_peer' => PairingState.waitingForPeer,
+        'handshaking' => PairingState.handshaking,
+        'awaiting_confirmation' => PairingState.awaitingConfirmation,
+        'confirmed' => PairingState.confirmed,
+        'rejected' => PairingState.rejected,
+        'cancelled' => PairingState.cancelled,
+        'timed_out' => PairingState.timedOut,
+        'failed' => PairingState.failed,
+        final state => throw FormatException('Unknown pairing state: $state'),
+      },
+      peerName: ceremony.peerName,
+      failureMessage: ceremony.failureMessage,
+      expiresIn: ceremony.expiresInMs == null
+          ? null
+          : Duration(milliseconds: ceremony.expiresInMs!.toInt()),
+    );
+  }
+}

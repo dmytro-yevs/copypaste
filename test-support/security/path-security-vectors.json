@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "displayLeakCases": [
+    {
+      "id": "parent-traversal-posix",
+      "surface": "Could not open ../outside/device.key",
+      "expectedRule": "parent-traversal",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["outside", "device.key"]
+    },
+    {
+      "id": "parent-traversal-windows",
+      "surface": "Could not open ..\\outside\\device.key",
+      "expectedRule": "parent-traversal",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["outside", "device.key"]
+    },
+    {
+      "id": "arbitrary-posix-root",
+      "surface": "State is stored under /srv-copypaste/private/device.key",
+      "expectedRule": "absolute-posix",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": ["srv-copypaste", "device.key"]
+    },
+    {
+      "id": "single-segment-posix-root",
+      "surface": "State directory: /vault",
+      "expectedRule": "absolute-posix",
+      "expectedSurface": "State directory: <path>",
+      "forbiddenFragments": ["vault"]
+    },
+    {
+      "id": "windows-drive-backslash",
+      "surface": "State is stored under Z:\\Profiles\\alice\\device.key",
+      "expectedRule": "windows-drive",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": ["Profiles", "alice", "device.key"]
+    },
+    {
+      "id": "windows-drive-forward-slash",
+      "surface": "State is stored under D:/Profiles/alice/device.key",
+      "expectedRule": "windows-drive",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": ["Profiles", "alice", "device.key"]
+    },
+    {
+      "id": "windows-unc",
+      "surface": "State is stored under \\\\fileserver\\private-share\\alice",
+      "expectedRule": "windows-unc",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": ["fileserver", "private-share", "alice"]
+    },
+    {
+      "id": "home-relative",
+      "surface": "State is stored under ~/.copypaste/state",
+      "expectedRule": "home-relative",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": [".copypaste"]
+    },
+    {
+      "id": "file-uri",
+      "surface": "State URL is file:///opt/copypaste/state.db",
+      "expectedRule": "file-uri",
+      "expectedSurface": "State URL is <path>",
+      "forbiddenFragments": ["opt", "copypaste", "state.db"]
+    },
+    {
+      "id": "environment-home",
+      "surface": "State is stored under $HOME/.copypaste",
+      "expectedRule": "path-variable",
+      "expectedSurface": "State is stored under <path>",
+      "forbiddenFragments": ["$HOME", ".copypaste"]
+    },
+    {
+      "id": "android-private-database-name",
+      "platform": "android",
+      "surface": "Database copypaste-v2.db could not be opened",
+      "expectedRule": "android-private-database",
+      "expectedSurface": "Database <path>",
+      "forbiddenFragments": ["copypaste-v2.db", "could not be opened"]
+    }
+  ],
+  "safeDisplayCases": [
+    {
+      "id": "https-url",
+      "surface": "Read https://example.com/help/getting-started"
+    },
+    {
+      "id": "app-route",
+      "surface": "Open settings/security to continue"
+    },
+    {
+      "id": "fraction",
+      "surface": "Synced 2/3 devices"
+    },
+    {
+      "id": "plain-database-word",
+      "surface": "Database unavailable"
+    },
+    {
+      "id": "assigned-https-url",
+      "surface": "See url=https://example.com/home/guide"
+    },
+    {
+      "id": "assigned-https-user-route",
+      "surface": "See url=https://example.com/Users/alice"
+    }
+  ],
+  "redactionCases": [
+    {
+      "id": "windows-extended-path",
+      "surface": "Could not open \\\\?\\C:\\Profiles\\alice\\device.key",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Profiles", "alice", "device.key"]
+    },
+    {
+      "id": "windows-device-path",
+      "surface": "Could not open \\\\.\\pipe\\copypaste-private",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["pipe", "copypaste-private"]
+    },
+    {
+      "id": "windows-path-with-spaces-and-quotes",
+      "surface": "Could not open \"C:\\Program Files\\CopyPaste\\private.db\" now",
+      "expectedSurface": "Could not open <path> now",
+      "forbiddenFragments": ["Program", "Files", "private.db"]
+    },
+    {
+      "id": "punctuated-assignment-posix",
+      "surface": "Failure {path=/srv-copypaste/private/device.key}",
+      "expectedSurface": "Failure <path>",
+      "forbiddenFragments": ["srv-copypaste", "device.key"]
+    },
+    {
+      "id": "quoted-posix-path-with-space",
+      "surface": "Could not open \"/Volumes/Private Data\" now",
+      "expectedSurface": "Could not open <path> now",
+      "forbiddenFragments": ["Volumes", "Private", "Data"]
+    },
+    {
+      "id": "windows-unc-with-space",
+      "surface": "Could not open \\\\fileserver\\private share\\device.key",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["fileserver", "share", "device.key"]
+    },
+    {
+      "id": "windows-forward-path-with-space",
+      "surface": "Could not open D:/Profiles/Alice Smith/private.db now",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Profiles", "Alice", "Smith", "private.db", "now"]
+    },
+    {
+      "id": "unquoted-posix-path-tail-to-line-boundary",
+      "surface": "Could not open /Users/alice/Library Application Support/private.sock while syncing",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Users", "alice", "Application", "Support", "private.sock", "while syncing"]
+    },
+    {
+      "id": "unquoted-posix-path-tail-keeps-next-line",
+      "surface": "Could not open /Users/alice/Library Application Support/private.sock while syncing\nretry later",
+      "expectedSurface": "Could not open <path>\nretry later",
+      "forbiddenFragments": ["Users", "alice", "Application", "Support", "private.sock", "while syncing"]
+    },
+    {
+      "id": "windows-extended-unc-with-space",
+      "surface": "Could not open \\\\?\\UNC\\fileserver\\private share\\device.key",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["fileserver", "share", "device.key"]
+    },
+    {
+      "id": "assigned-quoted-windows-path",
+      "surface": "Failure path=\"C:\\Program Files\\Alice\\private.db\"",
+      "expectedSurface": "Failure <path>",
+      "forbiddenFragments": ["Program", "Files", "Alice", "private.db"]
+    },
+    {
+      "id": "colon-assigned-windows-path",
+      "surface": "Failure path:'D:/Profiles/alice/device.key'",
+      "expectedSurface": "Failure <path>",
+      "forbiddenFragments": ["Profiles", "alice", "device.key"]
+    },
+    {
+      "id": "quoted-posix-path-with-escaped-quote",
+      "surface": "Could not open \"/Users/alice/Private\\\" folder/secret.db\" retry",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Users", "alice", "Private", "folder", "secret.db", "retry"]
+    },
+    {
+      "id": "quoted-path-closing-punctuation",
+      "surface": "Could not open \"C:\\Program Files\\private.db\", retry now",
+      "expectedSurface": "Could not open <path> retry now",
+      "forbiddenFragments": ["Program", "Files", "private.db"]
+    },
+    {
+      "id": "quoted-path-before-https-url",
+      "surface": "Could not open \"/Volumes/Private Data\", see https://example.com/help",
+      "expectedSurface": "Could not open <path> see https://example.com/help",
+      "forbiddenFragments": ["Volumes", "Private", "Data"]
+    },
+    {
+      "id": "quoted-file-uri-with-space",
+      "surface": "Could not open \"file:///Volumes/Private Data\"",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Volumes", "Private", "Data"]
+    },
+    {
+      "id": "posix-filename-with-equals",
+      "surface": "Could not open /srv-copypaste/device=alice.key",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["srv-copypaste", "device=alice.key"]
+    },
+    {
+      "id": "windows-filename-with-equals",
+      "surface": "Could not open C:\\Temp\\device=alice.key",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Temp", "device=alice.key"]
+    },
+    {
+      "id": "quoted-windows-filename-with-equals",
+      "surface": "Could not open \"C:\\Program Files\\device=alice.key\"",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Program", "Files", "device=alice.key"]
+    }
+  ],
+  "artifactContainmentCases": [
+    {
+      "id": "parent-traversal",
+      "kind": "traversal",
+      "root": "evidence",
+      "entries": ["evidence/accepted.json", "evidence/../outside.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "case-collision",
+      "kind": "case_collision",
+      "root": "evidence",
+      "entries": ["evidence/Failure.json", "evidence/failure.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "symlinked-parent",
+      "kind": "symlink_parent",
+      "root": "evidence",
+      "entries": ["evidence/link/record.json"],
+      "link": { "path": "evidence/link", "target": "../outside" },
+      "expected": "reject"
+    },
+    {
+      "id": "symlinked-leaf",
+      "kind": "symlink_leaf",
+      "root": "evidence",
+      "entries": ["evidence/record.json"],
+      "link": { "path": "evidence/record.json", "target": "../outside.json" },
+      "expected": "reject"
+    },
+    {
+      "id": "hardlink-alias",
+      "kind": "hardlink_alias",
+      "root": "evidence",
+      "entries": ["evidence/first.json", "evidence/alias.json"],
+      "sameFile": ["evidence/first.json", "evidence/alias.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "duplicate-resolved-file",
+      "kind": "duplicate_resolved",
+      "root": "evidence",
+      "entries": ["evidence/nested/../record.json", "evidence/record.json"],
+      "expected": "reject"
+    }
+  ]
+}

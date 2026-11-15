@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">Przechwytywanie wstrzymane</string>
+    <string name="background_status_capturing">Zapisuje kopie</string>
+    <string name="background_status_syncing">Synchronizuje w tle</string>
+    <string name="background_status_last_sync">Ostatnia synchronizacja %1$s</string>
+    <string name="background_status_last_saved">Ostatni zapis %1$s</string>
+    <string name="background_action_pause">Wstrzymaj</string>
+    <string name="background_action_resume">Wznów</string>
+    <string name="background_action_send">Wyślij schowek</string>
+    <string name="background_action_open">Otwórz</string>
+    <string name="shortcut_send_clipboard">Wyślij schowek</string>
+    <string name="shortcut_transform_clipboard">Przekształć schowek</string>
+</resources>

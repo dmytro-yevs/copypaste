@@ -1,0 +1,963 @@
+import 'dart:async';
+
+import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
+import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
+import 'package:copypaste_flutter/platform/desktop/desktop_visibility_preferences.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('fullscreen close preserves the normal saved window bounds', () async {
+    final host = _FakeDesktopWindowHost();
+    final store = _FakeGeometryStore();
+    final controller = DesktopWindowController(
+      host: host,
+      geometryStore: store,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final normal = host.bounds;
+    await controller.handleCloseRequested();
+    expect(store.lastWrittenBounds, normal);
+    host.fullScreen = true;
+    host.bounds = const DesktopWindowBounds(
+      left: 0,
+      top: 0,
+      width: 1920,
+      height: 1080,
+    );
+    await controller.handleCloseRequested();
+    expect(store.lastWrittenBounds, normal);
+    expect(host.hideCalls, 2);
+  });
+  test(
+    'full-screen commands use current native state and preserve close policy',
+    () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      addTearDown(controller.dispose);
+      await controller.toggleFullScreen();
+      expect(host.fullScreen, isTrue);
+      await controller.toggleFullScreen();
+      expect(host.fullScreen, isFalse);
+      host.fullScreen = true;
+      await controller.exitFullScreen();
+      expect(host.fullScreen, isFalse);
+      final changes = host.fullScreenChanges;
+      await controller.exitFullScreen();
+      expect(host.fullScreenChanges, changes);
+      host.failFullScreen = true;
+      await controller.toggleFullScreen();
+      expect(
+        controller.setupIssue.value,
+        DesktopWindowSetupIssue.windowUnavailable,
+      );
+    },
+  );
+  group('DesktopWindowController', () {
+    test(
+      'native window adapter forwards visibility rather than focus loss',
+      () {
+        final host = FlutterDesktopWindowHost();
+        final visibility = <bool>[];
+        host.setVisibilityChangedHandler(visibility.add);
+        host.onWindowBlur();
+        expect(visibility, isEmpty);
+        host.onWindowMinimize();
+        host.onWindowRestore();
+        host.onWindowEvent('hide');
+        host.onWindowEvent('show');
+        expect(visibility, [false, true, false, true]);
+        host.onWindowEvent('hide');
+        host.onWindowFocus();
+        expect(visibility, [false, true, false, true, false, true]);
+        host.setVisibilityChangedHandler(null);
+        host.onWindowMinimize();
+        host.onWindowFocus();
+        expect(visibility, hasLength(6));
+      },
+    );
+
+    test(
+      'reports native minimize/restore and tray hide/show visibility',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        expect(controller.isVisible.value, isTrue);
+        host.visibilityHandler!(false);
+        expect(controller.isVisible.value, isFalse);
+        host.visibilityHandler!(true);
+        expect(controller.isVisible.value, isTrue);
+        await controller.handleCloseRequested();
+        expect(controller.isVisible.value, isFalse);
+        await controller.showFromTrayOrDock();
+        expect(controller.isVisible.value, isTrue);
+        await controller.dispose();
+      },
+    );
+
+    test(
+      'a background start stays hidden unless the tray is unavailable',
+      () async {
+        final hidden = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: hidden,
+          geometryStore: _FakeGeometryStore(),
+          startHidden: true,
+        );
+        await controller.initialize();
+        expect(hidden.shownAtInitialization, isFalse);
+        expect(hidden.showAndFocusCalls, 0);
+        expect(controller.isVisible.value, isFalse);
+
+        final trayless = _FakeDesktopWindowHost(failedTrayInitializations: 1);
+        final fallback = DesktopWindowController(
+          host: trayless,
+          geometryStore: _FakeGeometryStore(),
+          startHidden: true,
+        );
+        await fallback.initialize();
+        expect(trayless.showAndFocusCalls, 1);
+      },
+    );
+
+    test('reports the window as unavailable before setup starts', () {
+      final controller = DesktopWindowController(
+        host: _FakeDesktopWindowHost(),
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      expect(controller.isUnifiedTitleBarReady.value, isFalse);
+    });
+
+    test('reports the window as ready after native setup succeeds', () async {
+      final controller = DesktopWindowController(
+        host: _FakeDesktopWindowHost(),
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+
+      expect(controller.isUnifiedTitleBarReady.value, isTrue);
+    });
+
+    test(
+      'keeps the unified title bar unavailable when native setup fails',
+      () async {
+        final controller = DesktopWindowController(
+          host: _FakeDesktopWindowHost(failedWindowInitializations: 1),
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+
+        expect(controller.isUnifiedTitleBarReady.value, isFalse);
+      },
+    );
+
+    test(
+      'keeps the unified title bar ready when close handler setup fails',
+      () async {
+        final controller = DesktopWindowController(
+          host: _FakeDesktopWindowHost(failedCloseHandlerInitializations: 1),
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+
+        expect(controller.isUnifiedTitleBarReady.value, isTrue);
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.windowUnavailable,
+        );
+      },
+    );
+
+    test(
+      'reports the window as ready after a successful setup retry',
+      () async {
+        final controller = DesktopWindowController(
+          host: _FakeDesktopWindowHost(failedCloseHandlerInitializations: 1),
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+        expect(controller.isUnifiedTitleBarReady.value, isTrue);
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.windowUnavailable,
+        );
+        await controller.retry();
+
+        expect(controller.isUnifiedTitleBarReady.value, isTrue);
+        expect(controller.setupIssue.value, isNull);
+      },
+    );
+
+    test('restores hidden icons and still reopens after close', () async {
+      final host = _FakeDesktopWindowHost();
+      final store = MemoryDesktopVisibilityStore(
+        const DesktopVisibilityPreferences(
+          showInTaskbar: false,
+          showInTray: false,
+        ),
+      );
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+        visibilityStore: store,
+      );
+      await controller.initialize();
+      expect(host.taskbarVisible, isFalse);
+      expect(host.trayVisible, isFalse);
+      expect(controller.setupIssue.value, isNull);
+      await controller.handleCloseRequested();
+      expect(controller.isVisible.value, isFalse);
+      host.taskbarVisible = true;
+      await controller.showFromTrayOrDock();
+      expect(controller.isVisible.value, isTrue);
+      expect(host.taskbarVisible, isFalse);
+      expect(host.trayVisible, isFalse);
+      await controller.visibility.setTrayVisible(true);
+      await host.openHandler!();
+      expect(host.trayVisible, isTrue);
+      expect(controller.isVisible.value, isTrue);
+      await controller.dispose();
+    });
+
+    test(
+      'reopen retains native visibility failures until retry succeeds',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        host.failedTaskbarChanges = 1;
+        await controller.showFromTrayOrDock();
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.windowUnavailable,
+        );
+        await controller.retry();
+        expect(controller.setupIssue.value, isNull);
+        await controller.dispose();
+      },
+    );
+
+    test('hides after an intercepted close when the tray is ready', () async {
+      final host = _FakeDesktopWindowHost();
+      final geometryStore = _FakeGeometryStore();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: geometryStore,
+      );
+
+      await controller.initialize();
+      await host.requestClose();
+
+      expect(host.hideCalls, 1);
+      expect(geometryStore.lastWrittenBounds, host.bounds);
+    });
+
+    test(
+      'lightweight close releases the runtime and quits instead of hiding',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+          visibilityStore: MemoryDesktopVisibilityStore(
+            const DesktopVisibilityPreferences(lightweightMode: true),
+          ),
+        );
+        final events = <String>[];
+        controller.setReleaseRuntime(() async {
+          events.add('release');
+          return true;
+        });
+        controller.setBeforeQuit(() async => events.add('beforeQuit'));
+
+        await controller.initialize();
+        await host.requestClose();
+
+        expect(events, ['release', 'beforeQuit']);
+        expect(host.quitCalls, 1);
+        expect(host.hideCalls, 0);
+      },
+    );
+
+    test(
+      'lightweight close hides when the runtime cannot be released',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+          visibilityStore: MemoryDesktopVisibilityStore(
+            const DesktopVisibilityPreferences(lightweightMode: true),
+          ),
+        );
+        controller.setReleaseRuntime(() async => false);
+
+        await controller.initialize();
+        await host.requestClose();
+
+        expect(host.quitCalls, 0);
+        expect(host.hideCalls, 1);
+      },
+    );
+
+    test('close action follows lightweight mode and tray availability', () {
+      expect(
+        desktopCloseAction(lightweightMode: false, trayReady: true),
+        DesktopCloseAction.hide,
+      );
+      expect(
+        desktopCloseAction(lightweightMode: false, trayReady: false),
+        DesktopCloseAction.keepOpen,
+      );
+      expect(
+        desktopCloseAction(lightweightMode: true, trayReady: false),
+        DesktopCloseAction.quitKeepingRuntime,
+      );
+    });
+
+    test('runs application shutdown before destroying the window', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      var shutdownCompleted = false;
+      controller.setBeforeQuit(() async {
+        expect(host.quitCalls, 0);
+        shutdownCompleted = true;
+      });
+
+      await controller.quit();
+
+      expect(shutdownCompleted, isTrue);
+      expect(host.quitCalls, 1);
+    });
+
+    test('keeps the app visible when tray setup fails', () async {
+      final host = _FakeDesktopWindowHost(failedTrayInitializations: 1);
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.retry();
+      await host.requestClose();
+
+      expect(
+        controller.setupIssue.value,
+        DesktopWindowSetupIssue.trayUnavailable,
+      );
+      expect(host.closeHandler, isNotNull);
+      expect(host.hideCalls, 0);
+      expect(host.showAndFocusCalls, 1);
+    });
+
+    test('retries tray setup without duplicating window setup', () async {
+      final host = _FakeDesktopWindowHost(failedTrayInitializations: 1);
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+      await controller.retry();
+      await host.requestClose();
+
+      expect(host.initializeWindowCalls, 1);
+      expect(host.setCloseHandlerCalls, 1);
+      expect(host.initializeTrayCalls, 2);
+      expect(host.hideCalls, 1);
+      expect(controller.setupIssue.value, isNull);
+    });
+
+    test('retries window access after the tray is already ready', () async {
+      final host = _FakeDesktopWindowHost(failedShowAndFocusAttempts: 1);
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+      await host.requestOpen();
+      await controller.retry();
+
+      expect(host.initializeWindowCalls, 1);
+      expect(host.initializeTrayCalls, 1);
+      expect(host.showAndFocusCalls, 2);
+      expect(controller.setupIssue.value, isNull);
+    });
+
+    test('restores the tray before retrying window access', () async {
+      final host = _FakeDesktopWindowHost(
+        failedTrayInitializations: 1,
+        failedShowAndFocusAttempts: 1,
+      );
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+      await host.requestClose();
+      expect(
+        controller.setupIssue.value,
+        DesktopWindowSetupIssue.windowUnavailable,
+      );
+
+      await controller.retry();
+
+      expect(host.initializeTrayCalls, 2);
+      expect(host.showAndFocusCalls, 2);
+      expect(controller.setupIssue.value, isNull);
+    });
+
+    test(
+      'retries window initialization after the first setup failure',
+      () async {
+        final host = _FakeDesktopWindowHost(failedWindowInitializations: 1);
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.windowUnavailable,
+        );
+
+        await controller.retry();
+
+        expect(host.initializeWindowCalls, 2);
+        expect(host.initializeTrayCalls, 1);
+        expect(controller.setupIssue.value, isNull);
+      },
+    );
+
+    test('shows and focuses the window from the tray or Dock', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+      await controller.showFromTrayOrDock();
+
+      expect(host.showAndFocusCalls, 1);
+    });
+
+    test('opens the window on Settings from the tray', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      var settingsOpenCalls = 0;
+      controller.setOpenSettings(() {
+        settingsOpenCalls += 1;
+      });
+
+      await controller.initialize();
+      await host.requestSettings();
+
+      expect(host.showAndFocusCalls, 1);
+      expect(settingsOpenCalls, 1);
+    });
+
+    test('updates and invokes the capture action from the tray', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      var toggleCalls = 0;
+      controller.setCaptureToggle(() async {
+        toggleCalls += 1;
+      });
+
+      await controller.initialize();
+      await controller.updateCaptureState(state: CaptureControlState.running);
+      await host.requestCapture();
+
+      expect(host.captureState, CaptureControlState.running);
+      expect(toggleCalls, 1);
+      await controller.updateCaptureState(state: CaptureControlState.stopped);
+      expect(host.captureState, CaptureControlState.stopped);
+      expect(host.captureState.actionLabel, 'Resume capture (not running)');
+      await host.requestCapture();
+      expect(toggleCalls, 2);
+    });
+
+    test('persists geometry and exits from the explicit quit action', () async {
+      final host = _FakeDesktopWindowHost();
+      final geometryStore = _FakeGeometryStore();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: geometryStore,
+      );
+
+      await controller.initialize();
+      await controller.quit();
+
+      expect(host.quitCalls, 1);
+      expect(geometryStore.lastWrittenBounds, host.bounds);
+    });
+
+    test(
+      'allows a quit retry after the host rejects the first attempt',
+      () async {
+        final host = _FakeDesktopWindowHost(failedQuitAttempts: 1);
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+        await controller.quit();
+        await controller.retry();
+
+        expect(host.quitCalls, 2);
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.quitUnavailable,
+        );
+      },
+    );
+
+    test(
+      'normal cancellation releases the quit latch and resident actions',
+      () async {
+        final gate = Completer<void>();
+        final host = _FakeDesktopWindowHost(quitGate: gate);
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        final quitting = controller.quit();
+        await Future<void>.delayed(Duration.zero);
+        await controller.quit();
+        expect(host.quitCalls, 1);
+        gate.complete();
+        await quitting;
+        await controller.handleCloseRequested();
+        await controller.showFromTrayOrDock();
+        await controller.quit();
+        expect(host.hideCalls, 1);
+        expect(host.showAndFocusCalls, 1);
+        expect(host.quitCalls, 2);
+        expect(controller.setupIssue.value, isNull);
+        await controller.dispose();
+      },
+    );
+
+    test('disposes host resources and ignores a repeated dispose', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+
+      await controller.initialize();
+      await controller.dispose();
+      await controller.dispose();
+
+      expect(host.disposeCalls, 1);
+    });
+
+    test(
+      'disposal waits for setup and prevents late tray initialization',
+      () async {
+        final windowInitializationStarted = Completer<void>();
+        final windowInitializationGate = Completer<void>();
+        final host = _FakeDesktopWindowHost(
+          windowInitializationStarted: windowInitializationStarted,
+          windowInitializationGate: windowInitializationGate,
+        );
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        final initialization = controller.initialize();
+        await windowInitializationStarted.future;
+        final disposal = controller.dispose();
+
+        expect(host.disposeCalls, 0);
+        windowInitializationGate.complete();
+        await Future.wait(<Future<void>>[initialization, disposal]);
+
+        expect(host.initializeTrayCalls, 0);
+        expect(host.disposeCalls, 1);
+      },
+    );
+
+    test('disposal prevents a pending geometry read from writing', () async {
+      final boundsReadStarted = Completer<void>();
+      final boundsReadGate = Completer<void>();
+      final host = _FakeDesktopWindowHost(
+        boundsReadStarted: boundsReadStarted,
+        boundsReadGate: boundsReadGate,
+      );
+      final geometryStore = _FakeGeometryStore();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: geometryStore,
+      );
+
+      await controller.initialize();
+      final save = host.requestBoundsChanged();
+      await boundsReadStarted.future;
+      final disposal = controller.dispose();
+      boundsReadGate.complete();
+      await Future.wait(<Future<void>>[save, disposal]);
+
+      expect(geometryStore.lastWrittenBounds, isNull);
+      expect(host.disposeCalls, 1);
+    });
+
+    test(
+      'does not replace saved geometry with startup bounds events',
+      () async {
+        const savedBounds = DesktopWindowBounds(
+          left: 240,
+          top: 120,
+          width: 900,
+          height: 700,
+        );
+        final host = _FakeDesktopWindowHost(
+          emitsBoundsDuringWindowInitialization: true,
+        );
+        final geometryStore = _FakeGeometryStore()..storedBounds = savedBounds;
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: geometryStore,
+        );
+
+        await controller.initialize();
+
+        expect(host.bounds.left, savedBounds.left);
+        expect(host.bounds.top, savedBounds.top);
+        expect(host.bounds.width, savedBounds.width);
+        expect(host.bounds.height, savedBounds.height);
+        expect(geometryStore.lastWrittenBounds, isNull);
+      },
+    );
+
+    test(
+      'uses the available work area when applying the minimum size',
+      () async {
+        final host = _FakeDesktopWindowHost(
+          workArea: const DesktopWorkArea(
+            left: 0,
+            top: 0,
+            width: 320,
+            height: 450,
+          ),
+        );
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+
+        await controller.initialize();
+
+        expect(host.minimumSize?.width, 320);
+        expect(host.minimumSize?.height, 450);
+        expect(host.bounds.width, 320);
+        expect(host.bounds.height, 450);
+      },
+    );
+  });
+
+  group('restoreDesktopWindowBounds', () {
+    test('clamps saved bounds to the available monitor work area', () {
+      final restored = restoreDesktopWindowBounds(
+        workArea: const DesktopWorkArea(
+          left: 100,
+          top: 50,
+          width: 800,
+          height: 600,
+        ),
+        savedBounds: const DesktopWindowBounds(
+          left: -400,
+          top: -300,
+          width: 2000,
+          height: 2000,
+        ),
+      );
+
+      expect(restored.left, 100);
+      expect(restored.top, 50);
+      expect(restored.width, 800);
+      expect(restored.height, 600);
+    });
+  });
+}
+
+class _FakeDesktopWindowHost implements DesktopWindowHost {
+  bool fullScreen = false;
+  int fullScreenChanges = 0;
+  bool failFullScreen = false;
+
+  @override
+  Future<bool> isFullScreen() async => fullScreen;
+
+  @override
+  Future<void> setFullScreen(bool enabled) async {
+    if (failFullScreen) throw StateError('Full screen unavailable');
+    fullScreen = enabled;
+    fullScreenChanges += 1;
+  }
+
+  bool taskbarVisible = true;
+  int failedTaskbarChanges = 0;
+  bool trayVisible = true;
+
+  @override
+  Future<void> setTaskbarVisible(bool visible) async {
+    if (failedTaskbarChanges > 0) {
+      failedTaskbarChanges -= 1;
+      throw StateError('Taskbar change failed.');
+    }
+    taskbarVisible = visible;
+  }
+
+  @override
+  Future<void> setTrayVisible(bool visible) async {
+    trayVisible = visible;
+  }
+
+  void Function(bool)? visibilityHandler;
+
+  @override
+  void setVisibilityChangedHandler(void Function(bool)? handler) {
+    visibilityHandler = handler;
+  }
+
+  _FakeDesktopWindowHost({
+    this.failedTrayInitializations = 0,
+    this.failedQuitAttempts = 0,
+    this.failedShowAndFocusAttempts = 0,
+    this.failedWindowInitializations = 0,
+    this.failedCloseHandlerInitializations = 0,
+    this.emitsBoundsDuringWindowInitialization = false,
+    this.windowInitializationStarted,
+    this.windowInitializationGate,
+    this.boundsReadStarted,
+    this.boundsReadGate,
+    this.quitGate,
+    DesktopWorkArea? workArea,
+  }) : workArea =
+           workArea ??
+           const DesktopWorkArea(left: 0, top: 0, width: 1920, height: 1080);
+
+  int failedTrayInitializations;
+  int failedQuitAttempts;
+  int failedShowAndFocusAttempts;
+  int failedWindowInitializations;
+  int failedCloseHandlerInitializations;
+  final bool emitsBoundsDuringWindowInitialization;
+  final Completer<void>? windowInitializationStarted;
+  final Completer<void>? windowInitializationGate;
+  final Completer<void>? boundsReadStarted;
+  final Completer<void>? boundsReadGate;
+  final Completer<void>? quitGate;
+  final DesktopWorkArea workArea;
+  DesktopWindowBounds bounds = desktopWindowInitialBounds;
+  Future<void> Function()? closeHandler;
+  Future<void> Function()? boundsChangedHandler;
+  Future<void> Function()? openHandler;
+  Future<void> Function()? captureHandler;
+  Future<void> Function()? settingsHandler;
+  int hideCalls = 0;
+  int showAndFocusCalls = 0;
+  int quitCalls = 0;
+  int initializeWindowCalls = 0;
+  bool? shownAtInitialization;
+  int setCloseHandlerCalls = 0;
+  int initializeTrayCalls = 0;
+  int disposeCalls = 0;
+  DesktopWindowSize? minimumSize;
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls += 1;
+    closeHandler = null;
+    boundsChangedHandler = null;
+    openHandler = null;
+    captureHandler = null;
+    settingsHandler = null;
+  }
+
+  @override
+  Future<DesktopWindowBounds> getBounds() async {
+    boundsReadStarted?.complete();
+    await boundsReadGate?.future;
+    return bounds;
+  }
+
+  @override
+  Future<void> hide() async {
+    hideCalls += 1;
+  }
+
+  @override
+  Future<void> initializeTray({
+    bool visible = true,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
+  }) async {
+    trayVisible = visible;
+    initializeTrayCalls += 1;
+    if (failedTrayInitializations > 0) {
+      failedTrayInitializations -= 1;
+      throw StateError('Tray setup failed.');
+    }
+    trayMenu = menu;
+    Future<void> Function() command(TrayCommand command) =>
+        () => events.onAction(TrayCommandAction(command));
+    openHandler = command(TrayCommand.openApp);
+    captureHandler = command(TrayCommand.toggleCapture);
+    settingsHandler = command(TrayCommand.openSettings);
+  }
+
+  List<TrayMenuEntry> trayMenu = const [];
+
+  CaptureControlState get captureState {
+    final label = trayMenu
+        .whereType<TrayMenuItem>()
+        .firstWhere((item) => item.key == TrayMenuKeys.toggleCapture)
+        .label;
+    return CaptureControlState.values.firstWhere(
+      (state) => state.actionLabel == label,
+    );
+  }
+
+  @override
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu) async {
+    trayMenu = menu;
+  }
+
+  @override
+  Future<void> openQuickPaste() async {}
+
+  @override
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+    bool show = true,
+  }) async {
+    shownAtInitialization = show;
+    taskbarVisible = showInTaskbar;
+    initializeWindowCalls += 1;
+    windowInitializationStarted?.complete();
+    await windowInitializationGate?.future;
+    if (failedWindowInitializations > 0) {
+      failedWindowInitializations -= 1;
+      throw StateError('Window setup failed.');
+    }
+    bounds = initialBounds;
+    if (emitsBoundsDuringWindowInitialization) {
+      await boundsChangedHandler?.call();
+    }
+  }
+
+  @override
+  Future<void> quit() async {
+    quitCalls += 1;
+    await quitGate?.future;
+    if (failedQuitAttempts > 0) {
+      failedQuitAttempts -= 1;
+      throw StateError('Quit failed.');
+    }
+  }
+
+  @override
+  void setBoundsChangedHandler(Future<void> Function() onBoundsChanged) {
+    boundsChangedHandler = onBoundsChanged;
+  }
+
+  @override
+  Future<void> setBounds(DesktopWindowBounds value) async {
+    bounds = value;
+  }
+
+  @override
+  Future<void> setMinimumSize(DesktopWindowSize size) async {
+    minimumSize = size;
+  }
+
+  @override
+  Future<void> setCloseHandler(Future<void> Function() onCloseRequested) async {
+    setCloseHandlerCalls += 1;
+    if (failedCloseHandlerInitializations > 0) {
+      failedCloseHandlerInitializations -= 1;
+      throw StateError('Close handler setup failed.');
+    }
+    closeHandler = onCloseRequested;
+  }
+
+  @override
+  Future<void> showAndFocus() async {
+    showAndFocusCalls += 1;
+    if (failedShowAndFocusAttempts > 0) {
+      failedShowAndFocusAttempts -= 1;
+      throw StateError('Window focus failed.');
+    }
+  }
+
+  @override
+  Future<DesktopWorkArea> workAreaFor(DesktopWindowBounds bounds) async {
+    return workArea;
+  }
+
+  Future<void> requestClose() async {
+    await closeHandler?.call();
+  }
+
+  Future<void> requestBoundsChanged() async {
+    await boundsChangedHandler?.call();
+  }
+
+  Future<void> requestOpen() async {
+    await openHandler?.call();
+  }
+
+  Future<void> requestCapture() async {
+    await captureHandler?.call();
+  }
+
+  Future<void> requestSettings() async {
+    await settingsHandler?.call();
+  }
+}
+
+class _FakeGeometryStore implements DesktopWindowGeometryStore {
+  DesktopWindowBounds? storedBounds;
+  DesktopWindowBounds? lastWrittenBounds;
+
+  @override
+  Future<DesktopWindowBounds?> read() async => storedBounds;
+
+  @override
+  Future<void> write(DesktopWindowBounds bounds) async {
+    lastWrittenBounds = bounds;
+  }
+}

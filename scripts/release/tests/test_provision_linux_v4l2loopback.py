@@ -1,0 +1,222 @@
+import importlib.util
+import os
+from pathlib import Path
+import stat
+import subprocess
+import tempfile
+import unittest
+from unittest import mock
+
+
+ROOT = Path(__file__).resolve().parents[3]
+SPEC = importlib.util.spec_from_file_location("provision_linux_v4l2", ROOT / "scripts/release/provision-linux-v4l2loopback.py")
+tool = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(tool)
+
+
+class ProvisionLinuxV4L2Test(unittest.TestCase):
+    def test_kernel_packages_require_headers_and_dkms_with_optional_published_extras(self):
+        for output, includes_extra in (("", False), ("  Candidate: (none)\n", False), ("  Candidate: 7.0.0-1017.17\n", True)):
+            with self.subTest(output=output), mock.patch.object(
+                tool.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=output),
+            ) as run:
+                packages = tool.kernel_packages("7.0.0-1017-azure")
+            self.assertEqual(packages[0], "linux-headers-7.0.0-1017-azure")
+            self.assertEqual(packages[-2:], ["v4l2loopback-dkms", "v4l-utils"])
+            self.assertEqual("linux-modules-extra-7.0.0-1017-azure" in packages, includes_extra)
+            run.assert_called_once_with(["apt-cache", "policy", "linux-modules-extra-7.0.0-1017-azure"], check=True, capture_output=True, text=True)
+
+    def test_package_metadata_failure_is_fatal_instead_of_becoming_an_absent_package(self):
+        with mock.patch.object(tool.subprocess, "run", side_effect=subprocess.CalledProcessError(100, "apt-cache")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                tool.kernel_packages("7.0.0-1017-azure")
+
+    def scenario_reset(self, succeeds):
+        script = (ROOT / "scripts/release/run-linux-native-scenarios.sh").read_text()
+        start = script.index('if [[ -n "${COPYPASTE_QUALIFICATION_V4L2_STATE:-}" ]]')
+        end = script.index('\npython3 ', start)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stub = root / "python3"
+            stub.write_text("#!/bin/sh\necho 'package preparation output'\necho 'device preparation detail' >&2\nexit " + ("0" if succeeds else "7") + "\n")
+            stub.chmod(0o755)
+            environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                           "TMPDIR": directory, "ROOT": str(ROOT), "COPYPASTE_QUALIFICATION_V4L2_STATE": "owned-state"}
+            result = subprocess.run(["bash", "-c", "set -euo pipefail\n" + script[start:end]],
+                                    env=environment, capture_output=True, text=True)
+            self.assertEqual(list(root.iterdir()), [stub])
+            return result
+
+    def test_successful_camera_reset_does_not_pollute_scenario_protocol(self):
+        result = self.scenario_reset(True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_camera_reset_failure_stays_fatal_and_preserves_complete_diagnostics(self):
+        result = self.scenario_reset(False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "package preparation output\ndevice preparation detail\n")
+
+    def test_reset_checks_headless_scope_before_any_device_mutation(self):
+        with mock.patch.object(tool, "require_ci", side_effect=RuntimeError("headless CI")), \
+             mock.patch.object(tool, "cleanup") as cleanup, \
+             mock.patch.object(tool, "provision") as provision:
+            with self.assertRaisesRegex(RuntimeError, "headless CI"):
+                tool.reset(Path("state"), Path("environment"))
+            cleanup.assert_not_called()
+            provision.assert_not_called()
+
+    def test_reset_does_not_recreate_an_input_when_prior_ownership_or_unload_fails(self):
+        with mock.patch.object(tool, "require_ci"), \
+             mock.patch.object(tool, "cleanup", side_effect=RuntimeError("owned device changed")), \
+             mock.patch.object(tool, "provision") as provision:
+            with self.assertRaisesRegex(RuntimeError, "owned device changed"):
+                tool.reset(Path("state"), Path("environment"))
+            provision.assert_not_called()
+
+    def test_reset_releases_the_exact_prior_device_before_provisioning_the_next(self):
+        calls = []
+        state = Path("state")
+        environment = Path("environment")
+        with mock.patch.object(tool, "require_ci"), \
+             mock.patch.object(tool, "cleanup", side_effect=lambda path, missing: calls.append(("release", path, missing))), \
+             mock.patch.object(tool, "provision", side_effect=lambda path, output: calls.append(("create", path, output))):
+            tool.reset(state, environment)
+        self.assertEqual(calls, [("release", state, False), ("create", state, environment)])
+
+    def test_requires_headless_ci(self):
+        with mock.patch.dict(os.environ, {"CI": "", "COPYPASTE_QUALIFICATION_HEADLESS": ""}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "headless CI"):
+                tool.require_ci()
+
+    def test_refuses_preexisting_device_or_module(self):
+        with mock.patch.object(Path, "exists", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "already in use"):
+                tool.assert_unowned_target()
+        with mock.patch.object(Path, "exists", side_effect=[False, False, True]):
+            with self.assertRaisesRegex(RuntimeError, "already loaded"):
+                tool.assert_unowned_target()
+
+    def test_accepts_one_exclusive_loopback_device_and_rejects_other_arrays(self):
+        self.assertTrue(tool.exclusive_caps_enabled("Y,N,N,N,N,N,N,N"))
+        self.assertTrue(tool.exclusive_caps_enabled("1"))
+        self.assertFalse(tool.exclusive_caps_enabled("N,N,N,N,N,N,N,N"))
+        self.assertFalse(tool.exclusive_caps_enabled("Y,N,Y"))
+
+    def test_state_is_exclusive_and_exactly_job_owned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v4l2.json"
+            tool.write_state(path, tool.state_base(os.getuid(), os.getgid(), "prepared"))
+            self.assertEqual(tool.read_state(path)["device"], "/dev/video42")
+            with self.assertRaisesRegex(RuntimeError, "already exists"):
+                tool.regular_state(path)
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "does not describe"):
+                tool.read_state(path)
+
+    def test_appends_to_precreated_environment_without_overwriting_exports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "github-env"
+            path.write_text("UNCHANGED=value\n", encoding="utf-8")
+            tool.append_environment(path, "COPYPASTE_QUALIFICATION_V4L2_DEVICE=/dev/video42\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "UNCHANGED=value\nCOPYPASTE_QUALIFICATION_V4L2_DEVICE=/dev/video42\n")
+
+    def test_rejects_symlink_and_wrong_owner_environment_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.write_text("other=value\n", encoding="utf-8")
+            link = root / "github-env"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, "regular file"):
+                tool.append_environment(link, "owned=value\n")
+        details = mock.Mock(st_mode=stat.S_IFREG, st_uid=os.getuid() + 1)
+        with mock.patch.object(Path, "lstat", return_value=details):
+            with self.assertRaisesRegex(RuntimeError, "owned by this job user"):
+                tool.append_environment(Path("/unused"), "owned=value\n")
+
+    def test_unwinds_a_created_module_after_environment_write_failure(self):
+        state = mock.Mock()
+        owned = {**tool.state_base(os.getuid(), os.getgid(), "loaded"), "live": {"major": 81, "minor": 42, "uid": os.getuid(), "gid": os.getgid(), "mode": "0660"}}
+        with mock.patch.object(tool, "read_state", return_value=owned), \
+             mock.patch.object(tool, "read_live_device", return_value={"major": 81, "minor": 42, "uid": os.getuid(), "gid": os.getgid(), "mode": "0660"}), \
+             mock.patch.object(tool.Path, "exists", side_effect=[True, False, False]), \
+             mock.patch.object(tool, "command") as command:
+            tool.unwind_provision(state, True, owned["live"])
+        command.assert_called_once_with(["sudo", "modprobe", "-r", "v4l2loopback"])
+        state.unlink.assert_called_once_with()
+
+    def test_does_not_unwind_a_replaced_state_file(self):
+        state = Path("/unsafe-replaced-state")
+        with mock.patch.object(tool, "read_state", side_effect=RuntimeError("state does not describe this job")), \
+             mock.patch.object(tool, "command") as command:
+            with self.assertRaisesRegex(RuntimeError, "does not describe"):
+                tool.unwind_provision(state, True)
+        command.assert_not_called()
+
+    def test_rejects_foreign_live_parameters_before_module_removal(self):
+        state = mock.Mock()
+        owned = {**tool.state_base(os.getuid(), os.getgid(), "active"), "live": {"major": 81, "minor": 42, "uid": os.getuid(), "gid": os.getgid(), "mode": "0600"}}
+        with mock.patch.object(tool, "read_state", return_value=owned), \
+             mock.patch.object(tool.Path, "exists", return_value=True), \
+             mock.patch.object(tool, "read_live_device", return_value={**owned["live"], "minor": 43}), \
+             mock.patch.object(tool, "command") as command:
+            with self.assertRaisesRegex(RuntimeError, "no longer matches"):
+                tool.unwind_provision(state, True)
+        command.assert_not_called()
+
+    def test_removes_only_its_partial_state_on_write_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state"
+            with mock.patch.object(tool.os, "write", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    tool.write_state(path, tool.state_base(os.getuid(), os.getgid(), "pending"))
+            self.assertFalse(path.exists())
+
+    def test_active_transition_write_failure_keeps_durable_loaded_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state"
+            loaded = {**tool.state_base(os.getuid(), os.getgid(), "loaded"), "live": {"major": 81, "minor": 42, "uid": 0, "gid": 44, "mode": "0660"}}
+            tool.write_state(path, loaded)
+            active = {**tool.state_base(os.getuid(), os.getgid(), "active"), "live": {"major": 81, "minor": 42, "uid": os.getuid(), "gid": os.getgid(), "mode": "0600"}}
+            with mock.patch.object(tool.os, "replace", side_effect=OSError("rename failed")):
+                with self.assertRaises(OSError):
+                    tool.replace_state(path, active)
+            self.assertEqual(tool.read_state(path), loaded)
+            self.assertFalse(path.with_name("state.next").exists())
+
+    def test_chown_then_chmod_failure_unwinds_with_refreshed_live_ownership(self):
+        root_live = {"major": 81, "minor": 42, "uid": 0, "gid": 44, "mode": "0660"}
+        job_live = {**root_live, "uid": os.getuid(), "gid": os.getgid()}
+        commands = []
+
+        def run(arguments):
+            commands.append(arguments)
+            if arguments[:3] == ["sudo", "chmod", "600"]:
+                raise RuntimeError("chmod failed")
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state"
+            environment = Path(directory) / "github-env"
+            environment.write_text("OTHER=value\n", encoding="utf-8")
+            with mock.patch.object(tool, "require_ci"), \
+                 mock.patch.object(tool, "assert_unowned_target"), \
+                 mock.patch.object(tool, "device_is_character", return_value=True), \
+                 mock.patch.object(tool.platform, "release", return_value="6.8.0"), \
+                 mock.patch.object(tool, "kernel_packages", return_value=["linux-headers-6.8.0", "linux-modules-extra-6.8.0", "v4l2loopback-dkms", "v4l-utils"]), \
+                 mock.patch.object(tool, "command", side_effect=run), \
+                 mock.patch.object(tool, "read_live_device", side_effect=[root_live, job_live]), \
+                 mock.patch.object(tool, "unwind_provision") as unwind:
+                with self.assertRaisesRegex(RuntimeError, "chmod failed"):
+                    tool.provision(state, environment)
+            self.assertEqual(commands[1], [
+                "sudo", "apt-get", "install", "--yes", "--no-install-recommends",
+                "linux-headers-6.8.0", "linux-modules-extra-6.8.0",
+                "v4l2loopback-dkms", "v4l-utils",
+            ])
+            self.assertEqual(commands[3], ["sudo", "udevadm", "settle"])
+            self.assertEqual(commands[-2:], [["sudo", "chown", f"{os.getuid()}:{os.getgid()}", "/dev/video42"], ["sudo", "chmod", "600", "/dev/video42"]])
+            self.assertEqual(unwind.call_args.args[2], job_live)

@@ -1,0 +1,888 @@
+//! `copypaste` — the command-line client.
+//!
+//! The CLI speaks IPC and nothing else: it does not depend on
+//! `copypaste-core`, so it cannot open the database, hold a key, or decide what
+//! has any content classification. Everything it knows comes back over the socket as typed
+//! [`copypaste_ipc`] values.
+//!
+//! Layout:
+//! * [`client`] — socket, framing, typed request/response
+//! * [`render`] — human-readable output (pure functions)
+//! * [`cloud`] — where `cloud sign-in` gets its two secrets, and why not argv
+//! * [`error`] — exit codes and the "no paths in errors" rule
+
+#![forbid(unsafe_code)]
+
+mod cli;
+mod client;
+mod cloud;
+mod doctor;
+mod error;
+mod render;
+mod report;
+#[cfg(any(windows, test))]
+mod shutdown;
+mod space;
+
+#[cfg(test)]
+use clap::Parser;
+use cli::{
+    config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, ModuleAction, PairAction,
+};
+use copypaste_ipc::{ConfigPatch, ExportData, Method, Response};
+use error::CliError;
+use std::io::{IsTerminal, Read, Write};
+use std::path::Path;
+
+#[cfg_attr(windows, tokio::main(flavor = "multi_thread", worker_threads = 1))]
+#[cfg_attr(not(windows), tokio::main(flavor = "current_thread"))]
+async fn main() {
+    let cli = parse_cli();
+    let code = match run(cli).await {
+        Ok(()) => error::EXIT_OK,
+        Err(err) => {
+            eprintln!("error: {}", err.user_message());
+            err.exit_code()
+        }
+    };
+    // `process::exit` skips destructors, and stdout is buffered.
+    let _ = std::io::stdout().flush();
+    std::process::exit(code);
+}
+
+async fn run(cli: Cli) -> Result<(), CliError> {
+    // Two commands are not one request and one reply, so they are handled
+    // before the mapping below rather than bent into it.
+    if let Command::Watch = &cli.command {
+        return watch(cli.json).await;
+    }
+    if let Command::Space { action } = &cli.command {
+        return space::run(action.as_ref(), cli.json).await;
+    }
+    if let Command::Pause { peer } | Command::Resume { peer } = &cli.command {
+        let paused = matches!(&cli.command, Command::Pause { .. });
+        return set_paused(peer.as_deref(), paused).await;
+    }
+    if let Command::Module {
+        action: ModuleAction::Connect { id, endpoint },
+    } = &cli.command
+    {
+        return client::connect_endpoint(id, endpoint).await;
+    }
+
+    #[cfg(windows)]
+    if let Command::Shutdown {
+        wait_for_exit: true,
+    } = &cli.command
+    {
+        let completion = client::shutdown_and_wait().await?;
+        report::report_shutdown_completion(completion);
+        return Ok(());
+    }
+
+    let method = match &cli.command {
+        Command::List { limit, cursor } => Method::List {
+            limit: *limit,
+            cursor: cursor.clone(),
+        },
+        Command::Search { query, limit } => Method::Search {
+            query: query.clone(),
+            limit: *limit,
+        },
+        Command::Add { text } => Method::Add {
+            content: read_content(text.as_deref())?,
+        },
+        Command::Copy { id } => Method::Copy { id: id.clone() },
+        Command::Delete { id } => Method::Delete { id: id.clone() },
+        Command::Clear { yes } => {
+            // Destroying history needs an explicit decision, and a piped stdin
+            // is not one (the privacy contract: data loss is the worst outcome).
+            if !yes && !confirm_clear()? {
+                out("cancelled; nothing was deleted");
+                return Ok(());
+            }
+            Method::DeleteAll { through: None }
+        }
+        Command::Pin { id } => Method::Pin {
+            id: id.clone(),
+            pinned: true,
+        },
+        Command::Unpin { id } => Method::Pin {
+            id: id.clone(),
+            pinned: false,
+        },
+        Command::Reorder { ids } => Method::ReorderPinned { ids: ids.clone() },
+        Command::Status | Command::Doctor => Method::Status,
+        Command::Shutdown { .. } => Method::Shutdown,
+        Command::Pair { action } => match action {
+            PairAction::Create => Method::PairCreateInvite,
+            PairAction::Join { code, addr } => Method::PairJoin {
+                code: code.clone(),
+                addr: addr.clone(),
+            },
+            PairAction::Progress => Method::PairProgress,
+            PairAction::Confirm => Method::PairConfirm { accept: true },
+            PairAction::Reject => Method::PairConfirm { accept: false },
+            PairAction::Cancel => Method::PairCancel,
+        },
+        Command::Peers => Method::Peers,
+        Command::Unpair { pairing_id } => Method::Unpair {
+            pairing_id: pairing_id.clone(),
+        },
+        Command::Revoke { pairing_id, yes } => {
+            // Irreversible, and the key on the other device is gone with it:
+            // both halves have to be paired again by hand (the privacy contract).
+            if !yes && !confirm_revoke(pairing_id)? {
+                out("cancelled; that device is still paired");
+                return Ok(());
+            }
+            Method::Revoke {
+                pairing_id: pairing_id.clone(),
+            }
+        }
+        Command::Sync { peer } => Method::SyncNow {
+            pairing_id: peer.clone(),
+        },
+        Command::Send { id, to } => Method::SendClips {
+            pairing_ids: to.clone(),
+            item_ids: vec![id.clone()],
+        },
+        Command::Discover { rescan } => {
+            if *rescan {
+                Method::Rescan
+            } else {
+                Method::Discovered
+            }
+        }
+        Command::Export { limit, .. } => Method::Export { limit: *limit },
+        Command::Import { file } => Method::Import {
+            items: read_export(file.as_deref())?.items,
+        },
+        Command::Backup { dest } => Method::Backup {
+            dest_path: dest.to_string_lossy().into_owned(),
+        },
+        Command::Restore { src, yes } => {
+            // Restoring replaces every item on this device. A piped stdin is
+            // not a decision (the privacy contract: data loss is the worst
+            // outcome).
+            if !yes && !confirm_restore()? {
+                out("cancelled; nothing was changed");
+                return Ok(());
+            }
+            Method::Restore {
+                src_path: src.to_string_lossy().into_owned(),
+                confirm: true,
+            }
+        }
+        Command::Config { action } => match action {
+            ConfigAction::Show => Method::GetConfig,
+            ConfigAction::Set { .. } => Method::SetConfig {
+                patch: config_patch(action),
+            },
+        },
+        Command::Watch
+        | Command::Module { .. }
+        | Command::Space { .. }
+        | Command::Pause { .. }
+        | Command::Resume { .. } => {
+            unreachable!("handled above")
+        }
+        Command::Cloud { action } => match action {
+            CloudAction::SignIn { email } => {
+                let (password, passphrase) = cloud::read_credentials()?;
+                Method::CloudSignIn {
+                    email: email.clone(),
+                    password,
+                    passphrase,
+                }
+            }
+            CloudAction::SignOut => Method::CloudSignOut,
+            CloudAction::Status => Method::CloudStatus,
+            CloudAction::Sync => Method::CloudSyncNow,
+        },
+    };
+
+    let response = match client::request(method).await {
+        Ok(response) => response,
+        Err(error) => {
+            if cli.json && matches!(&cli.command, Command::Doctor) {
+                out(&doctor::unavailable_json());
+            }
+            return Err(error);
+        }
+    };
+    if matches!(&cli.command, Command::Doctor) {
+        let status = client::expect_status(client::into_data(response)?)?;
+        out(&doctor::render(&status, cli.json));
+        return Ok(());
+    }
+    finish_response(&cli.command, cli.json, response, out)
+}
+
+fn finish_response(
+    command: &Command,
+    json: bool,
+    response: Response,
+    write_json: impl FnOnce(&str),
+) -> Result<(), CliError> {
+    if json {
+        // Printed before the ok/error split so a failing command still yields a
+        // machine-readable answer; the exit code below still reflects it.
+        let text = serde_json::to_string_pretty(&response)
+            .map_err(|e| CliError::local(format!("could not render the reply as JSON: {e}")))?;
+        write_json(&text);
+    }
+
+    let data = client::into_data(response)?;
+    if json {
+        report::apply_side_effects(command, data)
+    } else {
+        report::report(command, data)
+    }
+}
+
+/// Subscribe and print a line per change until interrupted.
+/// Pause or resume automatic sync, everywhere or with one paired device. The
+/// policy is keyed by device id, which `peers` reports once a sync identified
+/// the device.
+async fn set_paused(pairing_id: Option<&str>, paused: bool) -> Result<(), CliError> {
+    let config = client::expect_config(client::into_data(
+        client::request(Method::GetConfig).await?,
+    )?)?
+    .config;
+    let mut device_sync = config.device_sync;
+    let scope = match pairing_id {
+        None => {
+            device_sync.paused = paused;
+            "everywhere".to_string()
+        }
+        Some(pairing_id) => {
+            let peers =
+                client::expect_peers(client::into_data(client::request(Method::Peers).await?)?)?;
+            let peer = peers
+                .iter()
+                .find(|peer| peer.pairing_id == pairing_id)
+                .ok_or_else(|| CliError::local(format!("no paired device {pairing_id}")))?;
+            let device_id = peer
+                .device_id
+                .clone()
+                .ok_or_else(|| CliError::local("sync with that device once before pausing it"))?;
+            let mut policy = device_sync.device(&device_id);
+            policy.paused = paused;
+            device_sync.devices.insert(device_id, policy);
+            format!("with {}", peer.name)
+        }
+    };
+    client::expect_config(client::into_data(
+        client::request(Method::SetConfig {
+            patch: ConfigPatch {
+                device_sync: Some(device_sync),
+                ..ConfigPatch::default()
+            },
+        })
+        .await?,
+    )?)?;
+    out(&format!(
+        "{} automatic sync {scope}",
+        if paused { "paused" } else { "resumed" }
+    ));
+    Ok(())
+}
+
+async fn watch(json: bool) -> Result<(), CliError> {
+    client::watch(|event| {
+        let line = if json {
+            serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            render::event_text(&event)
+        };
+        out(&line);
+        true
+    })
+    .await
+}
+
+/// Read an export file, or stdin.
+fn read_export(path: Option<&Path>) -> Result<ExportData, CliError> {
+    let raw = match path {
+        Some(path) => std::fs::read_to_string(path).map_err(|e| {
+            // The user supplied the path, so naming *what went wrong* is
+            // useful; the path itself is scrubbed on the way out by
+            // `CliError::user_message` (the privacy contract).
+            CliError::local(format!("could not read the import file: {e}"))
+        })?,
+        None => {
+            let stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                return Err(CliError::local(
+                    "nothing to import: pass a file, or pipe one on stdin",
+                ));
+            }
+            let mut buffer = String::new();
+            stdin
+                .lock()
+                .read_to_string(&mut buffer)
+                .map_err(|e| CliError::local(format!("could not read stdin: {e}")))?;
+            buffer
+        }
+    };
+
+    serde_json::from_str(&raw).map_err(|e| {
+        CliError::local(format!(
+            "that file is not a CopyPaste export: {e}. Expected the JSON written by `copypaste export`."
+        ))
+    })
+}
+
+fn confirm_restore() -> Result<bool, CliError> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Err(CliError::local(
+            "refusing to replace this device's history without confirmation: pass --yes",
+        ));
+    }
+    eprint!("Replace this device's clipboard history with the backup? [y/N] ");
+    let _ = std::io::stderr().flush();
+
+    let mut answer = String::new();
+    stdin
+        .read_line(&mut answer)
+        .map_err(|e| CliError::local(format!("could not read the answer: {e}")))?;
+    Ok(is_affirmative(&answer))
+}
+
+/// Write one block to stdout, treating a closed pipe as a normal end.
+///
+/// `println!` panics when its write fails, so `copypaste list | head -1` used to
+/// end in a Rust backtrace instead of behaving like every other Unix tool. A
+/// downstream reader that stopped reading is not this program's failure: exit
+/// quietly, the way SIGPIPE would have.
+pub(crate) fn out(text: &str) {
+    use std::io::ErrorKind;
+    let mut stdout = std::io::stdout().lock();
+    let wrote = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.write_all(b"\n"));
+    if let Err(e) = wrote {
+        if e.kind() == ErrorKind::BrokenPipe {
+            std::process::exit(error::EXIT_OK);
+        }
+        // Anything else — a full disk, a closed descriptor — is worth saying,
+        // once, on the stream that is still open.
+        eprintln!("error: could not write output: {e}");
+        std::process::exit(error::EXIT_OTHER);
+    }
+}
+
+pub(crate) use copypaste_clock::now_ms;
+
+/// The content for `add`: the argument if given, otherwise stdin.
+fn read_content(text: Option<&str>) -> Result<String, CliError> {
+    if let Some(text) = text {
+        if text.is_empty() {
+            return Err(CliError::local("nothing to add: TEXT is empty"));
+        }
+        return Ok(text.to_string());
+    }
+
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        // Blocking on an interactive terminal looks like a hang.
+        return Err(CliError::local(
+            "nothing to add: pass the text as an argument, or pipe it on stdin",
+        ));
+    }
+
+    let mut buffer = String::new();
+    stdin
+        .lock()
+        .read_to_string(&mut buffer)
+        .map_err(|e| CliError::local(format!("could not read stdin: {e}")))?;
+
+    let content = strip_one_trailing_newline(&buffer);
+    if content.is_empty() {
+        return Err(CliError::local("nothing to add: stdin was empty"));
+    }
+    Ok(content.to_string())
+}
+
+/// Drop the single trailing newline a shell adds, and nothing else.
+///
+/// `echo hi | copypaste add` should store `hi`, but content that genuinely ends
+/// in blank lines must keep them.
+fn strip_one_trailing_newline(input: &str) -> &str {
+    input
+        .strip_suffix("\r\n")
+        .or_else(|| input.strip_suffix('\n'))
+        .unwrap_or(input)
+}
+
+fn confirm_clear() -> Result<bool, CliError> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Err(CliError::local(
+            "refusing to delete every item without confirmation: pass --yes",
+        ));
+    }
+    // Prompt on stderr so `copypaste clear > file` still captures only output.
+    eprint!("Delete all clipboard items? This cannot be undone. [y/N] ");
+    let _ = std::io::stderr().flush();
+
+    let mut answer = String::new();
+    stdin
+        .read_line(&mut answer)
+        .map_err(|e| CliError::local(format!("could not read the answer: {e}")))?;
+    Ok(is_affirmative(&answer))
+}
+
+fn confirm_revoke(pairing_id: &str) -> Result<bool, CliError> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Err(CliError::local(
+            "refusing to revoke a device without confirmation: pass --yes",
+        ));
+    }
+    eprint!(
+        "Revoke {pairing_id}? Its code can never be used again, and pairing these \
+         devices means a new code on both. [y/N] "
+    );
+    let _ = std::io::stderr().flush();
+
+    let mut answer = String::new();
+    stdin
+        .read_line(&mut answer)
+        .map_err(|e| CliError::local(format!("could not read the answer: {e}")))?;
+    Ok(is_affirmative(&answer))
+}
+
+/// Only an explicit yes counts. Anything else, including empty, is no.
+fn is_affirmative(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+    use copypaste_ipc::{ErrorCode, ExportItem, ResponseData};
+    use std::path::PathBuf;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("should parse")
+    }
+
+    fn test_output_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "copypaste-cli-{}-{name}-{}.json",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    fn one_item_export() -> ExportData {
+        ExportData {
+            items: vec![ExportItem {
+                privacy: Default::default(),
+                content: "hello".to_string(),
+                content_type: "text/plain".to_string(),
+                created_at: 1,
+                pinned: false,
+            }],
+            skipped_non_text: 0,
+            skipped_undecryptable: 0,
+        }
+    }
+
+    #[test]
+    fn clap_definition_is_internally_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn list_has_sensible_defaults() {
+        match parse(&["copypaste", "list"]).command {
+            Command::List { limit, cursor } => {
+                assert_eq!(limit, 50);
+                assert_eq!(cursor, None, "the first page is asked for by omission");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_accepts_a_limit_and_a_page_marker() {
+        match parse(&["copypaste", "list", "--limit", "5", "--cursor", "ab12"]).command {
+            Command::List { limit, cursor } => {
+                assert_eq!(limit, 5);
+                assert_eq!(cursor.as_deref(), Some("ab12"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Offsets are gone from the surface, not merely unused: `--offset 10` on a
+    /// list that grows at the top skips rows, and accepting the flag would let a
+    /// script keep asking for that (B-1, `CopyPaste-8ebg.57`).
+    #[test]
+    fn list_no_longer_accepts_an_offset() {
+        assert!(Cli::try_parse_from(["copypaste", "list", "--offset", "10"]).is_err());
+    }
+
+    #[test]
+    fn a_zero_limit_is_rejected_rather_than_silently_corrected() {
+        assert!(Cli::try_parse_from(["copypaste", "list", "--limit", "0"]).is_err());
+    }
+
+    #[test]
+    fn search_requires_a_query_and_defaults_its_limit() {
+        assert!(Cli::try_parse_from(["copypaste", "search"]).is_err());
+        match parse(&["copypaste", "search", "token"]).command {
+            Command::Search { query, limit } => {
+                assert_eq!(query, "token");
+                assert_eq!(limit, 20);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_is_accepted_before_and_after_the_subcommand() {
+        assert!(parse(&["copypaste", "list", "--json"]).json);
+        assert!(parse(&["copypaste", "--json", "list"]).json);
+        assert!(!parse(&["copypaste", "list"]).json);
+        assert!(parse(&["copypaste", "status", "--json"]).json);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_shutdown_wait_is_explicit_and_conflicts_with_json() {
+        let Command::Shutdown {
+            wait_for_exit: true,
+        } = parse(&["copypaste", "shutdown", "--wait-for-exit"]).command
+        else {
+            panic!("expected the Windows wait-for-exit command");
+        };
+        for args in [
+            ["copypaste", "--json", "shutdown", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--json", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--wait-for-exit", "--json"],
+        ] {
+            assert!(cli::try_parse_cli_from(args).is_err());
+        }
+        assert!(
+            cli::try_parse_cli_from(["copypaste", "shutdown", "--json"])
+                .expect("ordinary JSON shutdown remains valid")
+                .json
+        );
+    }
+
+    #[test]
+    fn json_export_writes_output_and_emits_only_the_response() {
+        let path = test_output_path("json-export");
+        let command = Command::Export {
+            output: Some(path.clone()),
+            limit: 0,
+        };
+        let export = one_item_export();
+        let response = Response::ok(41, ResponseData::Export(export.clone()));
+        let mut emitted = Vec::new();
+
+        finish_response(&command, true, response, |text| {
+            emitted.push(text.to_string())
+        })
+        .expect("JSON export should complete");
+
+        assert_eq!(emitted.len(), 1);
+        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+        assert_eq!(machine.id, 41);
+        assert!(machine.ok);
+        let expected_file = format!("{}\n", serde_json::to_string_pretty(&export).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected_file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn json_only_command_emits_one_typed_response() {
+        let command = Command::Delete {
+            id: "item-1".to_string(),
+        };
+        let response = Response::ok(42, ResponseData::Empty {});
+        let mut emitted = Vec::new();
+
+        finish_response(&command, true, response, |text| {
+            emitted.push(text.to_string())
+        })
+        .expect("JSON command should complete");
+
+        assert_eq!(emitted.len(), 1);
+        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+        assert_eq!(machine.id, 42);
+        assert!(machine.ok);
+    }
+
+    #[test]
+    fn json_error_is_emitted_and_prevents_export_file_creation() {
+        let path = test_output_path("json-error");
+        let command = Command::Export {
+            output: Some(path.clone()),
+            limit: 0,
+        };
+        for (code, expected_exit) in [
+            (ErrorCode::NotFound, error::EXIT_NOT_FOUND),
+            (ErrorCode::ContentTooLarge, error::EXIT_OTHER),
+        ] {
+            let response = Response::err(43, code, "export refused");
+            let mut emitted = Vec::new();
+
+            let err = finish_response(&command, true, response, |text| {
+                emitted.push(text.to_string())
+            })
+            .expect_err("daemon failure should determine the exit");
+
+            assert_eq!(err.exit_code(), expected_exit);
+            assert_eq!(emitted.len(), 1);
+            let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+            assert!(!machine.ok);
+            assert_eq!(machine.error_code, Some(code));
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn add_text_is_optional_so_stdin_can_supply_it() {
+        match parse(&["copypaste", "add"]).command {
+            Command::Add { text } => assert!(text.is_none()),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "add", "hello"]).command {
+            Command::Add { text } => assert_eq!(text.as_deref(), Some("hello")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn id_taking_commands_require_an_id() {
+        for verb in ["copy", "delete", "pin", "unpin"] {
+            assert!(
+                Cli::try_parse_from(["copypaste", verb]).is_err(),
+                "{verb} should require an id"
+            );
+        }
+    }
+
+    #[test]
+    fn pin_and_unpin_are_the_same_method_with_opposite_state() {
+        let pin = parse(&["copypaste", "pin", "abc"]).command;
+        let unpin = parse(&["copypaste", "unpin", "abc"]).command;
+        assert!(matches!(pin, Command::Pin { .. }));
+        assert!(matches!(unpin, Command::Unpin { .. }));
+    }
+
+    #[test]
+    fn clear_takes_yes() {
+        match parse(&["copypaste", "clear"]).command {
+            Command::Clear { yes } => assert!(!yes),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "clear", "--yes"]).command {
+            Command::Clear { yes } => assert!(yes),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_subcommand_is_required() {
+        assert!(Cli::try_parse_from(["copypaste"]).is_err());
+    }
+
+    #[test]
+    fn unknown_subcommands_are_rejected() {
+        assert!(Cli::try_parse_from(["copypaste", "nuke"]).is_err());
+    }
+
+    #[test]
+    fn stdin_loses_exactly_one_trailing_newline() {
+        assert_eq!(strip_one_trailing_newline("hi\n"), "hi");
+        assert_eq!(strip_one_trailing_newline("hi\r\n"), "hi");
+        assert_eq!(strip_one_trailing_newline("hi\n\n"), "hi\n");
+        assert_eq!(strip_one_trailing_newline("hi"), "hi");
+    }
+
+    #[test]
+    fn explicit_empty_text_is_refused() {
+        let err = read_content(Some("")).unwrap_err();
+        assert_eq!(err.exit_code(), error::EXIT_OTHER);
+    }
+
+    #[test]
+    fn whitespace_only_text_is_still_content() {
+        // A tab or a run of spaces is a legitimate thing to keep on a clipboard.
+        assert_eq!(read_content(Some("\t")).unwrap(), "\t");
+    }
+
+    #[test]
+    fn only_an_explicit_yes_confirms_a_clear() {
+        for yes in ["y", "Y", "yes", "YES", " yes \n"] {
+            assert!(is_affirmative(yes), "{yes:?}");
+        }
+        for no in ["", "\n", "n", "no", "sure", "yep", "yeah"] {
+            assert!(!is_affirmative(no), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn pair_create_has_no_unused_peer_name() {
+        match parse(&["copypaste", "pair", "create"]).command {
+            Command::Pair {
+                action: PairAction::Create,
+            } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(Cli::try_parse_from(["copypaste", "pair", "create", "--name", "phone"]).is_err());
+    }
+
+    #[test]
+    fn pair_join_requires_both_a_code_and_an_address() {
+        assert!(Cli::try_parse_from(["copypaste", "pair", "join"]).is_err());
+        assert!(Cli::try_parse_from(["copypaste", "pair", "join", "CODE"]).is_err());
+        match parse(&[
+            "copypaste",
+            "pair",
+            "join",
+            "ABCD-EFGH",
+            "--addr",
+            "127.0.0.1:47654",
+        ])
+        .command
+        {
+            Command::Pair {
+                action: PairAction::Join { code, addr },
+            } => {
+                assert_eq!(code, "ABCD-EFGH");
+                assert_eq!(addr, "127.0.0.1:47654");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn pairing_decisions_are_explicit_subcommands() {
+        for (verb, expected) in [
+            ("progress", PairAction::Progress),
+            ("confirm", PairAction::Confirm),
+            ("reject", PairAction::Reject),
+            ("cancel", PairAction::Cancel),
+        ] {
+            let Command::Pair { action } = parse(&["copypaste", "pair", verb]).command else {
+                panic!("pair action did not parse");
+            };
+            assert_eq!(
+                std::mem::discriminant(&action),
+                std::mem::discriminant(&expected)
+            );
+        }
+    }
+
+    #[test]
+    fn send_needs_a_device_and_pause_scopes_to_one_when_named() {
+        assert!(Cli::try_parse_from(["copypaste", "send", "item"]).is_err());
+        match parse(&["copypaste", "send", "item", "--to", "a", "--to", "b"]).command {
+            Command::Send { id, to } => {
+                assert_eq!((id.as_str(), to), ("item", vec!["a".into(), "b".into()]))
+            }
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "pause"]).command {
+            Command::Pause { peer } => assert!(peer.is_none()),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "resume", "--peer", "abc123"]).command {
+            Command::Resume { peer } => assert_eq!(peer.as_deref(), Some("abc123")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_targets_everything_unless_a_peer_is_named() {
+        match parse(&["copypaste", "sync"]).command {
+            Command::Sync { peer } => assert!(peer.is_none()),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "sync", "--peer", "abc123"]).command {
+            Command::Sync { peer } => assert_eq!(peer.as_deref(), Some("abc123")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn unpair_requires_a_pairing_id() {
+        assert!(Cli::try_parse_from(["copypaste", "unpair"]).is_err());
+        match parse(&["copypaste", "unpair", "abc123"]).command {
+            Command::Unpair { pairing_id } => assert_eq!(pairing_id, "abc123"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Revoking is irreversible, so the prompt is the default and `--yes` is
+    /// the way past it — the shape `clear` and `restore` already use.
+    #[test]
+    fn revoke_takes_a_pairing_id_and_confirms_by_default() {
+        assert!(Cli::try_parse_from(["copypaste", "revoke"]).is_err());
+        match parse(&["copypaste", "revoke", "abc123"]).command {
+            Command::Revoke { pairing_id, yes } => {
+                assert_eq!(pairing_id, "abc123");
+                assert!(!yes);
+            }
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "revoke", "abc123", "--yes"]).command {
+            Command::Revoke { yes, .. } => assert!(yes),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn peer_commands_map_onto_the_wire_methods() {
+        // The mapping is the whole of `run`'s first half; a typo here is a
+        // command that silently does something else.
+        for (args, expected) in [
+            (vec!["copypaste", "peers"], r#""method":"peers""#),
+            (vec!["copypaste", "sync"], r#""method":"sync_now""#),
+            (vec!["copypaste", "unpair", "x"], r#""method":"unpair""#),
+            (
+                vec!["copypaste", "revoke", "x", "--yes"],
+                r#""method":"revoke""#,
+            ),
+            (
+                vec!["copypaste", "pair", "create"],
+                r#""method":"pair_create_invite""#,
+            ),
+        ] {
+            let method = method_for(&parse(&args).command).expect("a method");
+            let json = serde_json::to_string(&method).unwrap();
+            assert!(json.contains(expected), "{json}");
+        }
+    }
+
+    /// The method a command sends, for the cases that need no stdin or prompt.
+    fn method_for(command: &Command) -> Option<Method> {
+        Some(match command {
+            Command::Peers => Method::Peers,
+            Command::Sync { peer } => Method::SyncNow {
+                pairing_id: peer.clone(),
+            },
+            Command::Unpair { pairing_id } => Method::Unpair {
+                pairing_id: pairing_id.clone(),
+            },
+            Command::Revoke { pairing_id, .. } => Method::Revoke {
+                pairing_id: pairing_id.clone(),
+            },
+            Command::Pair {
+                action: PairAction::Create,
+            } => Method::PairCreateInvite,
+            _ => return None,
+        })
+    }
+}

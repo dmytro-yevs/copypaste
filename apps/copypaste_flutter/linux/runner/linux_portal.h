@@ -1,0 +1,97 @@
+#ifndef FLUTTER_LINUX_PORTAL_H_
+#define FLUTTER_LINUX_PORTAL_H_
+
+#include <gio/gio.h>
+
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+typedef struct _GtkWindow GtkWindow;
+
+// A shortcut definition sent by Flutter. `usage` is a USB HID usage name and
+// `modifiers` contains the logical modifiers requested by the user. The portal
+// may choose a different trigger; callers must render ShortcutResult instead of
+// assuming preferred_trigger was accepted.
+struct ShortcutRequest {
+  std::string id;
+  std::string description;
+  std::string usage;
+  std::vector<std::string> modifiers;
+  std::string preferred_trigger;
+};
+
+struct ShortcutResult {
+  bool registered = false;
+  std::string trigger_description;
+  std::string reason;
+};
+
+struct LinuxPortalCallbacks {
+  // The activation token belongs to the compositor. The runner must preserve
+  // it while handing the activation to its companion; this helper never opens
+  // a window itself.
+  std::function<void(const std::string& shortcut_id,
+                     const std::string& activation_token)>
+      shortcut_activated;
+  std::function<void()> session_closed;
+};
+
+// GIO implementation of the XDG GlobalShortcuts and RemoteDesktop portals.
+// It owns portal sessions but not the GtkWindow passed to it.
+class LinuxPortal {
+ public:
+  // Associate the process-wide bus connection with the packaged desktop ID
+  // before GTK makes portal calls. The caller owns the returned connection.
+  static GDBusConnection* register_application();
+
+  explicit LinuxPortal(GtkWindow* parent, LinuxPortalCallbacks callbacks = {});
+  ~LinuxPortal();
+
+  LinuxPortal(const LinuxPortal&) = delete;
+  LinuxPortal& operator=(const LinuxPortal&) = delete;
+
+  // True only when GlobalShortcuts is exported on the session bus. This does
+  // not report a shortcut as registered and does not request user consent.
+  bool is_available() const;
+
+  // True after the portal has granted a keyboard RemoteDesktop session and a
+  // GlobalShortcuts binding. The host must also require a live compositor
+  // companion before advertising Quick Paste itself as available.
+  bool quick_paste_ready() const;
+
+  bool remote_desktop_active() const;
+  bool remote_desktop_available() const;
+  // True when any shortcut, or the shortcut with `id`, is bound.
+  bool shortcut_registered() const;
+  bool shortcut_registered(const std::string& id) const;
+
+  // Starts a keyboard-only RemoteDesktop request. The caller must invoke this
+  // from an explicit Settings action, because Start may present consent UI.
+  void request_remote_desktop(std::function<void(bool)> done);
+
+  // Adds or replaces the shortcut with `request.id`. BindShortcuts runs once
+  // per session, so every registered shortcut is bound again together in one
+  // new session. A successful result contains the portal's actual
+  // user-facing trigger description, not the preferred trigger.
+  void register_shortcut(const ShortcutRequest& request,
+                         std::function<void(ShortcutResult)> done);
+  // Stops reporting `id` at once. The remaining shortcuts are bound again
+  // after a short delay, so a following register needs one session only.
+  void unregister_shortcut(const std::string& id,
+                           std::function<void(bool)> done);
+
+  // Sends Ctrl+V through an active keyboard RemoteDesktop grant. Returns false
+  // until the grant is active; it never falls back to an unprivileged injector.
+  bool send_ctrl_v();
+
+  // Queues `count` Left-arrow presses through the same grant, in order.
+  bool send_caret_left(int count);
+
+ private:
+  struct Impl;
+  std::shared_ptr<Impl> impl_;
+};
+
+#endif  // FLUTTER_LINUX_PORTAL_H_

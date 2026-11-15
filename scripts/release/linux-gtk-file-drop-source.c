@@ -1,0 +1,172 @@
+// Private GTK drag source used only by Linux product qualification.
+//
+// It offers a real text/uri-list selection to the installed History surface.
+// A separate, permissioned desktop-input actor must move the actual pointer
+// from this source into the installed application; this program does not
+// synthesize input or claim that the destination accepted a drop.
+
+#define _POSIX_C_SOURCE 200809L
+
+#include <fcntl.h>
+#include <gtk/gtk.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define MAX_URI_LIST_BYTES 8192
+
+typedef struct {
+  const char* activity_path;
+  const char* start_path;
+  gchar* uri_list;
+  gsize uri_list_size;
+  GdkDragContext* context;
+  gboolean armed;
+  gboolean started;
+} State;
+
+static gboolean regular_file(const char* path, gsize maximum) {
+  struct stat details;
+  return path != NULL && lstat(path, &details) == 0 && S_ISREG(details.st_mode) &&
+      !S_ISLNK(details.st_mode) && details.st_size > 0 && (gsize)details.st_size <= maximum;
+}
+
+static gboolean write_once(const char* path, const char* value) {
+  int descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (descriptor < 0) return FALSE;
+  const size_t length = strlen(value);
+  const gboolean success = write(descriptor, value, length) == (ssize_t)length && fsync(descriptor) == 0;
+  close(descriptor);
+  return success;
+}
+
+static void activity(const State* state, const char* event, GdkDragContext* context) {
+  int descriptor = open(state->activity_path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+  if (descriptor < 0) return;
+  const guint actions = context == NULL ? 0 : gdk_drag_context_get_actions(context);
+  const guint selected = context == NULL ? 0 : gdk_drag_context_get_selected_action(context);
+  const gboolean destination = context != NULL && gdk_drag_context_get_dest_window(context) != NULL;
+  dprintf(descriptor, "{\"event\":\"%s\",\"timestamp_us\":%" G_GINT64_FORMAT
+          ",\"actions\":%u,\"selected_action\":%u,\"destination_window\":%s}\n",
+          event, g_get_monotonic_time(), actions, selected, destination ? "true" : "false");
+  fsync(descriptor);
+  close(descriptor);
+}
+
+static void provide(GtkWidget* widget, GdkDragContext* context, GtkSelectionData* selection,
+                    guint info, guint time, gpointer data) {
+  (void)widget;
+  (void)context;
+  (void)info;
+  (void)time;
+  const State* state = data;
+  gtk_selection_data_set(selection, gdk_atom_intern("text/uri-list", FALSE), 8,
+                         (const guchar*)state->uri_list, (gint)state->uri_list_size);
+  activity(state, "uri_list_requested", context);
+}
+
+static void end_drag(GtkWidget* widget, GdkDragContext* context, gpointer data) {
+  (void)widget;
+  State* state = data;
+  activity(state, "drag_end", context);
+  g_clear_object(&state->context);
+}
+
+static void begin_drag(GtkWidget* widget, GdkDragContext* context, gpointer data) {
+  (void)widget;
+  activity(data, "drag_begin", context);
+}
+
+static gboolean failed_drag(GtkWidget* widget, GdkDragContext* context, GtkDragResult result, gpointer data) {
+  (void)widget;
+  (void)result;
+  State* state = data;
+  activity(state, "drag_failed", context);
+  return FALSE;
+}
+
+static void drag_status(GdkDragContext* context, GdkDragAction action, gpointer data) {
+  // The initial selected action is COPY even before a destination accepts it.
+  // Observe GTK's negotiated action notification instead of polling that value.
+  if (action == GDK_ACTION_COPY) activity(data, "drag_status_copy", context);
+}
+
+static gboolean arm_drag(gpointer data) {
+  State* state = data;
+  if (state->armed || !g_file_test(state->start_path, G_FILE_TEST_IS_REGULAR)) return G_SOURCE_CONTINUE;
+  state->armed = TRUE;
+  activity(state, "drag_armed", NULL);
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean start_drag(GtkWidget* source, GdkEventButton* event, gpointer data) {
+  State* state = data;
+  if (!state->armed || state->started || event->button != 1) return FALSE;
+  state->started = TRUE;
+  GdkDragContext* context = gtk_drag_begin_with_coordinates(
+      source, gtk_drag_source_get_target_list(source), GDK_ACTION_COPY, event->button,
+      (GdkEvent*)event, (gint)event->x, (gint)event->y);
+  if (context == NULL) {
+    activity(state, "drag_failed", NULL);
+    return TRUE;
+  }
+  state->context = g_object_ref(context);
+  g_signal_connect(context, "action-changed", G_CALLBACK(drag_status), state);
+  return TRUE;
+}
+
+static void activate(GtkApplication* application, gpointer data) {
+  State* state = data;
+  GtkWidget* window = gtk_application_window_new(application);
+  gtk_window_set_title(GTK_WINDOW(window), "CopyPaste Qualification File Drop Source");
+  gtk_window_set_default_size(GTK_WINDOW(window), 320, 96);
+  GtkWidget* source = gtk_button_new_with_label("Drag qualification file");
+  gtk_drag_source_set(source, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_COPY);
+  GtkTargetEntry target = {(gchar*)"text/uri-list", 0, 0};
+  gtk_drag_source_set_target_list(source, gtk_target_list_new(&target, 1));
+  g_signal_connect(source, "button-press-event", G_CALLBACK(start_drag), state);
+  g_signal_connect(source, "drag-begin", G_CALLBACK(begin_drag), state);
+  g_signal_connect(source, "drag-data-get", G_CALLBACK(provide), state);
+  g_signal_connect(source, "drag-end", G_CALLBACK(end_drag), state);
+  g_signal_connect(source, "drag-failed", G_CALLBACK(failed_drag), state);
+  gtk_container_add(GTK_CONTAINER(window), source);
+  gtk_widget_show_all(window);
+  g_timeout_add(20, arm_drag, state);
+}
+
+int main(int argc, char** argv) {
+  const char* ready_path = NULL;
+  const char* uri_list_path = NULL;
+  State state = {0};
+  for (int index = 1; index + 1 < argc; index += 2) {
+    if (strcmp(argv[index], "--ready-file") == 0) ready_path = argv[index + 1];
+    else if (strcmp(argv[index], "--start-file") == 0) state.start_path = argv[index + 1];
+    else if (strcmp(argv[index], "--activity-log") == 0) state.activity_path = argv[index + 1];
+    else if (strcmp(argv[index], "--uri-list-file") == 0) uri_list_path = argv[index + 1];
+    else return 2;
+  }
+  if (ready_path == NULL || state.start_path == NULL || state.activity_path == NULL ||
+      !regular_file(uri_list_path, MAX_URI_LIST_BYTES)) return 2;
+  GError* error = NULL;
+  if (!g_file_get_contents(uri_list_path, &state.uri_list, &state.uri_list_size, &error)) {
+    g_clear_error(&error);
+    return 1;
+  }
+  if (!g_utf8_validate(state.uri_list, (gssize)state.uri_list_size, NULL) ||
+      !g_str_has_prefix(state.uri_list, "file://")) {
+    g_free(state.uri_list);
+    return 2;
+  }
+  if (!write_once(ready_path, "ready\n")) {
+    g_free(state.uri_list);
+    return 1;
+  }
+  GtkApplication* application = gtk_application_new(
+      "org.copypaste.QualificationFileDropSource", G_APPLICATION_NON_UNIQUE);
+  g_signal_connect(application, "activate", G_CALLBACK(activate), &state);
+  const int result = g_application_run(G_APPLICATION(application), 1, argv);
+  g_object_unref(application);
+  g_free(state.uri_list);
+  return result;
+}

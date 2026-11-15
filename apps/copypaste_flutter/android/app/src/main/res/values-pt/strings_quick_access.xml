@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Clipes do CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Mudar teclado</string>
+    <string name="quick_access_tile_save_label">Salvar área de transferência</string>
+    <string name="quick_access_tile_capture_label">Captura da área de transferência</string>
+    <string name="quick_access_widget_label">Clipes recentes</string>
+    <string name="quick_access_widget_description">Seus clipes mais recentes. Toque em um para copiá-lo.</string>
+    <string name="quick_access_queue_intake_label">Adicionar à fila de colagem</string>
+    <string name="quick_access_transform_label">Transformar</string>
+</resources>

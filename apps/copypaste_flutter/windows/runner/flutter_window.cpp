@@ -1,0 +1,1374 @@
+#include "flutter_window.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <optional>
+#include <limits>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <UIAutomation.h>
+#include <wrl/client.h>
+
+#include <flutter/method_channel.h>
+#include <flutter/method_result_functions.h>
+#include <flutter/standard_method_codec.h>
+#include <file_selector_windows/file_selector_windows.h>
+
+#include "flutter/generated_plugin_registrant.h"
+#include "copypaste_flutter_protected_pairing.h"
+#include "utils.h"
+#include "screenshot_protection.h"
+#include "application_instance.h"
+
+namespace {
+
+constexpr size_t kMaximumArtifactBytes = 16 * 1024 * 1024;
+constexpr UINT kRetireQuickPaste = WM_APP + 42;
+constexpr UINT kFinishQuickPasteRetirement = WM_APP + 43;
+constexpr UINT kFailQuickPasteOpen = WM_APP + 44;
+constexpr UINT kMemoryPressure = WM_APP + 45;
+constexpr UINT kSecureFieldResult = WM_APP + 46;
+constexpr UINT_PTR kQuickPasteShutdownTimer = 1;
+constexpr UINT_PTR kCaretMoveTimer = 2;
+// Caret placement waits up to 1 s for the activating keys to be released.
+constexpr UINT kCaretMoveRetryMilliseconds = 25;
+constexpr int kCaretMoveAttempts = 40;
+constexpr int64_t kMaxCaretMove = 2000;
+constexpr LPARAM kFieldPlain = 0;
+constexpr LPARAM kFieldPassword = 1;
+constexpr LPARAM kFieldUnknown = 2;
+constexpr char kQuickPasteHostChannel[] =
+    "com.copypaste.app/quick_paste_host";
+constexpr char kQuickPasteContextChannel[] =
+    "com.copypaste.app/quick_paste_context";
+
+int64_t QuickPastePresentationId(const flutter::EncodableValue* arguments) {
+  if (!arguments) return 0;
+  const auto* map = std::get_if<flutter::EncodableMap>(arguments);
+  if (!map) return 0;
+  const auto found = map->find(flutter::EncodableValue("presentationId"));
+  if (found == map->end()) return 0;
+  if (const auto* id = std::get_if<int64_t>(&found->second)) return *id > 0 ? *id : 0;
+  if (const auto* id = std::get_if<int32_t>(&found->second)) return *id > 0 ? *id : 0;
+  return 0;
+}
+
+std::optional<RECT> QuickPasteTrayAnchor(const flutter::EncodableValue* arguments) {
+  if (!arguments) return std::nullopt;
+  const auto* map = std::get_if<flutter::EncodableMap>(arguments);
+  if (!map) return std::nullopt;
+  const auto number = [&](const char* key) -> double {
+    const auto found = map->find(flutter::EncodableValue(key));
+    if (found == map->end()) return std::numeric_limits<double>::quiet_NaN();
+    if (const auto* value = std::get_if<double>(&found->second)) return *value;
+    return std::numeric_limits<double>::quiet_NaN();
+  };
+  const double x = number("x"), y = number("y");
+  const double width = number("width"), height = number("height");
+  const double right = x + width, bottom = y + height;
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(right) ||
+      !std::isfinite(bottom) || width <= 0 || height <= 0 ||
+      width > std::numeric_limits<LONG>::max() || height > std::numeric_limits<LONG>::max() ||
+      x < std::numeric_limits<LONG>::min() || y < std::numeric_limits<LONG>::min() ||
+      right > std::numeric_limits<LONG>::max() || bottom > std::numeric_limits<LONG>::max()) {
+    return std::nullopt;
+  }
+  return RECT{static_cast<LONG>(x), static_cast<LONG>(y),
+              static_cast<LONG>(right), static_cast<LONG>(bottom)};
+}
+
+template <typename Function>
+Function ResolveProtectedPairingSymbol(const char* symbol) {
+  const HMODULE bridge = GetModuleHandleW(L"copypaste_flutter_bridge.dll");
+  return bridge == nullptr ? nullptr
+      : reinterpret_cast<Function>(GetProcAddress(bridge, symbol));
+}
+
+std::optional<std::vector<uint8_t>> CopyAndReleaseBuffer(
+    copypaste_flutter_protected_pairing_buffer buffer) {
+  const auto free_buffer = ResolveProtectedPairingSymbol<
+      decltype(&copypaste_flutter_free_protected_pairing_buffer)>(
+          "copypaste_flutter_free_protected_pairing_buffer");
+  if (buffer.bytes == nullptr || buffer.len == 0 ||
+      buffer.len > kMaximumArtifactBytes || free_buffer == nullptr) {
+    if (buffer.bytes != nullptr && free_buffer != nullptr) free_buffer(buffer);
+    return std::nullopt;
+  }
+  std::vector<uint8_t> copy(buffer.bytes, buffer.bytes + buffer.len);
+  free_buffer(buffer);
+  return copy;
+}
+
+const std::string* StringArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
+                                  const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) return nullptr;
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  return iterator == arguments->end()
+      ? nullptr : std::get_if<std::string>(&iterator->second);
+}
+
+const bool* BoolArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
+                         const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) return nullptr;
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  return iterator == arguments->end()
+      ? nullptr : std::get_if<bool>(&iterator->second);
+}
+
+std::optional<int64_t> IntArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
+                                   const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) return std::nullopt;
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  if (iterator == arguments->end()) return std::nullopt;
+  if (const auto* value = std::get_if<int32_t>(&iterator->second)) return *value;
+  if (const auto* value = std::get_if<int64_t>(&iterator->second)) return *value;
+  return std::nullopt;
+}
+
+std::optional<DWORD> IntegrityLevel(HANDLE process) {
+  HANDLE token = nullptr;
+  if (!::OpenProcessToken(process, TOKEN_QUERY, &token)) return std::nullopt;
+  std::optional<DWORD> level;
+  DWORD size = 0;
+  ::GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &size);
+  if (size >= sizeof(TOKEN_MANDATORY_LABEL)) {
+    std::vector<BYTE> buffer(size);
+    if (::GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), size, &size)) {
+      const auto* label = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(buffer.data());
+      const PUCHAR count = ::GetSidSubAuthorityCount(label->Label.Sid);
+      if (count != nullptr && *count > 0) {
+        level = *::GetSidSubAuthority(label->Label.Sid, static_cast<DWORD>(*count - 1));
+      }
+    }
+  }
+  ::CloseHandle(token);
+  return level;
+}
+
+// UIPI silently drops input sent to a higher integrity level, so a target this
+// process cannot inspect counts as elevated.
+bool RunsAboveOwnIntegrity(DWORD pid) {
+  const auto own = IntegrityLevel(::GetCurrentProcess());
+  const HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (process == nullptr) return true;
+  const auto target = IntegrityLevel(process);
+  ::CloseHandle(process);
+  return !own || !target || *target > *own;
+}
+
+// The lowercase image name capture attribution and per-app defaults use.
+std::string ProcessImageName(DWORD pid) {
+  const HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (process == nullptr) return {};
+  std::wstring path(32768, L'\0');
+  DWORD length = static_cast<DWORD>(path.size());
+  const bool queried = ::QueryFullProcessImageNameW(process, 0, path.data(), &length) != 0;
+  ::CloseHandle(process);
+  if (!queried || length == 0) return {};
+  path.resize(length);
+  std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+  if (name.empty()) return {};
+  ::CharLowerBuffW(name.data(), static_cast<DWORD>(name.size()));
+  return Utf8FromUtf16(name.c_str());
+}
+
+bool ModifierHeld(const QuickPasteTargetApi& api) {
+  for (const int key : {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN}) {
+    if (api.get_async_key_state(key) < 0) return true;
+  }
+  return false;
+}
+
+// Runs on a worker thread: a UI Automation client must not block the UI
+// thread on a slow provider.
+LPARAM FocusedFieldState() {
+  const HRESULT initialized = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  LPARAM state = kFieldUnknown;
+  {
+    Microsoft::WRL::ComPtr<IUIAutomation> automation;
+    if (FAILED(::CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&automation)))) {
+      ::CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(&automation));
+    }
+    Microsoft::WRL::ComPtr<IUIAutomation2> bounded;
+    if (automation && SUCCEEDED(automation.As(&bounded))) {
+      bounded->put_ConnectionTimeout(500);
+      bounded->put_TransactionTimeout(500);
+    }
+    Microsoft::WRL::ComPtr<IUIAutomationElement> focused;
+    int pid = 0;
+    BOOL password = FALSE;
+    // An element of this process means a CopyPaste window already took focus.
+    if (automation && SUCCEEDED(automation->GetFocusedElement(&focused)) && focused &&
+        SUCCEEDED(focused->get_CurrentProcessId(&pid)) &&
+        static_cast<DWORD>(pid) != ::GetCurrentProcessId() &&
+        SUCCEEDED(focused->get_CurrentIsPassword(&password))) {
+      state = password ? kFieldPassword : kFieldPlain;
+    }
+  }
+  if (SUCCEEDED(initialized)) ::CoUninitialize();
+  return state;
+}
+
+}  // namespace
+
+std::optional<std::string> ForegroundInputBlocked(const QuickPasteTargetApi& api,
+                                                  HWND* target_root) {
+  const HWND foreground = api.get_foreground_window();
+  const HWND root = foreground ? api.get_ancestor(foreground, GA_ROOT) : nullptr;
+  DWORD pid = 0;
+  if (!root || api.get_owner(root, &pid) == 0 || pid == 0 ||
+      pid == api.get_current_process_id()) {
+    return "noTarget";
+  }
+  if (RunsAboveOwnIntegrity(pid)) return "elevatedTarget";
+  if (target_root) *target_root = root;
+  return std::nullopt;
+}
+
+bool SendCaretLeft(const QuickPasteTargetApi& api, int count) {
+  if (count <= 0) return count == 0;
+  std::vector<INPUT> inputs(static_cast<size_t>(count) * 2);
+  for (size_t index = 0; index < inputs.size(); ++index) {
+    inputs[index].type = INPUT_KEYBOARD;
+    inputs[index].ki.wVk = VK_LEFT;
+    inputs[index].ki.dwFlags = KEYEVENTF_EXTENDEDKEY | (index % 2 ? KEYEVENTF_KEYUP : 0);
+  }
+  const auto total = static_cast<UINT>(inputs.size());
+  const UINT inserted = api.send_input(total, inputs.data(), sizeof(INPUT));
+  if (inserted == total) return true;
+  // Never leave an injected arrow held after a partial batch.
+  if (inserted < total && inserted % 2 == 1) {
+    api.send_input(1, &inputs[inserted], sizeof(INPUT));
+  }
+  return false;
+}
+
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool is_protected_pairing_context,
+                             std::string pairing_context_id,
+                             std::string pairing_ceremony_id,
+                             std::string pending_pairing_uri,
+                             bool is_quick_paste_context)
+    : project_(project),
+      is_protected_pairing_context_(is_protected_pairing_context),
+      pairing_context_id_(std::move(pairing_context_id)),
+      pairing_ceremony_id_(std::move(pairing_ceremony_id)),
+      pending_pairing_uri_(std::move(pending_pairing_uri)),
+      is_quick_paste_context_(is_quick_paste_context) {}
+
+FlutterWindow::~FlutterWindow() {
+  ScreenshotProtection::Unregister(GetHandle());
+}
+
+bool FlutterWindow::OnCreate() {
+  if (!Win32Window::OnCreate()) {
+    return false;
+  }
+
+  if (!ScreenshotProtection::Register(GetHandle()) ||
+      (is_protected_pairing_context_ && !BeginProtectedPairingContext())) {
+    return false;
+  }
+
+  RECT frame = GetClientArea();
+
+  // The size here must match the window dimensions to avoid unnecessary surface
+  // creation / destruction in the startup path.
+  flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
+      frame.right - frame.left, frame.bottom - frame.top, project_);
+  // Ensure that basic setup of the controller was successful.
+  if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    return false;
+  }
+  if (is_quick_paste_context_) {
+    FileSelectorWindowsRegisterWithRegistrar(
+        flutter_controller_->engine()->GetRegistrarForPlugin("FileSelectorWindows"));
+  } else {
+    RegisterPlugins(flutter_controller_->engine());
+  }
+  if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
+    security_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            "com.copypaste.app/security",
+            &flutter::StandardMethodCodec::GetInstance());
+    security_channel_->SetMethodCallHandler(
+        [](const auto& call, auto result) {
+          if (call.method_name() == "getBlockScreenshots") {
+            result->Success(flutter::EncodableValue(ScreenshotProtection::Blocked()));
+          } else if (call.method_name() == "setBlockScreenshots") {
+            const auto* enabled = BoolArgument(call, "enabled");
+            if (enabled == nullptr) result->Error("invalid_arguments");
+            else result->Success(flutter::EncodableValue(ScreenshotProtection::SetBlocked(*enabled)));
+          } else {
+            result->NotImplemented();
+          }
+        });
+  }
+  if (!is_protected_pairing_context_) {
+    device_authentication_ = std::make_unique<DeviceAuthentication>(
+        flutter_controller_->engine()->messenger(), GetHandle());
+    window_material_ = std::make_unique<WindowMaterial>(
+        flutter_controller_->engine()->messenger(), GetHandle(),
+        is_quick_paste_context_ ? WindowMaterial::Role::kTransient
+                                : WindowMaterial::Role::kMain);
+  }
+  if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
+    app_update_channel_ = std::make_unique<AppUpdateChannel>(
+        flutter_controller_->engine()->messenger(), GetHandle());
+    startup_channel_ = std::make_unique<StartupChannel>(
+        flutter_controller_->engine()->messenger());
+    memory_pressure_monitor_ =
+        std::make_unique<MemoryPressureMonitor>(GetHandle(), kMemoryPressure);
+  }
+  if (is_quick_paste_context_) {
+    quick_paste_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            kQuickPasteContextChannel,
+            &flutter::StandardMethodCodec::GetInstance());
+    quick_paste_channel_->SetMethodCallHandler(
+        [this](const auto& call, auto result) {
+          if (call.method_name() == "ready") {
+            quick_paste_ready_ = true;
+            result->Success(flutter::EncodableValue(true));
+            NotifyQuickPasteOpened();
+          } else if (call.method_name() == "present") {
+            const auto id = QuickPastePresentationId(call.arguments());
+            if (id <= 0 || quick_paste_session_.id() != id) {
+              result->Success(flutter::EncodableValue(false));
+              return;
+            }
+            flutter_controller_->engine()->SetNextFrameCallback([this, id] {
+              if (quick_paste_session_.id() != id) return;
+              if (!RevealQuickPaste(GetHandle(), quick_paste_pending_foreground_,
+                                    QuickPastePresentationApi{})) {
+                quick_paste_session_.Close(id, GetHandle());
+                ScheduleQuickPasteRetirement();
+              }
+            });
+            flutter_controller_->ForceRedraw();
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "accessibilityGranted" ||
+              call.method_name() == "requestAccessibility") {
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "setInspectorVisible") {
+            const auto* visible = BoolArgument(call, "visible");
+            result->Success(flutter::EncodableValue(visible != nullptr &&
+                SetQuickPasteInspectorVisible(QuickPastePresentationId(call.arguments()), *visible,
+                    BoolArgument(call, "remember") == nullptr || *BoolArgument(call, "remember"))));
+          } else if (call.method_name() == "paste") {
+            const auto id = QuickPastePresentationId(call.arguments());
+            const bool pasted = PasteIntoPreviousWindow(id);
+            result->Success(flutter::EncodableValue(
+                pasted));
+            ScheduleQuickPasteRetirement();
+          } else if (call.method_name() == "close") {
+            const auto id = QuickPastePresentationId(call.arguments());
+            quick_paste_session_.Close(id, GetHandle());
+            result->Success(flutter::EncodableValue(true));
+            ScheduleQuickPasteRetirement();
+          } else if (call.method_name() == "openMain") {
+            ShowMainWindow(false);
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "openSettings") {
+            ShowMainWindow(true);
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "quit") {
+            quick_paste_session_.Invalidate();
+            result->Success(flutter::EncodableValue(true));
+            ::PostQuitMessage(0);
+          } else if (!HandleForegroundInputCall(call, result)) {
+            result->NotImplemented();
+          }
+        });
+  } else if (!is_protected_pairing_context_) {
+    quick_paste_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            kQuickPasteHostChannel,
+            &flutter::StandardMethodCodec::GetInstance());
+    quick_paste_channel_->SetMethodCallHandler(
+        [this](const auto& call, auto result) {
+          if (call.method_name() == "isSupported") {
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "prepare") {
+            result->Success(
+                flutter::EncodableValue(PrepareQuickPasteContext()));
+          } else if (call.method_name() == "open") {
+            result->Success(flutter::EncodableValue(OpenQuickPasteContext()));
+          } else if (call.method_name() == "openFromTray") {
+            const auto anchor = QuickPasteTrayAnchor(call.arguments());
+            if (!anchor) result->Error("invalid_tray_anchor");
+            else result->Success(flutter::EncodableValue(OpenQuickPasteContext(anchor)));
+          } else if (call.method_name() == "accessibilityGranted" ||
+                     call.method_name() == "requestAccessibility") {
+            result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "dispose") {
+            CloseQuickPasteContext();
+            result->Success(flutter::EncodableValue(true));
+          } else if (!HandleForegroundInputCall(call, result)) {
+            result->NotImplemented();
+          }
+        });
+  }
+  pairing_links_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "com.copypaste.app/pairing_links",
+          &flutter::StandardMethodCodec::GetInstance());
+  pairing_links_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() != "takePendingUri") {
+          result->NotImplemented();
+          return;
+        }
+        if (pending_pairing_uri_.empty()) {
+          result->Success(flutter::EncodableValue());
+          return;
+        }
+        auto uri = std::move(pending_pairing_uri_);
+        pending_pairing_uri_.clear();
+        result->Success(flutter::EncodableValue(uri));
+      });
+  pairing_presentation_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          is_protected_pairing_context_
+              ? "com.copypaste.app/pairing_presentation_context"
+              : "com.copypaste.app/pairing_presentation_host",
+          &flutter::StandardMethodCodec::GetInstance());
+  pairing_presentation_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (is_protected_pairing_context_) {
+          if (call.method_name() == "isContextActive") {
+            result->Success(flutter::EncodableValue(IsProtectedPairingContextActive()));
+          } else if (call.method_name() == "ceremonyId" && IsProtectedPairingContextActive()) {
+            result->Success(flutter::EncodableValue(pairing_ceremony_id_));
+          } else if (call.method_name() == "status") {
+            const auto status = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_protected_pairing_status)>(
+                    "copypaste_flutter_protected_pairing_status");
+            copypaste_flutter_protected_pairing_status_value value{};
+            if (status == nullptr || !status(pairing_context_id_.c_str(), pairing_generation_, &value)) {
+              result->Error("context_inactive");
+            } else {
+              flutter::EncodableMap response;
+              response[flutter::EncodableValue("state")] = flutter::EncodableValue(static_cast<int32_t>(value.state));
+              response[flutter::EncodableValue("expiresInMs")] = flutter::EncodableValue(static_cast<int64_t>(value.expires_in_ms));
+              result->Success(flutter::EncodableValue(response));
+            }
+          } else if (call.method_name() == "revealQr") {
+            const auto reveal = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_reveal_protected_pairing_qr_png)>(
+                    "copypaste_flutter_reveal_protected_pairing_qr_png");
+            copypaste_flutter_protected_pairing_buffer output{};
+            const auto copy = reveal == nullptr ? std::nullopt
+                : (reveal(pairing_ceremony_id_.c_str(), pairing_context_id_.c_str(), pairing_generation_, &output)
+                    ? CopyAndReleaseBuffer(output) : std::nullopt);
+            copy.has_value() ? result->Success(flutter::EncodableValue(*copy)) : result->Error("operation_rejected");
+          } else if (call.method_name() == "revealSas") {
+            const auto reveal = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_reveal_protected_pairing_sas)>(
+                    "copypaste_flutter_reveal_protected_pairing_sas");
+            copypaste_flutter_protected_pairing_buffer output{};
+            const auto copy = reveal == nullptr ? std::nullopt
+                : (reveal(pairing_context_id_.c_str(), pairing_generation_, &output)
+                    ? CopyAndReleaseBuffer(output) : std::nullopt);
+            copy.has_value() ? result->Success(flutter::EncodableValue(*copy)) : result->Error("operation_rejected");
+          } else if (call.method_name() == "joinManual") {
+            const auto* code = StringArgument(call, "code");
+            const auto* address = StringArgument(call, "address");
+            const auto join = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_protected_pairing_join)>(
+                    "copypaste_flutter_protected_pairing_join");
+            if (code == nullptr || code->empty() || address == nullptr || address->empty() || join == nullptr) result->Error("invalid_arguments");
+            else result->Success(flutter::EncodableValue(join(pairing_context_id_.c_str(), pairing_generation_, code->c_str(), address->c_str())));
+          } else if (call.method_name() == "joinQr") {
+            const auto* uri = StringArgument(call, "uri");
+            const auto join = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_protected_pairing_join_uri)>(
+                    "copypaste_flutter_protected_pairing_join_uri");
+            if (uri == nullptr || uri->empty() || join == nullptr) result->Error("invalid_arguments");
+            else result->Success(flutter::EncodableValue(join(pairing_context_id_.c_str(), pairing_generation_, uri->c_str())));
+          } else if (call.method_name() == "confirm") {
+            const auto* sas = StringArgument(call, "sas");
+            const auto* accept = BoolArgument(call, "accept");
+            const auto decide = ResolveProtectedPairingSymbol<
+                decltype(&copypaste_flutter_protected_pairing_decide)>(
+                    "copypaste_flutter_protected_pairing_decide");
+            if (sas == nullptr || sas->empty() || decide == nullptr) result->Error("invalid_arguments");
+            else if (accept == nullptr) result->Error("invalid_arguments");
+            else result->Success(flutter::EncodableValue(decide(pairing_context_id_.c_str(), pairing_generation_, sas->c_str(), *accept)));
+          } else if (call.method_name() == "cancel") {
+            result->Success(flutter::EncodableValue(CancelProtectedPairingContext()));
+          } else if (call.method_name() == "closeContext" && CancelProtectedPairingContext()) {
+            pairing_cancellation_approved_ = true;
+            result->Success(flutter::EncodableValue(true));
+            PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+          } else {
+            result->NotImplemented();
+          }
+          return;
+        }
+        if (call.method_name() == "isSupported") {
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+        if (call.method_name() == "setCaptureProtection") {
+          const auto* enabled = BoolArgument(call, "enabled");
+          if (enabled == nullptr) {
+            result->Error("invalid_arguments");
+          } else {
+            result->Success(flutter::EncodableValue(ScreenshotProtection::Apply(GetHandle())));
+          }
+          return;
+        }
+        if (call.method_name() != "open" && call.method_name() != "close") {
+          result->NotImplemented();
+          return;
+        }
+        const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+        if (arguments == nullptr) {
+          result->Error("invalid_arguments");
+          return;
+        }
+        const std::string argument_name = call.method_name() == "open"
+            ? "ceremonyId"
+            : "contextId";
+        const auto iterator = arguments->find(flutter::EncodableValue(argument_name));
+        if (iterator == arguments->end()) {
+          result->Error("invalid_arguments");
+          return;
+        }
+        const auto* value = std::get_if<std::string>(&iterator->second);
+        if (value == nullptr || value->empty()) {
+          result->Error("invalid_arguments");
+          return;
+        }
+        if (call.method_name() == "close") {
+          CloseProtectedPairingContext(*value);
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+        const auto context_id = OpenProtectedPairingContext(*value);
+        if (context_id.empty()) {
+          result->Error("protected_context_unavailable");
+          return;
+        }
+        flutter::EncodableMap response;
+        response[flutter::EncodableValue("contextId")] =
+            flutter::EncodableValue(context_id);
+        result->Success(flutter::EncodableValue(response));
+      });
+  // Hidden Quick Paste must not activate itself before its foreground check.
+  SetChildContent(flutter_controller_->view()->GetNativeWindow(),
+                  !is_quick_paste_context_);
+
+  if (is_quick_paste_context_) {
+    const auto handle = GetHandle();
+    auto style = ::GetWindowLongPtr(handle, GWL_STYLE);
+    style &= ~(WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    // Keep native Alt+F4 and Alt+Space available without adding a title bar.
+    style |= WS_POPUP | WS_THICKFRAME | WS_SYSMENU;
+    ::SetWindowLongPtr(handle, GWL_STYLE, style);
+    ::SetWindowPos(handle, HWND_TOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    UpdateQuickPasteWindowCorners();
+  }
+
+  flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    if (!is_quick_paste_context_ && !defer_initial_show_) this->Show();
+  });
+
+  // Flutter can complete the first frame before the "show window" callback is
+  // registered. The following call ensures a frame is pending to ensure the
+  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  flutter_controller_->ForceRedraw();
+
+  return true;
+}
+
+void FlutterWindow::OnDestroy() {
+  if (pending_caret_move_) {
+    ::KillTimer(GetHandle(), kCaretMoveTimer);
+    pending_caret_move_->result->Success(flutter::EncodableValue(false));
+    pending_caret_move_.reset();
+  }
+  for (auto& waiter : secure_field_waiters_) waiter->Success(flutter::EncodableValue());
+  secure_field_waiters_.clear();
+  memory_pressure_monitor_.reset();
+  quick_paste_session_.Invalidate();
+  CloseProtectedPairingContext(pairing_context_id_);
+  CloseQuickPasteContext();
+  for (auto& entry : retiring_quick_paste_windows_) entry.second->Destroy();
+  retiring_quick_paste_windows_.clear();
+  DetachProtectedPairingContext();
+  ScreenshotProtection::Unregister(GetHandle());
+  security_channel_.reset();
+  device_authentication_.reset();
+  window_material_.reset();
+  pairing_presentation_channel_.reset();
+  pairing_links_channel_.reset();
+  quick_paste_channel_.reset();
+  startup_channel_.reset();
+  if (flutter_controller_) {
+    flutter_controller_ = nullptr;
+  }
+
+  Win32Window::OnDestroy();
+}
+
+bool FlutterWindow::BeginProtectedPairingContext() {
+  const auto begin = ResolveProtectedPairingSymbol<
+      decltype(&copypaste_flutter_begin_protected_pairing_context)>(
+          "copypaste_flutter_begin_protected_pairing_context");
+  pairing_generation_ = begin == nullptr ? 0
+      : begin(pairing_ceremony_id_.c_str(), pairing_context_id_.c_str());
+  return pairing_generation_ != 0;
+}
+
+bool FlutterWindow::IsProtectedPairingContextActive() const {
+  const auto active = ResolveProtectedPairingSymbol<
+      decltype(&copypaste_flutter_protected_pairing_context_active)>(
+          "copypaste_flutter_protected_pairing_context_active");
+  return active != nullptr && active(pairing_context_id_.c_str());
+}
+
+bool FlutterWindow::DetachProtectedPairingContext() {
+  const auto detach = ResolveProtectedPairingSymbol<
+      decltype(&copypaste_flutter_detach_protected_pairing_context)>(
+          "copypaste_flutter_detach_protected_pairing_context");
+  return detach != nullptr && detach(pairing_context_id_.c_str());
+}
+
+bool FlutterWindow::CancelProtectedPairingContext() {
+  const auto cancel = ResolveProtectedPairingSymbol<
+      decltype(&copypaste_flutter_cancel_protected_pairing_context)>(
+          "copypaste_flutter_cancel_protected_pairing_context");
+  return cancel != nullptr && cancel(pairing_context_id_.c_str());
+}
+
+std::string FlutterWindow::OpenProtectedPairingContext(
+    const std::string& ceremony_id) {
+  if (is_protected_pairing_context_ || ceremony_id.empty()) {
+    return "";
+  }
+  CloseProtectedPairingContext("");
+  GUID guid;
+  if (CoCreateGuid(&guid) != S_OK) {
+    return "";
+  }
+  wchar_t guid_buffer[40] = {};
+  if (StringFromGUID2(guid, guid_buffer, 40) == 0) {
+    return "";
+  }
+  const std::string context_id = Utf8FromUtf16(guid_buffer);
+  if (context_id.empty()) {
+    return "";
+  }
+  flutter::DartProject project(L"data");
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+  project.set_dart_entrypoint_arguments(
+      std::vector<std::string>{"--route=" + std::string("/protected-pairing/") + context_id});
+  auto protected_window = std::make_unique<FlutterWindow>(
+      project, true, context_id, ceremony_id, "", false);
+  if (!protected_window->Create(L"CopyPaste", Win32Window::Point(60, 60),
+                                Win32Window::Size(520, 640))) {
+    return "";
+  }
+  protected_window->SetQuitOnClose(false);
+  protected_pairing_window_ = std::move(protected_window);
+  return context_id;
+}
+
+bool FlutterWindow::PrepareQuickPasteContext() {
+  if (is_protected_pairing_context_ || is_quick_paste_context_) return false;
+  if (quick_paste_window_) return true;
+  flutter::DartProject project(L"data");
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+  project.set_dart_entrypoint("quickPasteMain");
+  auto quick_window = std::make_unique<FlutterWindow>(
+      project, false, "", "", "", true);
+  if (!quick_window->Create(L"CopyPaste Quick Paste",
+                            Win32Window::Point(0, 0),
+                            Win32Window::Size(448, 800))) {
+    return false;
+  }
+  quick_window->SetQuitOnClose(false);
+  quick_window->main_window_handle_ = GetHandle();
+  quick_window->quick_paste_inspector_visible_ = quick_paste_inspector_visible_;
+  quick_window->quick_paste_inspector_pinned_ = quick_paste_inspector_visible_;
+  quick_window->quick_paste_generation_ = ++quick_paste_generation_;
+  quick_paste_window_ = std::move(quick_window);
+  return true;
+}
+
+bool FlutterWindow::OpenQuickPasteContext(const std::optional<RECT>& tray_anchor) {
+  const HWND sampled_foreground = ::GetForegroundWindow();
+  if (!PrepareQuickPasteContext()) return false;
+  const bool shown = quick_paste_window_->ShowQuickPaste(sampled_foreground, tray_anchor);
+  if (!shown) quick_paste_window_->ScheduleQuickPasteRetirement();
+  return shown;
+}
+
+void FlutterWindow::NotifyMemoryPressure() {
+  // The Windows embedder does not forward OS memory pressure to the framework.
+  static constexpr char kMessage[] = "{\"type\":\"memoryPressure\"}";
+  for (FlutterWindow* window : {this, quick_paste_window_.get(),
+                                protected_pairing_window_.get()}) {
+    if (!window || !window->flutter_controller_) continue;
+    window->flutter_controller_->engine()->messenger()->Send(
+        "flutter/system", reinterpret_cast<const uint8_t*>(kMessage),
+        sizeof(kMessage) - 1);
+  }
+}
+
+void FlutterWindow::CloseQuickPasteContext() {
+  if (is_quick_paste_context_ || !quick_paste_window_) return;
+  quick_paste_window_->Destroy();
+  quick_paste_window_.reset();
+}
+
+std::optional<QuickPasteTargetSession::Target> QuickPasteTargetSession::Capture(HWND window) const {
+  const HWND root = window ? api_.get_ancestor(window, GA_ROOT) : nullptr;
+  if (!root || !api_.is_window(root)) return std::nullopt;
+  DWORD pid = 0;
+  const DWORD tid = api_.get_owner(root, &pid);
+  if (!pid || !tid || pid == api_.get_current_process_id()) return std::nullopt;
+  return Target{root, pid, tid};
+}
+
+bool QuickPasteTargetSession::Valid(const Target& target) const {
+  const auto current = Capture(target.root);
+  return current && current->root == target.root && current->pid == target.pid && current->tid == target.tid;
+}
+
+int64_t QuickPasteTargetSession::Begin(HWND sampled_foreground, HWND popup) {
+  const HWND sampled_root = sampled_foreground ? api_.get_ancestor(sampled_foreground, GA_ROOT) : nullptr;
+  const bool preserve = id_ > 0 && target_ && Valid(*target_) &&
+      api_.is_window_visible(popup) && sampled_root == popup;
+  const auto next_target = preserve ? target_ : Capture(sampled_foreground);
+  Invalidate();
+  if (counter_ == std::numeric_limits<int64_t>::max()) return 0;
+  id_ = ++counter_;
+  target_ = next_target;
+  return id_;
+}
+
+void QuickPasteTargetSession::Invalidate() {
+  id_ = 0;
+  target_.reset();
+}
+
+void QuickPasteTargetSession::Hide(HWND popup) {
+  const bool was_hiding = internally_hiding_;
+  internally_hiding_ = true;
+  api_.show_window(popup, SW_HIDE);
+  internally_hiding_ = was_hiding;
+}
+
+bool QuickPasteTargetSession::HideForPreparation(int64_t id, HWND popup) {
+  if (id <= 0 || id != id_) return false;
+  Hide(popup);
+  return id == id_;
+}
+
+void QuickPasteTargetSession::Close(int64_t id, HWND popup) {
+  if (id <= 0 || id != id_) return;
+  Invalidate();
+  Hide(popup);
+}
+
+bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
+  if (requested_id <= 0 || requested_id != id_ || pasting_ || !target_ || !Valid(*target_)) return false;
+  const Target target = *target_;
+  pasting_ = true;
+  struct ReleaseBusy { bool& busy; ~ReleaseBusy() { busy = false; } } release{pasting_};
+  Hide(popup);
+  const auto current = [&] { return requested_id == id_ && target_ && Valid(target); };
+  const auto fail = [&] {
+    if (requested_id == id_) Invalidate();
+    return false;
+  };
+  if (!current()) return fail();
+  if (api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root &&
+      !api_.set_foreground_window(target.root)) return fail();
+  const auto sent = SendNeutralPaste(api_, [&] {
+    if (!current() || api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root ||
+        requested_id != id_) return false;
+    // There is no atomic public compare-foreground-and-SendInput operation.
+    Invalidate();
+    return true;
+  });
+  if (sent == NeutralPasteResult::kCancelled) return fail();
+  return sent == NeutralPasteResult::kSent;
+}
+
+NeutralPasteResult SendNeutralPaste(const QuickPasteTargetApi& api,
+                                    const std::function<bool()>& ready) {
+  // SendInput preserves existing key state. Alt/Shift used to activate a clip
+  // must not turn the target's Ctrl+V into another command. Keep any physical
+  // Ctrl held, and restore the other held modifiers in the same input batch.
+  // Ctrl remains down across their release/restore to suppress bare Alt/Win.
+  // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput
+  constexpr std::array<WORD, 8> modifiers = {
+      VK_LCONTROL, VK_RCONTROL, VK_LSHIFT, VK_RSHIFT,
+      VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN};
+  std::array<bool, 8> original{};
+  for (size_t index = 0; index < modifiers.size(); ++index) {
+    original[index] = api.get_async_key_state(modifiers[index]) < 0;
+  }
+  const bool control_held = original[0] || original[1];
+  std::vector<INPUT> inputs;
+  inputs.reserve(16);
+  const auto append = [&](WORD key, DWORD flags = 0) {
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = key;
+    input.ki.dwFlags = flags;
+    inputs.push_back(input);
+  };
+  if (!control_held) append(VK_CONTROL);
+  std::vector<WORD> released;
+  for (size_t index = 2; index < modifiers.size(); ++index) {
+    if (!original[index]) continue;
+    const WORD key = modifiers[index];
+    released.push_back(key);
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended | KEYEVENTF_KEYUP);
+  }
+  append('V');
+  append('V', KEYEVENTF_KEYUP);
+  for (const WORD key : released) {
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended);
+  }
+  if (!control_held) append(VK_CONTROL, KEYEVENTF_KEYUP);
+  if (!ready()) return NeutralPasteResult::kCancelled;
+  const auto count = static_cast<UINT>(inputs.size());
+  const UINT inserted = api.send_input(count, inputs.data(), sizeof(INPUT));
+  if (inserted == count) return NeutralPasteResult::kSent;
+  if (inserted == 0 || inserted > count) return NeutralPasteResult::kFailed;
+
+  // A partial batch may leave our Ctrl held or a physical modifier released.
+  // Recover only modifier differences from the accepted prefix, once. Never
+  // resubmit V: the target may already have processed the paste.
+  auto remaining = original;
+  for (UINT event = 0; event < inserted; ++event) {
+    const WORD key = inputs[event].ki.wVk == VK_CONTROL
+        ? VK_LCONTROL : inputs[event].ki.wVk;
+    const auto found = std::find(modifiers.begin(), modifiers.end(), key);
+    if (found == modifiers.end()) continue;
+    remaining[static_cast<size_t>(found - modifiers.begin())] =
+        (inputs[event].ki.dwFlags & KEYEVENTF_KEYUP) == 0;
+  }
+  inputs.clear();
+  // Restore held Alt/Shift/Win before removing the injected Ctrl guard.
+  for (size_t index = 2; index < modifiers.size(); ++index) {
+    if (remaining[index] == original[index]) continue;
+    const WORD key = modifiers[index];
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended | (original[index] ? 0 : KEYEVENTF_KEYUP));
+  }
+  if (!control_held && remaining[0]) append(VK_CONTROL, KEYEVENTF_KEYUP);
+  if (!inputs.empty()) {
+    // Recovery can also be rejected by the OS. Do not retry or report success.
+    api.send_input(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+  }
+  return NeutralPasteResult::kFailed;
+}
+
+RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
+                         int width, int height, int gap) {
+  const auto below_top = std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.bottom) + gap, work.top, work.bottom);
+  const auto above_bottom = std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.top) - gap, work.top, work.bottom);
+  const int below = static_cast<int>(work.bottom - below_top);
+  const int above = static_cast<int>(above_bottom - work.top);
+  const bool opens_below = below >= above;
+  width = std::min(width, static_cast<int>(work.right - work.left));
+  height = std::min(height, opens_below ? below : above);
+  const int x = static_cast<int>(std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.right) - width, work.left,
+      static_cast<int64_t>(work.right) - width));
+  const int y = static_cast<int>(opens_below ? below_top : above_bottom - height);
+  return RECT{x, y, x + width, y + height};
+}
+
+bool PresentQuickPaste(
+    HWND window, const QuickPastePresentationApi& api,
+    const std::function<void()>& opened, const std::function<bool()>& owns,
+    const std::function<void()>& cleanup, bool inspector_visible,
+    const std::optional<RECT>& tray_anchor, bool reveal) {
+  const auto fail = [&] {
+    if (owns()) {
+      if (cleanup) cleanup();
+      else api.show_window(window, SW_HIDE);
+    }
+    return false;
+  };
+  if (!owns()) return false;
+  POINT cursor{};
+  if (tray_anchor) {
+    cursor = POINT{tray_anchor->left + (tray_anchor->right - tray_anchor->left) / 2,
+                   tray_anchor->top + (tray_anchor->bottom - tray_anchor->top) / 2};
+  } else if (!api.get_cursor_pos(&cursor) || !owns()) return fail();
+  const HMONITOR monitor = api.monitor_from_point(cursor, MONITOR_DEFAULTTONEAREST);
+  if (!monitor || !owns()) return fail();
+  MONITORINFO monitor_info{sizeof(MONITORINFO)};
+  if (!api.get_monitor_info(monitor, &monitor_info) || !owns()) return fail();
+  // Move first so GetDpiForWindow resolves the display at the presentation anchor rather
+  // than the display where this hidden window was created.
+  if (!api.set_window_pos(window, HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
+                      SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
+  const UINT dpi = api.get_dpi_for_window(window);
+  if (dpi == 0 || !owns()) return fail();
+  const RECT work = monitor_info.rcWork;
+  const int width = std::min(::MulDiv(inspector_visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
+                             static_cast<int>(work.right - work.left));
+  const int height = std::min(::MulDiv(tray_anchor ? 600 : 800, dpi, USER_DEFAULT_SCREEN_DPI),
+                              static_cast<int>(work.bottom - work.top));
+  const int minimum_x = static_cast<int>(work.left);
+  const int minimum_y = static_cast<int>(work.top);
+  const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
+  const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
+  const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
+  const int gap = ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI);
+  const int y = static_cast<int>(std::clamp<int64_t>(
+      static_cast<int64_t>(cursor.y) + gap, minimum_y, maximum_y));
+  const RECT frame = tray_anchor
+      ? QuickPasteTrayFrame(*tray_anchor, work, width, height, gap)
+      : RECT{x, y, x + width, y + height};
+  if (!api.set_window_pos(window, HWND_TOPMOST, frame.left, frame.top,
+                      frame.right - frame.left, frame.bottom - frame.top,
+                      SWP_FRAMECHANGED | (reveal ? SWP_SHOWWINDOW : SWP_NOACTIVATE)) || !owns()) return fail();
+  if (reveal && (!api.set_foreground_window(window) || !owns())) return fail();
+  opened();
+  return true;
+}
+
+bool ShowQuickPastePresentation(
+    HWND window, QuickPasteTargetSession& session, int64_t id,
+    const QuickPastePresentationApi& api, const std::function<void()>& opened,
+    bool inspector_visible, const std::optional<RECT>& tray_anchor, bool reveal) {
+  const auto owns = [&] { return id > 0 && session.id() == id; };
+  const auto cleanup = [&] {
+    if (!owns()) return;
+    session.Invalidate();
+    api.show_window(window, SW_HIDE);
+  };
+  if (!owns()) return false;
+  const bool shown = PresentQuickPaste(window, api, opened, owns, cleanup, inspector_visible, tray_anchor, reveal);
+  if (!shown || !owns()) {
+    cleanup();
+    return false;
+  }
+  return true;
+}
+
+bool RevealQuickPaste(HWND window, HWND pending_foreground,
+                     const QuickPastePresentationApi& api) {
+  const HWND foreground = api.get_foreground_window();
+  // Flutter can activate its own hidden popup while preparing the media frame.
+  if (foreground != pending_foreground && foreground != window) return false;
+  if (!api.set_window_pos(window, HWND_TOPMOST, 0, 0, 0, 0,
+          SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_FRAMECHANGED)) return false;
+  return api.set_foreground_window(window);
+}
+
+bool CanRetireQuickPaste(uint64_t requested_generation, uint64_t generation,
+                        int64_t presentation_id, bool visible) {
+  return requested_generation == generation && presentation_id == 0 && !visible;
+}
+
+bool CanFailQuickPasteOpen(uint64_t requested_generation, uint64_t generation,
+                          int64_t requested_id, int64_t current_id, bool retiring) {
+  return !retiring && requested_generation == generation && requested_id > 0 &&
+         requested_id == current_id;
+}
+
+bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
+                                  const std::optional<RECT>& tray_anchor) {
+  if (!is_quick_paste_context_) return false;
+  // Hiding an active popup restores its previous foreground window. Keep the
+  // original opening snapshot so the prepared-frame check still owns that target.
+  const bool reopening = sampled_foreground == GetHandle() &&
+      quick_paste_session_.id() > 0 && ::IsWindowVisible(GetHandle());
+  const HWND pending_foreground = reopening ? quick_paste_pending_foreground_ : sampled_foreground;
+  const int64_t id = quick_paste_session_.Begin(sampled_foreground, GetHandle());
+  if (id == 0) {
+    if (quick_paste_session_.id() == 0) ::ShowWindow(GetHandle(), SW_HIDE);
+    return false;
+  }
+  // Reopening an active popup must prepare its next media frame offscreen too.
+  // Capture the target first, then suppress the hide's focus-loss invalidation.
+  if (!quick_paste_session_.HideForPreparation(id, GetHandle())) return false;
+  quick_paste_inspector_visible_ = quick_paste_inspector_pinned_;
+  quick_paste_tray_anchor_ = tray_anchor;
+  // A reopened active popup keeps the sample taken for its target.
+  if (!reopening || (!secure_field_state_ && !secure_field_query_pending_)) {
+    StartSecureFieldQuery();
+  }
+  quick_paste_pending_foreground_ = pending_foreground;
+  return ShowQuickPastePresentation(
+      GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{},
+      [this] { NotifyQuickPasteOpened(); }, quick_paste_inspector_visible_, tray_anchor, false);
+}
+
+void FlutterWindow::NotifyQuickPasteOpened() {
+  const auto id = quick_paste_session_.id();
+  if (!quick_paste_ready_ || quick_paste_retiring_ || id <= 0 || !quick_paste_channel_) return;
+  const HWND owner = main_window_handle_;
+  const auto generation = quick_paste_generation_;
+  const auto failed = [owner, generation, id] {
+    ::PostMessage(owner, kFailQuickPasteOpen, static_cast<WPARAM>(generation),
+                  static_cast<LPARAM>(id));
+  };
+  flutter::EncodableMap arguments{
+      {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)},
+      {flutter::EncodableValue("inspectorVisible"), flutter::EncodableValue(quick_paste_inspector_visible_)}};
+  if (const auto pid = quick_paste_session_.target_pid()) {
+    const std::string image = ProcessImageName(*pid);
+    if (!image.empty()) arguments[flutter::EncodableValue("targetApp")] = flutter::EncodableValue(image);
+  }
+  quick_paste_channel_->InvokeMethod(
+      "opened", std::make_unique<flutter::EncodableValue>(std::move(arguments)),
+      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+          nullptr, [failed](const auto&, const auto&, const auto*) { failed(); }, failed));
+}
+
+void FlutterWindow::ScheduleQuickPasteRetirement() {
+  if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
+  ::PostMessage(main_window_handle_, kRetireQuickPaste,
+                static_cast<WPARAM>(quick_paste_generation_), 0);
+}
+
+void FlutterWindow::BeginQuickPasteShutdown() {
+  quick_paste_retiring_ = true;
+  quick_paste_session_.Invalidate();
+  const HWND owner = main_window_handle_;
+  const auto generation = quick_paste_generation_;
+  const auto finish = [owner, generation] {
+    ::PostMessage(owner, kFinishQuickPasteRetirement, static_cast<WPARAM>(generation), 0);
+  };
+  // A failed Dart startup must not retain a hidden engine indefinitely.
+  ::SetTimer(GetHandle(), kQuickPasteShutdownTimer, 1000, nullptr);
+  quick_paste_channel_->InvokeMethod(
+      "shutdown", std::make_unique<flutter::EncodableValue>(),
+      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+          [finish](const auto*) { finish(); },
+          [finish](const auto&, const auto&, const auto*) { finish(); }, finish));
+}
+
+bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember) {
+  if (!is_quick_paste_context_ || presentation_id <= 0 ||
+      quick_paste_session_.id() != presentation_id) return false;
+  RECT current{};
+  MONITORINFO monitor{sizeof(MONITORINFO)};
+  if (!::GetWindowRect(GetHandle(), &current) ||
+      !::GetMonitorInfoW(::MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+  const UINT dpi = ::GetDpiForWindow(GetHandle());
+  if (dpi == 0) return false;
+  const RECT work = monitor.rcWork;
+  const int width = std::min(::MulDiv(visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
+                             static_cast<int>(work.right - work.left));
+  const int height = std::min(static_cast<int>(current.bottom - current.top),
+                              static_cast<int>(work.bottom - work.top));
+  const int x = std::clamp(static_cast<int>(current.left), static_cast<int>(work.left),
+                           std::max(static_cast<int>(work.left), static_cast<int>(work.right) - width));
+  const int y = std::clamp(static_cast<int>(current.top), static_cast<int>(work.top),
+                           std::max(static_cast<int>(work.top), static_cast<int>(work.bottom) - height));
+  const RECT frame = quick_paste_tray_anchor_
+      ? QuickPasteTrayFrame(*quick_paste_tray_anchor_, work, width, height, ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI))
+      : RECT{x, y, x + width, y + height};
+  if (!::SetWindowPos(GetHandle(), nullptr, frame.left, frame.top,
+      frame.right - frame.left, frame.bottom - frame.top,
+      SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED)) return false;
+  if (quick_paste_session_.id() != presentation_id) return false;
+  quick_paste_inspector_visible_ = visible;
+  if (remember) quick_paste_inspector_pinned_ = visible;
+  return true;
+}
+
+void FlutterWindow::UpdateQuickPasteWindowCorners() {
+  if (!is_quick_paste_context_) return;
+  RECT frame{};
+  if (!::GetWindowRect(GetHandle(), &frame)) return;
+  const int width = static_cast<int>(frame.right - frame.left);
+  const int height = static_cast<int>(frame.bottom - frame.top);
+  if (width <= 0 || height <= 0 ||
+      (width == quick_paste_rounded_width_ && height == quick_paste_rounded_height_)) return;
+  quick_paste_rounded_width_ = width;
+  quick_paste_rounded_height_ = height;
+  const int diameter = ::MulDiv(24, ::GetDpiForWindow(GetHandle()), USER_DEFAULT_SCREEN_DPI);
+  HRGN region = ::CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
+  if (region != nullptr && !::SetWindowRgn(GetHandle(), region, TRUE)) ::DeleteObject(region);
+}
+
+bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
+  return is_quick_paste_context_ && quick_paste_session_.Paste(presentation_id, GetHandle());
+}
+
+void FlutterWindow::ShowMainWindow(bool open_settings) {
+  if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
+  quick_paste_session_.Invalidate();
+  ::ShowWindow(GetHandle(), SW_HIDE);
+  ScheduleQuickPasteRetirement();
+  ::ShowWindow(main_window_handle_, SW_SHOW);
+  ::SetForegroundWindow(main_window_handle_);
+  if (quick_paste_channel_) {
+    ::PostMessage(main_window_handle_, WM_APP + 41, open_settings ? 1 : 0, 0);
+  }
+}
+
+bool FlutterWindow::HandleForegroundInputCall(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>& result) {
+  const QuickPasteTargetApi api;
+  if (call.method_name() == "pasteForeground") {
+    if (const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments())) {
+      const auto plain = arguments->find(flutter::EncodableValue("plainText"));
+      if (plain != arguments->end() && std::get_if<bool>(&plain->second) == nullptr) {
+        result->Error("invalid_arguments");
+        return true;
+      }
+    }
+    // Plain text is decided by the delivered clipboard content, so the
+    // standard paste chord serves both variants.
+    HWND root = nullptr;
+    const auto blocked = ForegroundInputBlocked(api, &root);
+    std::string outcome = blocked.value_or("pasted");
+    if (!blocked) {
+      const auto sent = SendNeutralPaste(api, [&api, root] {
+        return api.get_ancestor(api.get_foreground_window(), GA_ROOT) == root;
+      });
+      if (sent == NeutralPasteResult::kCancelled) outcome = "noTarget";
+      if (sent == NeutralPasteResult::kFailed) outcome = "copiedOnly";
+    }
+    result->Success(flutter::EncodableValue(outcome));
+    return true;
+  }
+  if (call.method_name() == "moveCaretLeft") {
+    const auto count = IntArgument(call, "count");
+    if (!count || *count < 0 || *count > kMaxCaretMove) {
+      result->Error("invalid_arguments");
+    } else if (*count == 0) {
+      result->Success(flutter::EncodableValue(true));
+    } else if (pending_caret_move_) {
+      result->Success(flutter::EncodableValue(false));
+    } else {
+      pending_caret_move_ = PendingCaretMove{std::move(result), static_cast<int>(*count), 0};
+      ContinueCaretMove();
+    }
+    return true;
+  }
+  if (call.method_name() == "secureFieldFocused") {
+    // The main window answers for the current focus; Quick Paste answers for
+    // the target sampled when it opened.
+    if (!secure_field_query_pending_ && (!is_quick_paste_context_ || !secure_field_state_)) {
+      StartSecureFieldQuery();
+    }
+    if (secure_field_state_) {
+      result->Success(*secure_field_state_);
+    } else {
+      secure_field_waiters_.push_back(std::move(result));
+    }
+    return true;
+  }
+  return false;
+}
+
+void FlutterWindow::ContinueCaretMove() {
+  if (!pending_caret_move_) return;
+  const QuickPasteTargetApi api;
+  // Injected arrows combine with held keys, so wait for the activating
+  // modifiers to be released instead of turning the move into a selection.
+  if (ModifierHeld(api) && ++pending_caret_move_->attempts < kCaretMoveAttempts) {
+    ::SetTimer(GetHandle(), kCaretMoveTimer, kCaretMoveRetryMilliseconds, nullptr);
+    return;
+  }
+  ::KillTimer(GetHandle(), kCaretMoveTimer);
+  auto result = std::move(pending_caret_move_->result);
+  const int count = pending_caret_move_->count;
+  pending_caret_move_.reset();
+  const bool moved = !ModifierHeld(api) && !ForegroundInputBlocked(api) &&
+      SendCaretLeft(api, count);
+  result->Success(flutter::EncodableValue(moved));
+}
+
+void FlutterWindow::StartSecureFieldQuery() {
+  secure_field_state_.reset();
+  secure_field_query_pending_ = true;
+  const uint64_t generation = ++secure_field_generation_;
+  const HWND window = GetHandle();
+  std::thread([window, generation] {
+    ::PostMessage(window, kSecureFieldResult, static_cast<WPARAM>(generation),
+                  FocusedFieldState());
+  }).detach();
+}
+
+void FlutterWindow::CompleteSecureFieldQuery(uint64_t generation, LPARAM state) {
+  if (generation != secure_field_generation_) return;
+  secure_field_query_pending_ = false;
+  secure_field_state_ = state == kFieldUnknown
+      ? flutter::EncodableValue()
+      : flutter::EncodableValue(state == kFieldPassword);
+  auto waiters = std::move(secure_field_waiters_);
+  secure_field_waiters_.clear();
+  for (auto& waiter : waiters) waiter->Success(*secure_field_state_);
+}
+
+void FlutterWindow::CloseProtectedPairingContext(const std::string& context_id) {
+  if (is_protected_pairing_context_ || !protected_pairing_window_) {
+    return;
+  }
+  if (!context_id.empty() &&
+      protected_pairing_window_->pairing_context_id_ != context_id) {
+    return;
+  }
+  protected_pairing_window_->Destroy();
+  protected_pairing_window_.reset();
+}
+
+LRESULT
+FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
+                              WPARAM const wparam,
+                              LPARAM const lparam) noexcept {
+  if (message == WM_COPYDATA && !is_protected_pairing_context_ &&
+      !is_quick_paste_context_) {
+    const auto uri = ApplicationInstance::ReadLaunch(
+        reinterpret_cast<const COPYDATASTRUCT*>(lparam));
+    if (!uri) return FALSE;
+    ::ShowWindow(hwnd, ::IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
+    ::SetForegroundWindow(hwnd);
+    if (!uri->empty()) {
+      pending_pairing_uri_ = *uri;
+      if (pairing_links_channel_) {
+        pairing_links_channel_->InvokeMethod("openPairingUri",
+            std::make_unique<flutter::EncodableValue>(*uri),
+            std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+                [this, launch_uri = *uri](const flutter::EncodableValue* result) {
+                  const auto* accepted = result == nullptr ? nullptr : std::get_if<bool>(result);
+                  if (accepted != nullptr && *accepted && pending_pairing_uri_ == launch_uri) {
+                    pending_pairing_uri_.clear();
+                  }
+                }, nullptr, nullptr));
+      }
+    }
+    return TRUE;
+  }
+  if (message == WM_TIMER && wparam == kCaretMoveTimer) {
+    ContinueCaretMove();
+    return 0;
+  }
+  // Transparency effects and high contrast arrive as setting or theme changes.
+  if (window_material_ &&
+      (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED)) {
+    window_material_->HandleSettingChange();
+  }
+  if (message == kSecureFieldResult) {
+    CompleteSecureFieldQuery(static_cast<uint64_t>(wparam), lparam);
+    return 0;
+  }
+  if (is_protected_pairing_context_ && message == WM_CLOSE && !pairing_cancellation_approved_) {
+    pairing_cancellation_approved_ = CancelProtectedPairingContext();
+    if (!pairing_cancellation_approved_) return 0;
+  }
+  if (is_quick_paste_context_) {
+    // The client must cover the whole popup, including the native resize frame.
+    // Otherwise WS_THICKFRAME leaves a strip above Flutter and exposed corners.
+    if (message == WM_NCCALCSIZE && wparam == TRUE) return 0;
+    if (message == WM_TIMER && wparam == kQuickPasteShutdownTimer && quick_paste_retiring_) {
+      ::KillTimer(hwnd, kQuickPasteShutdownTimer);
+      ::PostMessage(main_window_handle_, kFinishQuickPasteRetirement,
+                    static_cast<WPARAM>(quick_paste_generation_), 0);
+      return 0;
+    }
+    if (message == WM_SIZE) UpdateQuickPasteWindowCorners();
+    if (message == WM_CLOSE) {
+      quick_paste_session_.Invalidate();
+      ::ShowWindow(hwnd, SW_HIDE);
+      ScheduleQuickPasteRetirement();
+      return 0;
+    }
+    if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
+      if (quick_paste_session_.internally_hiding()) return 0;
+      // A save dialog owns focus until the inspector's download completes.
+      const auto activated_window = reinterpret_cast<HWND>(lparam);
+      if (activated_window && ::GetAncestor(activated_window, GA_ROOTOWNER) == hwnd) return 0;
+      quick_paste_session_.Invalidate();
+      ::ShowWindow(hwnd, SW_HIDE);
+      ScheduleQuickPasteRetirement();
+      return 0;
+    }
+  } else if (!is_protected_pairing_context_ && message == kFailQuickPasteOpen) {
+    if (quick_paste_window_ && CanFailQuickPasteOpen(wparam,
+        quick_paste_window_->quick_paste_generation_, static_cast<int64_t>(lparam),
+        quick_paste_window_->quick_paste_session_.id(), quick_paste_window_->quick_paste_retiring_)) {
+      auto* context = quick_paste_window_.get();
+      context->quick_paste_session_.Close(static_cast<int64_t>(lparam), context->GetHandle());
+      context->ScheduleQuickPasteRetirement();
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == kMemoryPressure) {
+    if (memory_pressure_monitor_ && memory_pressure_monitor_->HandleSignal(wparam)) {
+      NotifyMemoryPressure();
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == kRetireQuickPaste) {
+    if (quick_paste_window_ && CanRetireQuickPaste(wparam,
+        quick_paste_window_->quick_paste_generation_, quick_paste_window_->quick_paste_session_.id(),
+        ::IsWindowVisible(quick_paste_window_->GetHandle()) != FALSE)) {
+      quick_paste_inspector_visible_ = quick_paste_window_->quick_paste_inspector_pinned_;
+      auto context = std::move(quick_paste_window_);
+      auto* retiring = context.get();
+      retiring_quick_paste_windows_.emplace(wparam, std::move(context));
+      retiring->BeginQuickPasteShutdown();
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == kFinishQuickPasteRetirement) {
+    const auto found = retiring_quick_paste_windows_.find(wparam);
+    if (found != retiring_quick_paste_windows_.end()) {
+      found->second->Destroy();
+      retiring_quick_paste_windows_.erase(found);
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == WM_APP + 41) {
+    if (quick_paste_channel_) {
+      quick_paste_channel_->InvokeMethod(
+          wparam ? "openSettings" : "openMain", std::make_unique<flutter::EncodableValue>());
+    }
+    return 0;
+  }
+  // Give Flutter, including plugins, an opportunity to handle window messages.
+  if (flutter_controller_) {
+    std::optional<LRESULT> result =
+        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
+                                                      lparam);
+    if (result) {
+      return *result;
+    }
+  }
+
+  switch (message) {
+    case WM_FONTCHANGE:
+      flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+  }
+
+  return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}

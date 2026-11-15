@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">已暂停采集</string>
+    <string name="background_status_capturing">正在保存复制内容</string>
+    <string name="background_status_syncing">正在后台同步</string>
+    <string name="background_status_last_sync">上次同步 %1$s</string>
+    <string name="background_status_last_saved">上次保存 %1$s</string>
+    <string name="background_action_pause">暂停</string>
+    <string name="background_action_resume">继续</string>
+    <string name="background_action_send">发送剪贴板</string>
+    <string name="background_action_open">打开</string>
+    <string name="shortcut_send_clipboard">发送剪贴板</string>
+    <string name="shortcut_transform_clipboard">转换剪贴板</string>
+</resources>

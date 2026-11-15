@@ -1,0 +1,1 @@
+{"schema":1,"gates":{"rustfmt":{"label":"cargo fmt --check","commands":[["cargo","+{rust_version}","fmt","--all","--check"]]},"clippy-workspace":{"label":"clippy --workspace","commands":[["cargo","+{rust_version}","clippy","--workspace","--all-targets","--locked","--","-D","warnings"]]}},"profiles":{"foundation":["rustfmt","clippy-workspace"]}}

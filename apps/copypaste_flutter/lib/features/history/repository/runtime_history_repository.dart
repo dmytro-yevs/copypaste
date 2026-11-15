@@ -1,0 +1,740 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/services.dart';
+
+import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/generated/api/clips.dart' as clips;
+import 'package:copypaste_flutter/l10n/l10n.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
+import '../../content_rules/models/content_rule_models.dart';
+import '../../content_rules/repository/runtime_content_rule_repository.dart';
+import '../../devices/flutter_rust_devices_gateway.dart';
+import '../../paste_queue/models/paste_queue_models.dart';
+import '../../paste_queue/repository/runtime_paste_queue_repository.dart';
+import 'clip_edit_preferences.dart';
+import 'clip_edit_repository.dart';
+import '../../transforms/repository/runtime_transform_repository.dart';
+import '../../transforms/repository/transform_recents_store.dart';
+import '../../transforms/repository/transform_repository.dart';
+import '../../../shared/error_text.dart';
+import '../../../shared/runtime_event_service.dart';
+import '../models/history_models.dart';
+import 'history_repository.dart';
+import '../controller/history_spoiler_controller.dart';
+import 'history_file_importer.dart';
+
+/// Production History port backed only by generated Flutter/Rust bindings.
+///
+/// Runtime startup and its isolated debug profile are owned by app integration.
+/// This adapter never starts a daemon and never supplies a fallback data source.
+class RuntimeHistoryRepository
+    implements
+        HistoryRepository,
+        HistoryGroupCountsRepository,
+        HistoryTagsRepository,
+        HistorySpoilerRepository,
+        HistoryFileDownloadCancellation,
+        HistoryFileProgressRepository,
+        HistoryDownloadedFileRepository,
+        HistoryEditRepository,
+        HistoryQueueRepository,
+        HistorySendRepository,
+        HistoryTransformRepository,
+        HistoryAnnotationsRepository {
+  bool _disposed = false;
+  final _downloadTokens = <String, String>{};
+
+  // Feature adapters are created on first use, so History pays nothing for
+  // capabilities it never opens.
+  late final _queue = RuntimePasteQueueRepository();
+  late final _rules = RuntimeContentRuleRepository(transforms: transforms);
+
+  @override
+  ClipEditRepository get clipEdits => const RuntimeClipEditRepository();
+
+  @override
+  late final ClipEditPreferences clipEditPreferences =
+      SharedPreferencesClipEditPreferences();
+
+  @override
+  late final TransformRepository transforms = RuntimeTransformRepository();
+
+  @override
+  late final TransformRecentsStore transformRecents =
+      SharedPreferencesTransformRecentsStore();
+
+  @override
+  Future<List<HistorySendTarget>> sendTargets() async {
+    _ensureActive();
+    return [
+      for (final peer in await runtime.listPeers())
+        if (peer.deviceId != null)
+          HistorySendTarget(id: peer.pairingId, name: peer.name),
+    ];
+  }
+
+  @override
+  Future<List<HistorySendResult>> sendClips(
+    List<String> clipIds,
+    List<String> targetIds,
+  ) async {
+    _ensureActive();
+    final outcomes = await runtime.sendClipsToDevices(
+      itemIds: clipIds,
+      pairingIds: targetIds,
+    );
+    return [
+      for (final outcome in outcomes)
+        HistorySendResult(
+          name: outcome.name,
+          sent: outcome.sent,
+          errorCode: outcome.errorCode,
+        ),
+    ];
+  }
+
+  @override
+  Future<int> addToQueue(List<String> clipIds) async {
+    _ensureActive();
+    final snapshot = await _queue.add([
+      for (final id in clipIds) PasteQueueSource.clip(id),
+    ]);
+    return snapshot.pendingCount;
+  }
+
+  @override
+  Future<String> pasteAllSeparator() async {
+    _ensureActive();
+    return (await _queue.state()).settings.joinSeparator;
+  }
+
+  @override
+  Future<HistoryClipAnnotations> keep(String clipId) async {
+    _ensureActive();
+    return _fromRuntimeAnnotations(
+      (await clips.keepClip(id: clipId)).annotations,
+    );
+  }
+
+  @override
+  Future<RuleTrace> ruleTrace(String clipId) {
+    _ensureActive();
+    return _rules.clipTrace(clipId);
+  }
+
+  @override
+  Future<RuleOptions> ruleOptions() {
+    _ensureActive();
+    return _rules.options();
+  }
+
+  @override
+  Stream<HistoryRuntimeEvent> watch() {
+    _ensureActive();
+    return RuntimeEventService.instance.events
+        .where((event) => event.kind == 'items' || event.kind == 'ready')
+        .map((_) => HistoryRuntimeEvent.itemsChanged);
+  }
+
+  @override
+  Future<HistoryFacets> facets() async {
+    _ensureActive();
+    return mapFacets(await runtime.historyFacets());
+  }
+
+  /// Maps only Rust-provided labels and opaque IDs for server-side filters.
+  static HistoryFacets mapFacets(runtime.HistoryFacets facets) {
+    return HistoryFacets(
+      tags: facets.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
+      originDevices: facets.originDevices
+          .map(
+            (facet) => HistoryDeviceFacet(
+              id: facet.id,
+              label: facet.label,
+              deviceClass: mapRuntimeDeviceClass(facet.deviceClass),
+            ),
+          )
+          .toList(growable: false),
+      sourceApps: facets.sourceApps
+          .map(
+            (facet) => HistorySourceAppFacet(
+              id: facet.id,
+              label: facet.label,
+              iconId: facet.iconId,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async {
+    _ensureActive();
+    final page = await runtime.queryClips(
+      query: mapQuery(query),
+      limit: limit,
+      cursor: cursor,
+    );
+    return HistoryClipPage(
+      items: page.clips.map(_fromRuntimeListClip).toList(growable: false),
+      nextCursor: page.nextCursor,
+      skippedUndecryptable: page.skippedUndecryptable,
+    );
+  }
+
+  /// The one translation of a list query, shared by pages and their counts.
+  static runtime.ClipQuery mapQuery(HistoryQuery query) => runtime.ClipQuery(
+    search: query.hasSearch ? query.search.trim() : null,
+    contentClasses: _toRuntimeContentClasses(query.kind),
+    semanticKinds: _toRuntimeSemanticKinds(query.kind),
+    pinnedOnly: query.pinnedOnly,
+    originDeviceId: query.origin,
+    sourceAppBundleId: query.sourceApp,
+    sort: _toRuntimeSort(query.sort),
+    capturedFromMs: query.capturedFrom == null
+        ? null
+        : PlatformInt64Util.from(query.capturedFrom!.millisecondsSinceEpoch),
+    capturedBeforeMs: query.capturedBefore == null
+        ? null
+        : PlatformInt64Util.from(query.capturedBefore!.millisecondsSinceEpoch),
+    tagIds: query.tagIds,
+    untaggedOnly: query.untaggedOnly,
+  );
+
+  @override
+  Future<HistoryGroupCounts?> groupCounts({
+    required HistoryQuery query,
+    required List<DateTime> days,
+  }) async {
+    _ensureActive();
+    final counts = await runtime.countClipGroups(
+      query: mapQuery(query),
+      ranges: mapDayRanges(days),
+    );
+    return counts == null ? null : mapGroupCounts(days, counts);
+  }
+
+  /// Each local calendar day as the instants that bound it. Built from local
+  /// midnights, so a day shortened or lengthened by a clock change keeps its
+  /// real 23 or 25 hours.
+  static List<runtime.ClipCountRange> mapDayRanges(List<DateTime> days) => [
+    for (final day in days)
+      runtime.ClipCountRange(
+        fromMs: PlatformInt64Util.from(
+          DateTime(day.year, day.month, day.day).millisecondsSinceEpoch,
+        ),
+        beforeMs: PlatformInt64Util.from(
+          DateTime(day.year, day.month, day.day + 1).millisecondsSinceEpoch,
+        ),
+      ),
+  ];
+
+  static HistoryGroupCounts mapGroupCounts(
+    List<DateTime> days,
+    runtime.ClipGroupCounts counts,
+  ) {
+    if (counts.ranges.length != days.length) {
+      throw StateError('History group counts do not match the request');
+    }
+    return HistoryGroupCounts(
+      pinned: counts.pinned.toInt(),
+      days: {
+        for (var i = 0; i < days.length; i++)
+          DateTime(days[i].year, days[i].month, days[i].day): counts.ranges[i]
+              .toInt(),
+      },
+    );
+  }
+
+  @override
+  Future<HistoryTags> tags(List<String> clipIds) async {
+    _ensureActive();
+    final data = await runtime.historyTags(clipIds: clipIds);
+    return HistoryTags(
+      tags: data.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
+      assignments: {
+        for (final entry in data.assignments) entry.clipId: entry.tagIds,
+      },
+    );
+  }
+
+  @override
+  Future<void> saveTag({String? id, required String name}) =>
+      runtime.saveHistoryTag(id: id, name: name);
+  @override
+  Future<void> deleteTag(String id) => runtime.deleteHistoryTag(id: id);
+  @override
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  }) => runtime.changeClipTags(
+    clipIds: clipIds,
+    tagIds: tagIds,
+    assigned: assigned,
+  );
+
+  @override
+  Future<HistoryClip> get(String id) async {
+    _ensureActive();
+    return _fromRuntimeDetailClip(await runtime.getClip(id: id));
+  }
+
+  @override
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async {
+    _ensureActive();
+    return _fromRuntimeImagePreview(
+      await runtime.clipImagePreview(
+        id: id,
+        maxEdge: maxEdge,
+        bounds: bounds == null
+            ? null
+            : runtime.ClipImagePreviewBounds(
+                width: bounds.width,
+                height: bounds.height,
+              ),
+      ),
+    );
+  }
+
+  @override
+  Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {
+    _ensureActive();
+    final preview = await runtime.sourceAppIcon(id: id);
+    if (preview == null) return null;
+    return HistorySourceAppIcon(
+      preview.pngBytes,
+      width: preview.width,
+      height: preview.height,
+    );
+  }
+
+  @override
+  Future<void> copy(String id) async {
+    _ensureActive();
+    await _fileOperation(() => runtime.copyClip(id: id));
+  }
+
+  @override
+  Future<void> copyPlainText(String id) async {
+    _ensureActive();
+    await runtime.copyClipAsPlainText(id: id);
+  }
+
+  @override
+  Future<void> copyText(String id, String text) async {
+    _ensureActive();
+    await runtime.copyClipText(id: id, text: text);
+  }
+
+  @override
+  Future<void> saveFile(String id, String destinationPath) async {
+    _ensureActive();
+    final random = Random.secure();
+    final token = base64UrlEncode(
+      List<int>.generate(16, (_) => random.nextInt(256)),
+    );
+    _downloadTokens[id] = token;
+    try {
+      await _fileOperation(
+        () => runtime.saveClipFile(
+          id: id,
+          destPath: destinationPath,
+          downloadToken: token,
+        ),
+      );
+    } finally {
+      if (_downloadTokens[id] == token) _downloadTokens.remove(id);
+    }
+  }
+
+  @override
+  Future<String?> downloadedFile(String id) =>
+      runtime.downloadedClipFile(id: id);
+
+  @override
+  Future<void> saveFileWithProgress(
+    String id,
+    String destinationPath,
+    void Function(int written, int total) onProgress,
+  ) async {
+    _ensureActive();
+    final service = RuntimeEventService.instance;
+    final token = base64UrlEncode(
+      List<int>.generate(16, (_) => Random.secure().nextInt(256)),
+    );
+    final finished = Completer<void>();
+    finished.future.ignore();
+    var checkAgain = false;
+    var checking = false;
+    Future<void> reconcile() async {
+      if (finished.isCompleted) return;
+      if (checking) {
+        checkAgain = true;
+        return;
+      }
+      checking = true;
+      try {
+        do {
+          checkAgain = false;
+          final records =
+              jsonDecode(await runtime.fileOperations(clear: false, id: token))
+                  as List;
+          final record = records.cast<Map>().firstOrNull;
+          if (record == null) continue;
+          onProgress(record['written'] as int, record['total'] as int);
+          if (record['phase'] == 'completed') {
+            finished.complete();
+          } else if (record['phase'] != 'running') {
+            finished.completeError(
+              HistoryFileOperationException(
+                record['error'] as String? ??
+                    AppStrings.current.historyDownloadErrorCancelled,
+              ),
+            );
+          }
+        } while (checkAgain && !finished.isCompleted);
+      } catch (error, trace) {
+        if (!finished.isCompleted) finished.completeError(error, trace);
+      } finally {
+        checking = false;
+      }
+    }
+
+    final subscription = service.events.listen(
+      (event) {
+        final progress = event.fileOperation;
+        if (progress?.id == token && progress?.phase == 'running') {
+          onProgress(progress!.written.toInt(), progress.total.toInt());
+        } else if (event.kind == 'ready' || progress?.id == token) {
+          unawaited(reconcile());
+        }
+      },
+      onError: (Object _, StackTrace _) {
+        // The runtime owns the operation; reconnect reconciles its durable result.
+      },
+    );
+    _downloadTokens[id] = token;
+    try {
+      try {
+        if (!await service.ready.timeout(const Duration(seconds: 5))) {
+          throw HistoryFileOperationException(
+            AppStrings.current.historyDownloadErrorServiceUnavailable,
+          );
+        }
+      } on TimeoutException {
+        throw HistoryFileOperationException(
+          AppStrings.current.historyDownloadErrorServiceTimeout,
+        );
+      }
+      await _fileOperation(
+        () => runtime.startFileDownload(
+          id: id,
+          destPath: destinationPath,
+          token: token,
+        ),
+      );
+      await reconcile();
+      await finished.future;
+    } finally {
+      if (_downloadTokens[id] == token) _downloadTokens.remove(id);
+      await subscription.cancel();
+    }
+  }
+
+  @override
+  Future<void> cancelFileDownload(String id) async {
+    final token = _downloadTokens[id];
+    if (token != null) await runtime.cancelClipFileDownload(id: token);
+  }
+
+  Future<T> _fileOperation<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
+    } on runtime.RuntimeError catch (error) {
+      throw HistoryFileOperationException(ErrorText.describe(error));
+    } on PlatformException catch (error) {
+      throw HistoryFileOperationException(
+        error.message ?? AppStrings.current.historyFileErrorAccess,
+      );
+    }
+  }
+
+  @override
+  Future<void> importFile(HistoryImportFile file) async {
+    _ensureActive();
+    await _fileOperation(() async {
+      final reference = file.sourceReference;
+      if (reference != null) {
+        await runtime.addFileReference(
+          reference: reference,
+          filename: file.name,
+          mimeType: file.mimeType,
+          sizeHint: file.sizeBytes == null
+              ? null
+              : BigInt.from(file.sizeBytes!),
+        );
+        return;
+      }
+      final maxBytes = (await runtime.historyFileImportMaxBytes()).toInt();
+      final path = await file.prepare(maxBytes);
+      await runtime.importClipFile(
+        path: path,
+        filename: file.name,
+        mimeType: file.mimeType,
+        sourceReference: file.sourceReference,
+      );
+    });
+  }
+
+  @override
+  Future<HistorySpoilerState> readSpoilers() async {
+    _ensureActive();
+    final state = await runtime.getSpoilerState();
+    return HistorySpoilerState(
+      state.revision.toInt(),
+      state.revealedIds.toSet(),
+    );
+  }
+
+  @override
+  Future<HistorySpoilerState> setSpoilerRevealed(
+    String? id,
+    bool revealed,
+  ) async {
+    _ensureActive();
+    final state = await runtime.setSpoilerRevealed(id: id, revealed: revealed);
+    return HistorySpoilerState(
+      state.revision.toInt(),
+      state.revealedIds.toSet(),
+    );
+  }
+
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async {
+    _ensureActive();
+    return mapDetailClip(await runtime.setClipSecret(id: id, secret: secret));
+  }
+
+  @override
+  Future<void> setPinned(String id, bool pinned) async {
+    _ensureActive();
+    await runtime.setClipPinned(id: id, pinned: pinned);
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    _ensureActive();
+    await runtime.deleteClip(id: id);
+  }
+
+  @override
+  Future<void> deleteAll() async {
+    _ensureActive();
+    final ceiling = await runtime.historyCeiling();
+    await runtime.deleteClipsThrough(
+      through: PlatformInt64Util.from(ceiling.toInt()),
+    );
+  }
+
+  @override
+  Future<void> reorderPinned(List<String> ids) async {
+    _ensureActive();
+    await runtime.reorderPinnedClips(ids: ids);
+  }
+
+  /// Closes the dedicated watch connection. The app integration owns this call
+  /// because a runtime repository can be shared by persistent destinations.
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+  }
+
+  void _ensureActive() {
+    if (_disposed) throw StateError('History runtime repository is disposed.');
+  }
+
+  /// Maps generated Rust data at the one permitted boundary into feature data.
+  static HistoryClip mapListClip(runtime.Clip clip) => _fromRuntimeClip(clip);
+
+  /// Maps the explicit get result and keeps its body out of list responses.
+  static HistoryClip mapDetailClip(runtime.Clip clip) =>
+      _fromRuntimeClip(clip, includeBody: true);
+
+  static HistoryImagePreview mapImagePreview(
+    runtime.ClipImagePreview preview,
+  ) => _fromRuntimeImagePreview(preview);
+}
+
+HistoryClip _fromRuntimeListClip(runtime.Clip clip) =>
+    RuntimeHistoryRepository.mapListClip(clip);
+
+HistoryClip _fromRuntimeDetailClip(runtime.Clip clip) =>
+    RuntimeHistoryRepository.mapDetailClip(clip);
+
+HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
+  final details = clip.fileDetails;
+  final imageDetails = clip.imageDetails;
+  return HistoryClip(
+    secret: clip.secret,
+    transient: clip.transient,
+    id: clip.id,
+    contentType: clip.contentType,
+    preview: clip.content,
+    body: includeBody ? clip.content : null,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      clip.createdAtMs.toInt(),
+      isUtc: true,
+    ),
+    pinned: clip.pinned,
+    tagIds: clip.tagIds,
+    kind: _fromRuntimeKind(clip.contentClass, clip.semanticKind),
+    origin: clip.originDeviceName,
+    originDeviceClass: mapRuntimeDeviceClass(clip.originDeviceClass),
+    sourceApp: clip.sourceAppName,
+    sourceAppIconId: clip.sourceAppIconId,
+    truncated: clip.truncated,
+    lineCount: clip.lineCount,
+    colorRgba: clip.colorRgba,
+    tooLargeToSync: clip.tooLargeToSync,
+    file: details == null
+        ? null
+        : HistoryFileDetails(
+            name: details.filename,
+            mimeType: details.mimeType,
+            sourceReference: details.sourceReference,
+            sourceAvailable: details.sourceAvailable,
+            sizeBytes: details.sizeBytes.toInt(),
+            fileCount: details.fileCount,
+            files: [
+              for (final member in details.files)
+                HistoryFileMember(
+                  name: member.filename,
+                  sizeBytes: member.sizeBytes.toInt(),
+                  sourceReference: member.sourceReference,
+                ),
+            ],
+          ),
+    image: imageDetails == null
+        ? null
+        : HistoryImageDetails(
+            width: imageDetails.width,
+            height: imageDetails.height,
+            sizeBytes: imageDetails.sizeBytes.toInt(),
+          ),
+    annotations: _fromRuntimeAnnotations(clip.annotations),
+  );
+}
+
+HistoryClipAnnotations _fromRuntimeAnnotations(
+  clips.ClipAnnotationState? state,
+) {
+  if (state == null) return HistoryClipAnnotations.none;
+  final expiresAt = state.expiresAtMs;
+  return HistoryClipAnnotations(
+    expiresAt: expiresAt == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(expiresAt.toInt(), isUtc: true),
+    ruleSecret: state.ruleSecret,
+    provenance: switch (state.provenance?.kind) {
+      clips.ClipProvenanceKind.manual => HistoryProvenance.manual,
+      clips.ClipProvenanceKind.edited => HistoryProvenance.edited,
+      clips.ClipProvenanceKind.transformed => HistoryProvenance.transformed,
+      clips.ClipProvenanceKind.module => HistoryProvenance.module,
+      null => null,
+    },
+    ruleTagIds: state.ruleTagIds,
+    keep: state.keep,
+  );
+}
+
+HistoryImagePreview _fromRuntimeImagePreview(
+  runtime.ClipImagePreview preview,
+) => HistoryImagePreview(
+  preview.pngBytes,
+  width: preview.width,
+  height: preview.height,
+);
+
+HistoryClipKind _fromRuntimeKind(
+  runtime.ClipContentClass contentClass,
+  runtime.ClipSemanticKind? semanticKind,
+) {
+  if (contentClass != runtime.ClipContentClass.text) {
+    return switch (contentClass) {
+      runtime.ClipContentClass.text => HistoryClipKind.text,
+      runtime.ClipContentClass.image => HistoryClipKind.image,
+      runtime.ClipContentClass.file => HistoryClipKind.file,
+      runtime.ClipContentClass.other => HistoryClipKind.other,
+    };
+  }
+  return switch (semanticKind) {
+    runtime.ClipSemanticKind.plainText || null => HistoryClipKind.text,
+    runtime.ClipSemanticKind.link => HistoryClipKind.link,
+    runtime.ClipSemanticKind.email => HistoryClipKind.email,
+    runtime.ClipSemanticKind.color => HistoryClipKind.color,
+    runtime.ClipSemanticKind.phone => HistoryClipKind.phone,
+    runtime.ClipSemanticKind.code => HistoryClipKind.code,
+    runtime.ClipSemanticKind.json => HistoryClipKind.json,
+    runtime.ClipSemanticKind.path => HistoryClipKind.path,
+    runtime.ClipSemanticKind.credentials => HistoryClipKind.credentials,
+  };
+}
+
+List<runtime.ClipContentClass> _toRuntimeContentClasses(
+  HistoryClipKind? kind,
+) => switch (kind) {
+  HistoryClipKind.image => const [runtime.ClipContentClass.image],
+  HistoryClipKind.file => const [runtime.ClipContentClass.file],
+  HistoryClipKind.other => const [runtime.ClipContentClass.other],
+  null ||
+  HistoryClipKind.text ||
+  HistoryClipKind.link ||
+  HistoryClipKind.email ||
+  HistoryClipKind.color ||
+  HistoryClipKind.phone ||
+  HistoryClipKind.code ||
+  HistoryClipKind.json ||
+  HistoryClipKind.path ||
+  HistoryClipKind.credentials => const [],
+};
+
+List<runtime.ClipSemanticKind> _toRuntimeSemanticKinds(HistoryClipKind? kind) =>
+    switch (kind) {
+      HistoryClipKind.text => const [runtime.ClipSemanticKind.plainText],
+      HistoryClipKind.link => const [runtime.ClipSemanticKind.link],
+      HistoryClipKind.email => const [runtime.ClipSemanticKind.email],
+      HistoryClipKind.color => const [runtime.ClipSemanticKind.color],
+      HistoryClipKind.phone => const [runtime.ClipSemanticKind.phone],
+      HistoryClipKind.code => const [runtime.ClipSemanticKind.code],
+      HistoryClipKind.json => const [runtime.ClipSemanticKind.json],
+      HistoryClipKind.path => const [runtime.ClipSemanticKind.path],
+      HistoryClipKind.credentials => const [
+        runtime.ClipSemanticKind.credentials,
+      ],
+      null ||
+      HistoryClipKind.image ||
+      HistoryClipKind.file ||
+      HistoryClipKind.other => const [],
+    };
+
+runtime.ClipSort _toRuntimeSort(HistorySort sort) => switch (sort) {
+  HistorySort.newest => runtime.ClipSort.newest,
+  HistorySort.oldest => runtime.ClipSort.oldest,
+  HistorySort.relevance => runtime.ClipSort.relevance,
+};

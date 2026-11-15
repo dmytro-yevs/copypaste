@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Wpisy CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Przełącz klawiaturę</string>
+    <string name="quick_access_tile_save_label">Zapisz schowek</string>
+    <string name="quick_access_tile_capture_label">Przechwytywanie schowka</string>
+    <string name="quick_access_widget_label">Ostatnie wpisy</string>
+    <string name="quick_access_widget_description">Twoje najnowsze wpisy. Dotknij wpisu, aby go skopiować.</string>
+    <string name="quick_access_queue_intake_label">Dodaj do kolejki wklejania</string>
+    <string name="quick_access_transform_label">Przekształć</string>
+</resources>

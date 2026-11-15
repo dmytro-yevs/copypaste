@@ -1,0 +1,1127 @@
+import Cocoa
+import ApplicationServices
+import Carbon
+import FlutterMacOS
+import file_selector_macos
+import shared_preferences_foundation
+
+private let pairingPresentationHostChannel = "com.copypaste.app/pairing_presentation_host"
+private let pairingPresentationContextChannel = "com.copypaste.app/pairing_presentation_context"
+private let pairingLinksChannel = "com.copypaste.app/pairing_links"
+private let protectedPairingRoutePrefix = "/protected-pairing/"
+private let quickPasteHostChannel = "com.copypaste.app/quick_paste_host"
+private let quickPasteContextChannel = "com.copypaste.app/quick_paste_context"
+
+class MainFlutterWindow: NSWindow {
+  static let unifiedTitlebarHeight: CGFloat = 48
+
+  private var pairingPresentationMethodChannel: FlutterMethodChannel?
+  private var pairingLinksMethodChannel: FlutterMethodChannel?
+  private var quickPasteHostMethodChannel: FlutterMethodChannel?
+  private var macosSetupChannel: MacosSetupChannel?
+  private var securityChannel: FlutterMethodChannel?
+  private var deviceAuthentication: MacosDeviceAuthentication?
+  private var appLanguageChannel: FlutterMethodChannel?
+  private var appUpdateChannel: MacosAppUpdateChannel?
+  private var applicationLifecycle: MacosApplicationLifecycle?
+  private var trayMenuChannel: MacosTrayMenuChannel?
+  private var windowMaterial: WindowMaterialHost?
+  private var protectedPresentation: ProtectedPairingPresentationWindow?
+  private var quickPastePresentation: QuickPastePresentationWindow?
+  private var quickPasteInspectorVisible = false
+  private var pendingPairingURI: String?
+  private var trafficLightLayoutObservers: [NSObjectProtocol] = []
+  private var trafficLightLayoutScheduled = false
+
+  override func awakeFromNib() {
+    let flutterViewController = FlutterViewController()
+    let windowFrame = frame
+    contentViewController = flutterViewController
+    setFrame(windowFrame, display: true)
+    let windowMaterial = WindowMaterialHost(controller: flutterViewController, role: .main)
+    self.windowMaterial = windowMaterial
+    windowMaterial.attachChannel()
+    RegisterGeneratedPlugins(registry: flutterViewController)
+    configurePairingPresentationChannel(flutterViewController)
+    configurePairingLinksChannel(flutterViewController)
+    configureQuickPasteHostChannel(flutterViewController)
+    macosSetupChannel = MacosSetupChannel(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    MacosScreenshotProtection.shared.register(window: self, view: flutterViewController.view)
+    MacosMemoryPressure.shared.register(engine: flutterViewController.engine)
+    deviceAuthentication = MacosDeviceAuthentication(binaryMessenger: flutterViewController.engine.binaryMessenger)
+    let security = FlutterMethodChannel(
+      name: "com.copypaste.app/security", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    securityChannel = security
+    security.setMethodCallHandler { call, result in
+      switch call.method {
+      case "getBlockScreenshots": result(MacosScreenshotProtection.shared.blocked)
+      case "setBlockScreenshots":
+        guard let args = call.arguments as? [String: Any], let enabled = args["enabled"] as? Bool else {
+          result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
+        }
+        result(MacosScreenshotProtection.shared.setBlocked(enabled))
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    // Menus and system panels read AppleLanguages at launch; Flutter switches live.
+    let appLanguage = FlutterMethodChannel(
+      name: "com.copypaste.app/app_language", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    appLanguageChannel = appLanguage
+    appLanguage.setMethodCallHandler { call, result in
+      let key = "AppleLanguages"
+      switch call.method {
+      case "getApplicationLocale":
+        let domain = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")
+        var state: [String: Any] = ["supported": true, "live": false]
+        if let tag = (domain?[key] as? [String])?.first { state["tag"] = tag }
+        result(state)
+      case "setApplicationLocale":
+        if let tag = (call.arguments as? [String: Any])?["tag"] as? String {
+          UserDefaults.standard.set([tag], forKey: key)
+        } else {
+          UserDefaults.standard.removeObject(forKey: key)
+        }
+        result(["supported": true, "live": false])
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    applicationLifecycle = MacosApplicationLifecycle(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    appUpdateChannel = MacosAppUpdateChannel(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    trayMenuChannel = MacosTrayMenuChannel(
+      binaryMessenger: flutterViewController.engine.binaryMessenger,
+      activate: { [weak self] foreground, anchor in
+        _ = self?.openQuickPaste(frontmost: foreground, trayAnchor: anchor)
+      }
+    )
+    super.awakeFromNib()
+    if Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true {
+      title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        ?? "CopyPaste Dev"
+    }
+    installTrafficLightLayoutObservers()
+    scheduleTrafficLightLayout()
+  }
+
+  deinit {
+    trafficLightLayoutObservers.forEach {
+      NotificationCenter.default.removeObserver($0)
+    }
+  }
+
+  override func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
+    if place != .out { MacosScreenshotProtection.shared.resume(window: self) }
+    super.order(place, relativeTo: otherWin)
+    if place == .out { MacosScreenshotProtection.shared.suspend(window: self) }
+    if place != .out {
+      scheduleTrafficLightLayout()
+    }
+  }
+
+  static func usesUnifiedTrafficLightLayout(styleMask: NSWindow.StyleMask) -> Bool {
+    styleMask.contains(.fullSizeContentView) && !styleMask.contains(.fullScreen)
+  }
+
+  static func trafficLightButtonOriginY(
+    headerHeight: CGFloat,
+    buttonHeight: CGFloat
+  ) -> CGFloat {
+    max(0, (headerHeight - buttonHeight) / 2)
+  }
+
+  static func unifiedTitlebarContainerFrame(
+    _ frame: NSRect,
+    headerHeight: CGFloat
+  ) -> NSRect {
+    let height = max(0, headerHeight)
+    return NSRect(
+      x: frame.minX,
+      y: frame.maxY - height,
+      width: frame.width,
+      height: height
+    )
+  }
+
+  static func unifiedTitlebarViewFrame(
+    containerBounds: NSRect,
+    headerHeight: CGFloat
+  ) -> NSRect {
+    NSRect(
+      x: containerBounds.minX,
+      y: containerBounds.minY,
+      width: containerBounds.width,
+      height: headerHeight
+    )
+  }
+
+  private func installTrafficLightLayoutObservers() {
+    let notifications: [Notification.Name] = [
+      NSWindow.didBecomeKeyNotification,
+      NSWindow.didResizeNotification,
+      NSWindow.didChangeBackingPropertiesNotification,
+      NSWindow.didExitFullScreenNotification,
+    ]
+    trafficLightLayoutObservers = notifications.map { notification in
+      NotificationCenter.default.addObserver(
+        forName: notification,
+        object: self,
+        queue: .main
+      ) { [weak self] _ in
+        self?.scheduleTrafficLightLayout()
+      }
+    }
+  }
+
+  private func scheduleTrafficLightLayout() {
+    guard Self.usesUnifiedTrafficLightLayout(styleMask: styleMask),
+          !trafficLightLayoutScheduled else {
+      return
+    }
+    trafficLightLayoutScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.trafficLightLayoutScheduled = false
+      self.layoutTrafficLights()
+    }
+  }
+
+  private func layoutTrafficLights() {
+    guard Self.usesUnifiedTrafficLightLayout(styleMask: styleMask) else {
+      return
+    }
+    let buttons = [
+      standardWindowButton(.closeButton),
+      standardWindowButton(.miniaturizeButton),
+      standardWindowButton(.zoomButton),
+    ].compactMap { $0 }
+    guard let titlebarView = buttons.first?.superview,
+          let titlebarContainer = titlebarView.superview,
+          buttons.allSatisfy({ $0.superview === titlebarView }) else {
+      return
+    }
+
+    let containerFrame = Self.unifiedTitlebarContainerFrame(
+      titlebarContainer.frame,
+      headerHeight: Self.unifiedTitlebarHeight
+    )
+    if titlebarContainer.frame != containerFrame {
+      titlebarContainer.frame = containerFrame
+    }
+    let titlebarViewFrame = Self.unifiedTitlebarViewFrame(
+      containerBounds: titlebarContainer.bounds,
+      headerHeight: Self.unifiedTitlebarHeight
+    )
+    if titlebarView.frame != titlebarViewFrame {
+      titlebarView.frame = titlebarViewFrame
+    }
+
+    for button in buttons {
+      button.setFrameOrigin(NSPoint(
+        x: button.frame.minX,
+        y: Self.trafficLightButtonOriginY(
+          headerHeight: Self.unifiedTitlebarHeight,
+          buttonHeight: button.frame.height
+        )
+      ))
+    }
+  }
+
+  private func configureQuickPasteHostChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: quickPasteHostChannel,
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    quickPasteHostMethodChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "window_unavailable", message: nil, details: nil))
+        return
+      }
+      switch call.method {
+      case "isSupported":
+        result(true)
+      case "prepare":
+        result(self.prepareQuickPaste())
+      case "open", "openFromTray":
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        var trayAnchor: NSRect?
+        if call.method == "openFromTray" {
+          guard let arguments = call.arguments as? [String: Any],
+                let x = arguments["x"] as? Double, let y = arguments["y"] as? Double,
+                let width = arguments["width"] as? Double, let height = arguments["height"] as? Double,
+                x.isFinite, y.isFinite, width.isFinite, height.isFinite, width > 0, height > 0,
+                let primary = NSScreen.screens.first else {
+            result(FlutterError(code: "invalid_tray_anchor", message: nil, details: nil))
+            return
+          }
+          // nativeapi exposes top-left global coordinates, flipped against the primary screen.
+          trayAnchor = NSRect(x: x, y: primary.frame.maxY - y - height, width: width, height: height)
+        }
+        result(self.openQuickPaste(frontmost: frontmost, trayAnchor: trayAnchor))
+      case "accessibilityGranted":
+        result(MacosAccessibility.isTrusted(prompt: false))
+      case "requestAccessibility":
+        result(MacosAccessibility.isTrusted(prompt: true))
+      case "dispose":
+        self.quickPastePresentation?.shutdown()
+        result(true)
+      default:
+        if !MacosForegroundInput.handle(call, secureField: { IsSecureEventInputEnabled() }, result: result) {
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+  }
+
+  private func openQuickPaste(
+    frontmost: NSRunningApplication?, trayAnchor: NSRect?
+  ) -> Bool {
+    guard prepareQuickPaste(), let presentation = quickPastePresentation else { return false }
+    return presentation.show(frontmost: frontmost, trayAnchor: trayAnchor)
+  }
+
+  private func prepareQuickPaste() -> Bool {
+    if quickPastePresentation != nil { return true }
+    guard let presentation = QuickPastePresentationWindow(
+      mainWindow: self,
+      inspectorVisible: quickPasteInspectorVisible,
+      onOpenSettings: { [weak self] in
+        self?.quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
+      },
+      onOpenMain: { [weak self] in
+        self?.quickPasteHostMethodChannel?.invokeMethod("openMain", arguments: nil)
+      },
+      onClose: { [weak self] inspectorVisible in
+        self?.quickPasteInspectorVisible = inspectorVisible
+        self?.quickPastePresentation = nil
+      }
+    ) else {
+      return false
+    }
+    quickPastePresentation = presentation
+    return true
+  }
+
+  func openSettings() {
+    quickPastePresentation?.shutdown()
+    makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
+  }
+
+  func findInHistory() {
+    makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    quickPasteHostMethodChannel?.invokeMethod("findInHistory", arguments: nil)
+  }
+
+  func receivePairingURL(_ url: URL) {
+    guard url.scheme == "copypaste", url.host == "pair",
+          ["/v1", "/v2"].contains(url.path) else {
+      return
+    }
+    pendingPairingURI = url.absoluteString
+    makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    pairingLinksMethodChannel?.invokeMethod(
+      "openPairingUri",
+      arguments: url.absoluteString
+    ) { [weak self] result in
+      if result as? Bool == true && self?.pendingPairingURI == url.absoluteString {
+        self?.pendingPairingURI = nil
+      }
+    }
+  }
+
+  private func configurePairingLinksChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: pairingLinksChannel,
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    pairingLinksMethodChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "takePendingUri" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let uri = self?.pendingPairingURI
+      self?.pendingPairingURI = nil
+      result(uri)
+    }
+  }
+
+  private func configurePairingPresentationChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(name: pairingPresentationHostChannel, binaryMessenger: controller.engine.binaryMessenger)
+    pairingPresentationMethodChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { result(FlutterError(code: "window_unavailable", message: nil, details: nil)); return }
+      switch call.method {
+      case "isSupported": result(true)
+      case "setCaptureProtection":
+        guard let arguments = call.arguments as? [String: Any], arguments["enabled"] is Bool else {
+          result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
+        }
+        result(MacosScreenshotProtection.shared.applyCurrentPolicy())
+      case "open":
+        guard let arguments = call.arguments as? [String: Any], let ceremonyId = arguments["ceremonyId"] as? String, !ceremonyId.isEmpty else {
+          result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
+        }
+        guard self.protectedPresentation == nil else { result(FlutterError(code: "context_active", message: nil, details: nil)); return }
+        let contextId = UUID().uuidString
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+          let generation = CPPairingBegin(ceremonyId, contextId)
+          DispatchQueue.main.async { [weak self] in
+            guard let self, generation != 0, self.protectedPresentation == nil else {
+              result(FlutterError(code: "protected_context_unavailable", message: nil, details: nil)); return
+            }
+            let presentation = ProtectedPairingPresentationWindow(contextId: contextId, ceremonyId: ceremonyId, generation: generation) { [weak self] closedContextId in
+              guard self?.protectedPresentation?.contextId == closedContextId else { return }
+              self?.protectedPresentation = nil
+            }
+            self.protectedPresentation = presentation
+            presentation.show()
+            result(["contextId": contextId])
+          }
+        }
+      case "close":
+        guard let arguments = call.arguments as? [String: Any], let contextId = arguments["contextId"] as? String,
+              let presentation = self.protectedPresentation, presentation.contextId == contextId else { result(false); return }
+        presentation.requestClose(result: result)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+}
+
+enum MacosAccessibility {
+  static func isTrusted(prompt: Bool) -> Bool {
+    let options = [
+      kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt
+    ] as CFDictionary
+    return AXIsProcessTrustedWithOptions(options)
+  }
+
+  // Construct the entire chord before any event is posted.
+  static func preparePaste(
+    source: () -> CGEventSource? = { CGEventSource(stateID: .combinedSessionState) },
+    event: (CGEventSource, Bool) -> CGEvent? = {
+      CGEvent(keyboardEventSource: $0, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: $1)
+    },
+    post: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }
+  ) -> (() -> Void)? {
+    guard let source = source(), let keyDown = event(source, true),
+          let keyUp = event(source, false) else { return nil }
+    source.setLocalEventsFilterDuringSuppressionState(
+      [.permitLocalMouseEvents, .permitSystemDefinedEvents],
+      state: .eventSuppressionStateSuppressionInterval
+    )
+    keyDown.flags = .maskCommand
+    keyUp.flags = .maskCommand
+    return { post(keyDown); post(keyUp) }
+  }
+
+  // Explicit flags keep held hotkey modifiers from turning arrows into selections.
+  static func prepareCaretMove(
+    count: Int,
+    source: () -> CGEventSource? = { CGEventSource(stateID: .combinedSessionState) },
+    event: (CGEventSource, Bool) -> CGEvent? = {
+      CGEvent(keyboardEventSource: $0, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: $1)
+    },
+    post: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }
+  ) -> (() -> Void)? {
+    guard count > 0, let source = source() else { return nil }
+    var events: [CGEvent] = []
+    events.reserveCapacity(count * 2)
+    for _ in 0..<count {
+      guard let keyDown = event(source, true), let keyUp = event(source, false) else { return nil }
+      keyDown.flags = [.maskNumericPad, .maskSecondaryFn]
+      keyUp.flags = [.maskNumericPad, .maskSecondaryFn]
+      events.append(keyDown)
+      events.append(keyUp)
+    }
+    return { events.forEach(post) }
+  }
+}
+
+/// Synthesized input into whichever application has focus, for actions that
+/// do not go through a Quick Paste presentation.
+enum MacosForegroundInput {
+  static let maxCaretMove = 2000
+
+  static func blockedOutcome(
+    frontmost: pid_t?, ownPID: pid_t, trusted: Bool, secureInput: Bool
+  ) -> String? {
+    guard let frontmost, frontmost > 0, frontmost != ownPID else { return "noTarget" }
+    return trusted && !secureInput ? nil : "copiedOnly"
+  }
+
+  static func currentBlockedOutcome() -> String? {
+    blockedOutcome(
+      frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+      ownPID: ProcessInfo.processInfo.processIdentifier,
+      trusted: MacosAccessibility.isTrusted(prompt: false),
+      secureInput: IsSecureEventInputEnabled()
+    )
+  }
+
+  static func paste() -> String {
+    if let blocked = currentBlockedOutcome() { return blocked }
+    guard let submit = MacosAccessibility.preparePaste() else { return "copiedOnly" }
+    submit()
+    return "pasted"
+  }
+
+  static func moveCaretLeft(_ count: Int) -> Bool {
+    if count == 0 { return true }
+    guard currentBlockedOutcome() == nil,
+          let submit = MacosAccessibility.prepareCaretMove(count: count) else { return false }
+    submit()
+    return true
+  }
+
+  /// Handles the foreground-input methods shared by the main and Quick Paste
+  /// channels. `secureField` answers `secureFieldFocused`.
+  static func handle(
+    _ call: FlutterMethodCall, secureField: () -> Bool, result: @escaping FlutterResult
+  ) -> Bool {
+    let arguments = call.arguments as? [String: Any]
+    switch call.method {
+    case "pasteForeground":
+      guard arguments?["plainText"] == nil || arguments?["plainText"] is Bool else {
+        result(FlutterError(code: "invalid_arguments", message: nil, details: nil))
+        return true
+      }
+      // Plain text is decided by the delivered clipboard content, so the
+      // standard paste chord serves both variants.
+      result(paste())
+    case "moveCaretLeft":
+      guard let count = arguments?["count"] as? Int, (0...maxCaretMove).contains(count) else {
+        result(FlutterError(code: "invalid_arguments", message: nil, details: nil))
+        return true
+      }
+      result(moveCaretLeft(count))
+    case "secureFieldFocused":
+      result(secureField())
+    default:
+      return false
+    }
+    return true
+  }
+}
+
+protocol QuickPasteApplicationTarget: AnyObject {
+  var processIdentifier: pid_t { get }
+  var bundleIdentifier: String? { get }
+  var isTerminated: Bool { get }
+  func activateForQuickPaste() -> Bool
+}
+
+extension NSRunningApplication: QuickPasteApplicationTarget {
+  func activateForQuickPaste() -> Bool { activate(options: []) }
+}
+
+// One native presentation owns one external application and at most one handoff.
+final class QuickPastePasteSession {
+  private final class Pending {
+    let id: Int64
+    let target: QuickPasteApplicationTarget
+    let result: (Bool) -> Void
+    var cancel: (() -> Void)?
+
+    init(id: Int64, target: QuickPasteApplicationTarget, result: @escaping (Bool) -> Void) {
+      self.id = id
+      self.target = target
+      self.result = result
+    }
+  }
+
+  private let ownPID: pid_t
+  private let foreground: () -> pid_t?
+  private let trusted: () -> Bool
+  private let prepareInput: () -> (() -> Void)?
+  private let schedule: (@escaping () -> Void) -> (() -> Void)
+  private var counter: Int64 = 0
+  private var pending: Pending?
+  private(set) var id: Int64 = 0
+  private(set) var target: QuickPasteApplicationTarget?
+  var hasPendingPaste: Bool { pending != nil }
+
+  init(
+    ownPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+    foreground: @escaping () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+    trusted: @escaping () -> Bool = { MacosAccessibility.isTrusted(prompt: false) },
+    prepareInput: @escaping () -> (() -> Void)? = { MacosAccessibility.preparePaste() },
+    schedule: @escaping (@escaping () -> Void) -> (() -> Void) = { continuation in
+      let item = DispatchWorkItem(block: continuation)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: item)
+      return { item.cancel() }
+    }
+  ) {
+    self.ownPID = ownPID
+    self.foreground = foreground
+    self.trusted = trusted
+    self.prepareInput = prepareInput
+    self.schedule = schedule
+  }
+
+  deinit { invalidate() }
+
+  func isValid(_ target: QuickPasteApplicationTarget?) -> Bool {
+    guard let target else { return false }
+    return !target.isTerminated && target.processIdentifier > 0 && target.processIdentifier != ownPID
+  }
+
+  func begin(frontmost: QuickPasteApplicationTarget?, popupActive: Bool) -> Int64? {
+    let retained = target
+    let preserve = popupActive && id > 0 && isValid(retained) &&
+      (frontmost?.processIdentifier == ownPID || frontmost?.processIdentifier == retained?.processIdentifier)
+    invalidate()
+    guard counter < Int64.max else { return nil }
+    counter += 1
+    id = counter
+    target = preserve ? retained : (isValid(frontmost) ? frontmost : nil)
+    return id
+  }
+
+  func invalidate() {
+    id = 0
+    target = nil
+    let action = pending
+    pending = nil
+    action?.cancel?()
+    action?.result(false)
+  }
+
+  func matches(_ requestedID: Int64) -> Bool { requestedID > 0 && requestedID == id }
+
+  func paste(id requestedID: Int64, hide: () -> Void, result: @escaping (Bool) -> Void) {
+    guard matches(requestedID), pending == nil, let target, isValid(target), trusted() else {
+      result(false)
+      return
+    }
+    let action = Pending(id: requestedID, target: target, result: result)
+    pending = action
+    hide()
+    guard pending === action, matches(requestedID), isValid(target) else { finish(action, false); return }
+    if foreground() != target.processIdentifier && !target.activateForQuickPaste() {
+      finish(action, false)
+      return
+    }
+    guard pending === action, matches(requestedID), isValid(target) else { finish(action, false); return }
+    action.cancel = schedule { [weak self, weak action] in
+      guard let self, let action, self.pending === action else { return }
+      guard let submit = self.prepareInput(), self.pending === action,
+            self.matches(action.id), self.isValid(action.target), self.trusted(),
+            self.foreground() == action.target.processIdentifier,
+            self.pending === action, self.matches(action.id) else {
+        self.finish(action, false)
+        return
+      }
+      // Public APIs cannot atomically compare focus and submit input.
+      self.pending = nil
+      self.id = 0
+      self.target = nil
+      action.cancel = nil
+      submit()
+      action.result(true)
+    }
+  }
+
+  private func finish(_ action: Pending, _ success: Bool) {
+    guard pending === action else { return }
+    pending = nil
+    id = 0
+    target = nil
+    action.cancel?()
+    action.cancel = nil
+    action.result(success)
+  }
+}
+
+// Keep rollback and each native presentation stage owned by the captured ID.
+func presentQuickPaste(
+  id: Int64,
+  session: QuickPastePasteSession,
+  position: () -> Bool,
+  show: () -> Bool,
+  hide: () -> Void,
+  opened: () -> Void
+) -> Bool {
+  let owns = { session.matches(id) }
+  func fail() -> Bool {
+    if owns() {
+      session.invalidate()
+      if session.id == 0 { hide() }
+    }
+    return false
+  }
+  guard owns() else { return false }
+  guard position(), owns() else { return fail() }
+  guard show(), owns() else { return fail() }
+  opened()
+  return true
+}
+
+// Retire on the next main-loop turn, after a platform-channel reply or paste.
+// A new presentation cancels retirement before it can release a reopened view.
+final class QuickPasteRetirement {
+  private var generation: UInt64 = 0
+  private let enqueue: (@escaping () -> Void) -> Void
+
+  init(enqueue: @escaping (@escaping () -> Void) -> Void = {
+    DispatchQueue.main.async(execute: $0)
+  }) { self.enqueue = enqueue }
+
+  func cancel() { generation &+= 1 }
+
+  func schedule(canRetire: @escaping () -> Bool, retire: @escaping () -> Void) {
+    cancel()
+    let scheduled = generation
+    enqueue { [weak self] in
+      guard let self, self.generation == scheduled, canRetire() else { return }
+      retire()
+    }
+  }
+}
+
+private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
+  private let mainWindow: NSWindow
+  private let onOpenSettings: () -> Void
+  private let onOpenMain: () -> Void
+  private let onClose: (Bool) -> Void
+  private let window: QuickPastePanel
+  private let engine: FlutterEngine
+  private let controller: FlutterViewController
+  private let windowMaterial: WindowMaterialHost
+  private var contextChannel: FlutterMethodChannel?
+  private var deviceAuthentication: MacosDeviceAuthentication?
+  private let pasteSession = QuickPastePasteSession()
+  private var performingAction = false
+  private var closed = false
+  private var inspectorVisible = false
+  private var inspectorPinned = false
+  private var contextReady = false
+  private var engineStopped = false
+  private var trayAnchor: NSRect?
+  private var pendingForegroundPID: pid_t?
+  // Sampled before the panel takes focus; secure input belongs to the target.
+  private var secureInputAtOpen = false
+  private let retirement = QuickPasteRetirement()
+
+  init?(
+    mainWindow: NSWindow,
+    inspectorVisible: Bool,
+    onOpenSettings: @escaping () -> Void,
+    onOpenMain: @escaping () -> Void,
+    onClose: @escaping (Bool) -> Void
+  ) {
+    self.mainWindow = mainWindow
+    self.inspectorVisible = inspectorVisible
+    self.inspectorPinned = inspectorVisible
+    self.onOpenSettings = onOpenSettings
+    self.onOpenMain = onOpenMain
+    self.onClose = onClose
+    let project = FlutterDartProject()
+    let engine = FlutterEngine(
+      name: "quick-paste",
+      project: project,
+      allowHeadlessExecution: true
+    )
+    guard engine.run(withEntrypoint: "quickPasteMain") else {
+      engine.shutDownEngine()
+      return nil
+    }
+    self.engine = engine
+    controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
+    windowMaterial = WindowMaterialHost(controller: controller, role: .panel)
+    window = QuickPastePanel(
+      contentRect: NSRect(x: 0, y: 0, width: 448, height: 800),
+      styleMask: QuickPastePanel.presentationStyleMask,
+      backing: .buffered,
+      defer: false
+    )
+    super.init()
+    controller.backgroundColor = .clear
+    window.title = "CopyPaste Quick Paste"
+    window.level = .floating
+    window.hasShadow = true
+    window.isOpaque = false
+    window.backgroundColor = .clear
+    window.isReleasedWhenClosed = false
+    window.hidesOnDeactivate = false
+    window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
+    window.delegate = self
+    window.onCloseRequested = { [weak self] in
+      self?.pasteSession.invalidate()
+      self?.hide()
+    }
+    window.contentViewController = controller
+    windowMaterial.attachChannel()
+    MacosScreenshotProtection.shared.register(window: window, view: controller.view)
+    window.contentView?.wantsLayer = true
+    window.contentView?.layer?.cornerRadius = QuickPastePanel.cornerRadius
+    window.contentView?.layer?.masksToBounds = true
+    FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
+    SharedPreferencesPlugin.register(with: controller.registrar(forPlugin: "SharedPreferencesPlugin"))
+    MacosMemoryPressure.shared.register(engine: engine)
+    deviceAuthentication = MacosDeviceAuthentication(binaryMessenger: engine.binaryMessenger)
+    configureContextChannel()
+  }
+
+  deinit { pasteSession.invalidate() }
+
+  func show(
+    frontmost: NSRunningApplication?, trayAnchor: NSRect? = nil
+  ) -> Bool {
+    guard !closed else { return false }
+    retirement.cancel()
+    let popupActive = window.isVisible && window.isKeyWindow
+    performingAction = true
+    window.orderOut(nil)
+    performingAction = false
+    pendingForegroundPID = frontmost?.processIdentifier
+    // A reopened active panel keeps the sample taken for its target.
+    if !popupActive { secureInputAtOpen = IsSecureEventInputEnabled() }
+    guard let id = pasteSession.begin(
+      frontmost: frontmost,
+      popupActive: popupActive
+    ) else {
+      if pasteSession.id == 0 { hide() }
+      return false
+    }
+    inspectorVisible = inspectorPinned
+    self.trayAnchor = trayAnchor
+    return presentQuickPaste(
+      id: id,
+      session: pasteSession,
+      position: {
+        let cursor = NSEvent.mouseLocation
+        let displays = NSScreen.screens.map {
+          QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame)
+        }
+        let size = NSSize(width: self.inspectorVisible ? 816 : 448, height: 800)
+        let frame = trayAnchor.map {
+          quickPasteTrayFrame(anchor: $0, size: size, displays: displays)
+        } ?? quickPasteFrame(cursor: cursor, size: size, displays: displays)
+        self.window.setFrame(frame, display: true)
+        return true
+      },
+      // The positioned view renders offscreen before Dart acknowledges its media frame.
+      show: { true },
+      hide: { self.hide() },
+      opened: { self.notifyOpened(id) }
+    )
+  }
+
+  private func presentPreparedFrame(_ id: Int64) -> Bool {
+    guard contextReady, !closed else { return false }
+    return presentQuickPaste(
+      id: id, session: pasteSession,
+      position: { NSWorkspace.shared.frontmostApplication?.processIdentifier == self.pendingForegroundPID },
+      show: {
+        MacosScreenshotProtection.shared.resume(window: self.window)
+        self.window.orderFrontRegardless()
+        self.window.makeKey()
+        return self.window.isVisible && self.window.isKeyWindow
+      },
+      hide: { self.hide() }, opened: {}
+    )
+  }
+
+  func shutdown() {
+    close()
+  }
+
+  private func stopEngine() {
+    guard !engineStopped else { return }
+    engineStopped = true
+    MacosMemoryPressure.shared.unregister(engine: engine)
+    deviceAuthentication = nil
+    window.delegate = nil
+    // AppKit's application-wide focus-ring state strongly retains the last
+    // active first responder until a responder change is processed. Without
+    // this, the retired FlutterView keeps its IOSurfaces alive.
+    _ = window.makeFirstResponder(nil)
+    window.close()
+    contextChannel?.setMethodCallHandler(nil)
+    contextChannel = nil
+    windowMaterial.detachChannel()
+    window.contentViewController = nil
+    controller.view.removeFromSuperview()
+    engine.viewController = nil
+    engine.shutDownEngine()
+  }
+
+  private func close() {
+    guard !closed else { return }
+    closed = true
+    retirement.cancel()
+    pasteSession.invalidate()
+    onClose(inspectorPinned)
+    // Drop the Dart/Rust watch lease before terminating its isolate. The
+    // deadline also retires a context that failed during Dart startup.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.stopEngine() }
+    contextChannel?.invokeMethod("shutdown", arguments: nil) { [self] _ in
+      DispatchQueue.main.async { [self] in stopEngine() }
+    }
+  }
+
+  func windowDidResignKey(_ notification: Notification) {
+    guard !performingAction else { return }
+    // The file selector transfers key status to an attached save sheet.
+    guard window.attachedSheet == nil else { return }
+    if pasteSession.hasPendingPaste && !window.isVisible { return }
+    pasteSession.invalidate()
+    hide()
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    close()
+  }
+
+  private func hide() {
+    let wasPerformingAction = performingAction
+    performingAction = true
+    window.orderOut(nil)
+    MacosScreenshotProtection.shared.suspend(window: window)
+    performingAction = wasPerformingAction
+    retireWhenHidden()
+  }
+
+  private func retireWhenHidden() {
+    retirement.schedule(canRetire: { [weak self] in
+      guard let self else { return false }
+      return !self.closed && !self.window.isVisible && !self.pasteSession.hasPendingPaste
+    }, retire: { [weak self] in self?.shutdown() })
+  }
+
+  private func notifyOpened(_ id: Int64) {
+    guard contextReady, pasteSession.matches(id) else { return }
+    var arguments: [String: Any] = ["presentationId": id, "inspectorVisible": inspectorVisible]
+    // Per-app paste defaults are keyed by the receiving app's bundle ID.
+    if let bundleID = pasteSession.target?.bundleIdentifier { arguments["targetApp"] = bundleID }
+    contextChannel?.invokeMethod("opened", arguments: arguments)
+  }
+
+  private func showMainWindow(openSettings: Bool) {
+    pasteSession.invalidate()
+    hide()
+    mainWindow.makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    if openSettings { onOpenSettings() } else { onOpenMain() }
+  }
+
+  private static func presentationID(_ arguments: Any?) -> Int64? {
+    guard let arguments = arguments as? [String: Any],
+          let value = arguments["presentationId"] as? NSNumber,
+          CFGetTypeID(value) != CFBooleanGetTypeID(),
+          String(cString: value.objCType) != "d", String(cString: value.objCType) != "f",
+          value.int64Value > 0 else { return nil }
+    return value.int64Value
+  }
+
+  private func configureContextChannel() {
+    let channel = FlutterMethodChannel(
+      name: quickPasteContextChannel,
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    contextChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self, !self.closed else {
+        result(FlutterError(code: "context_closed", message: nil, details: nil))
+        return
+      }
+      switch call.method {
+      case "present":
+        guard let id = Self.presentationID(call.arguments) else { result(false); return }
+        result(self.presentPreparedFrame(id))
+      case "ready":
+        self.contextReady = true
+        result(true)
+        self.notifyOpened(self.pasteSession.id)
+      case "accessibilityGranted":
+        result(MacosAccessibility.isTrusted(prompt: false))
+      case "requestAccessibility":
+        result(MacosAccessibility.isTrusted(prompt: true))
+      case "setInspectorVisible":
+        guard let id = Self.presentationID(call.arguments), self.pasteSession.matches(id),
+              let arguments = call.arguments as? [String: Any],
+              let visible = arguments["visible"] as? Bool,
+              let screen = self.window.screen ?? NSScreen.main else { result(false); return }
+        let frame: NSRect
+        if let anchor = self.trayAnchor {
+          frame = quickPasteTrayFrame(
+            anchor: anchor,
+            size: NSSize(width: visible ? 816 : 448, height: self.window.frame.height),
+            displays: NSScreen.screens.map { QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+          )
+        } else {
+          frame = quickPasteInspectorFrame(
+            current: self.window.frame, visible: screen.visibleFrame, expanded: visible
+          )
+        }
+        self.window.setFrame(frame, display: true)
+        guard self.pasteSession.matches(id) else { result(false); return }
+        self.inspectorVisible = visible
+        if arguments["remember"] as? Bool ?? true {
+          self.inspectorPinned = visible
+        }
+        result(true)
+      case "paste":
+        guard let id = Self.presentationID(call.arguments) else { result(false); return }
+        self.pasteSession.paste(id: id, hide: { self.hide() }, result: { [weak self] pasted in
+          result(pasted)
+          self?.retireWhenHidden()
+        })
+      case "close":
+        if let id = Self.presentationID(call.arguments), self.pasteSession.matches(id) {
+          self.pasteSession.invalidate()
+          self.hide()
+        }
+        result(true)
+      case "openMain":
+        self.showMainWindow(openSettings: false)
+        result(true)
+      case "openSettings":
+        self.showMainWindow(openSettings: true)
+        result(true)
+      case "quit":
+        self.pasteSession.invalidate()
+        result(true)
+        NSApplication.shared.terminate(nil)
+      default:
+        if !MacosForegroundInput.handle(call, secureField: { self.secureInputAtOpen }, result: result) {
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+  }
+}
+
+private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelegate {
+  let contextId: String
+  private let ceremonyId: String
+  private let generation: UInt64
+  private let onClose: (String) -> Void
+  private let window: NSWindow
+  private let controller: FlutterViewController
+  private var contextChannel: FlutterMethodChannel?
+  private var closed = false
+  private var closeApproved = false
+
+  init(contextId: String, ceremonyId: String, generation: UInt64, onClose: @escaping (String) -> Void) {
+    self.contextId = contextId
+    self.ceremonyId = ceremonyId
+    self.generation = generation
+    self.onClose = onClose
+    window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    let project = FlutterDartProject()
+    project.dartEntrypointArguments = ["--route=\(protectedPairingRoutePrefix)\(contextId)"]
+    controller = FlutterViewController(project: project)
+    super.init()
+    window.title = "CopyPaste"
+    window.isReleasedWhenClosed = false
+    window.delegate = self
+    window.contentViewController = controller
+    MacosScreenshotProtection.shared.register(window: window, view: controller.view)
+    RegisterGeneratedPlugins(registry: controller)
+    MacosMemoryPressure.shared.register(engine: controller.engine)
+    configureContextChannel()
+  }
+
+  func show() {
+    window.center()
+    MacosScreenshotProtection.shared.resume(window: window)
+    window.makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+  }
+
+  func requestClose(result: FlutterResult? = nil) {
+    guard !closed else { result?(true); return }
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self else { return }
+      let active = CPPairingActive(self.contextId)
+      let canClose = !active || CPPairingCancel(self.contextId)
+      if !active { _ = CPPairingDetach(self.contextId) }
+      DispatchQueue.main.async {
+        guard !self.closed else { result?(true); return }
+        guard canClose else { result?(FlutterError(code: "decision_busy", message: nil, details: nil)); return }
+        self.closeApproved = true
+        result?(true)
+        self.window.close()
+      }
+    }
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    if closed || closeApproved { return true }
+    requestClose()
+    return false
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    guard !closed else { return }
+    closed = true
+    contextChannel?.setMethodCallHandler(nil)
+    contextChannel = nil
+    MacosMemoryPressure.shared.unregister(engine: controller.engine)
+    DispatchQueue.global(qos: .utility).async { [contextId] in _ = CPPairingDetach(contextId) }
+    onClose(contextId)
+  }
+
+  private func configureContextChannel() {
+    let channel = FlutterMethodChannel(name: pairingPresentationContextChannel, binaryMessenger: controller.engine.binaryMessenger)
+    contextChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self, !self.closed else { result(FlutterError(code: "context_closed", message: nil, details: nil)); return }
+      switch call.method {
+      case "isContextActive": self.performNative(result) { CPPairingActive(self.contextId) }
+      case "ceremonyId": self.performNative(result) { CPPairingActive(self.contextId) ? self.ceremonyId : nil }
+      case "status": self.performNative(result) {
+        var state: UInt32 = 0; var expiresInMs: UInt64 = 0
+        guard CPPairingStatus(self.contextId, self.generation, &state, &expiresInMs) else { return nil }
+        return ["state": state, "expiresInMs": expiresInMs]
+      }
+      case "revealQr": self.performNative(result) {
+        guard let data = CPPairingRevealQr(self.ceremonyId, self.contextId, self.generation) else { return nil }
+        return FlutterStandardTypedData(bytes: data)
+      }
+      case "revealSas": self.performNative(result) {
+        guard let data = CPPairingRevealSas(self.contextId, self.generation) else { return nil }
+        return FlutterStandardTypedData(bytes: data)
+      }
+      case "joinManual":
+        guard let arguments = call.arguments as? [String: Any], let code = arguments["code"] as? String,
+              let address = arguments["address"] as? String, !code.isEmpty, !address.isEmpty else { result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return }
+        self.performNative(result) { CPPairingJoin(self.contextId, self.generation, code, address) }
+      case "joinQr":
+        guard let arguments = call.arguments as? [String: Any], let uri = arguments["uri"] as? String,
+              !uri.isEmpty else { result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return }
+        self.performNative(result) { CPPairingJoinURI(self.contextId, self.generation, uri) }
+      case "confirm":
+        guard let arguments = call.arguments as? [String: Any], let sas = arguments["sas"] as? String,
+              let accept = arguments["accept"] as? Bool, !sas.isEmpty else { result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return }
+        self.performNative(result) { CPPairingDecide(self.contextId, self.generation, sas, accept) }
+      case "cancel": self.performNative(result) { CPPairingCancel(self.contextId) }
+      case "closeContext": self.requestClose(result: result)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private func performNative(_ result: @escaping FlutterResult, operation: @escaping () -> Any?) {
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let output = operation()
+      DispatchQueue.main.async {
+        guard let self, !self.closed else { result(FlutterError(code: "context_closed", message: nil, details: nil)); return }
+        guard let output else { result(FlutterError(code: "operation_rejected", message: nil, details: nil)); return }
+        result(output)
+      }
+    }
+  }
+}

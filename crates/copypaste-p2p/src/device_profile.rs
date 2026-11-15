@@ -1,0 +1,494 @@
+//! Bounded, non-secret device metadata shared through discovery and Noise.
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use copypaste_ipc::{DeviceClass, DevicePlatform};
+
+use crate::protocol::PROTOCOL_VERSION;
+
+#[cfg(any(target_os = "windows", test))]
+#[cfg_attr(target_os = "windows", allow(unsafe_code))]
+mod windows_firmware;
+
+/// The highest organization record class this build stores and syncs. A peer
+/// that declares less, or nothing, is legacy: it would decline every newer
+/// record on each session without moving its cursor, so it is not offered one.
+pub const ORGANIZATION_KINDS: u32 = 3;
+
+/// The class every build that syncs organization records accepts.
+const LEGACY_ORGANIZATION_KINDS: u32 = 1;
+
+/// Claims made by a device about itself. Trust comes from the channel carrying
+/// the value: mDNS is unverified, while the same value inside Noise is
+/// authenticated to the pairing key.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeviceProfile {
+    pub app_version: Option<String>,
+    pub protocol_version: Option<u32>,
+    pub platform: DevicePlatform,
+    pub device_class: DeviceClass,
+    pub os_name: Option<String>,
+    pub os_version: Option<String>,
+    pub model: Option<String>,
+    pub organization_kinds: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeviceProfileWire<'a> {
+    app_version: &'a Option<String>,
+    protocol_version: &'a Option<u32>,
+    platform: DevicePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform_detail: Option<&'static str>,
+    device_class: DeviceClass,
+    os_name: &'a Option<String>,
+    os_version: &'a Option<String>,
+    model: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization_kinds: &'a Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceProfileWireOwned {
+    app_version: Option<String>,
+    protocol_version: Option<u32>,
+    platform: DevicePlatform,
+    #[serde(default)]
+    platform_detail: Option<String>,
+    device_class: DeviceClass,
+    os_name: Option<String>,
+    os_version: Option<String>,
+    model: Option<String>,
+    #[serde(default)]
+    organization_kinds: Option<u32>,
+}
+
+impl Serialize for DeviceProfile {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let (platform, platform_detail) = match self.platform {
+            DevicePlatform::Linux => (DevicePlatform::Unknown, Some("linux")),
+            platform => (platform, None),
+        };
+        DeviceProfileWire {
+            app_version: &self.app_version,
+            protocol_version: &self.protocol_version,
+            platform,
+            platform_detail,
+            device_class: self.device_class,
+            os_name: &self.os_name,
+            os_version: &self.os_version,
+            model: &self.model,
+            organization_kinds: &self.organization_kinds,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DeviceProfileWireOwned::deserialize(deserializer)?;
+        let platform = match (wire.platform, wire.platform_detail.as_deref()) {
+            (DevicePlatform::Linux, _) | (DevicePlatform::Unknown, Some("linux")) => {
+                DevicePlatform::Linux
+            }
+            (platform, _) => platform,
+        };
+        Ok(Self {
+            app_version: wire.app_version,
+            protocol_version: wire.protocol_version,
+            platform,
+            device_class: wire.device_class,
+            os_name: wire.os_name,
+            os_version: wire.os_version,
+            model: wire.model,
+            organization_kinds: wire.organization_kinds,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedDeviceProfile {
+    pub profile: DeviceProfile,
+    pub observed_at_ms: i64,
+    pub fresh_until_ms: i64,
+}
+
+/// Android-native facts supplied by the host before the P2P runtime starts.
+/// Android's resource configuration is the authoritative source for phone
+/// versus tablet; Rust must not infer it from ABI or model text.
+#[cfg(target_os = "android")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidHardwareProfile {
+    pub model: Option<String>,
+    pub os_version: Option<String>,
+    pub device_class: DeviceClass,
+}
+
+impl DeviceProfile {
+    /// The organization record classes a peer that sent `profile` accepts.
+    #[must_use]
+    pub fn accepted_organization_kinds(profile: Option<&Self>) -> u32 {
+        profile
+            .and_then(|profile| profile.organization_kinds)
+            .map_or(LEGACY_ORGANIZATION_KINDS, |kinds| {
+                kinds.max(LEGACY_ORGANIZATION_KINDS)
+            })
+    }
+
+    #[must_use]
+    pub fn current() -> Self {
+        let os = os_info::get();
+        let detected_os_name = match os.os_type() {
+            os_info::Type::Unknown => None,
+            known => bounded_text(known.to_string(), 64),
+        };
+        let detected_os_version = match os.version() {
+            os_info::Version::Unknown => None,
+            known => bounded_text(known.to_string(), 64),
+        };
+        let native = native_metadata();
+        Self {
+            app_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            protocol_version: Some(PROTOCOL_VERSION),
+            platform: DevicePlatform::current(),
+            device_class: native.device_class,
+            os_name: native.os_name.or(detected_os_name),
+            os_version: native.os_version.or(detected_os_version),
+            model: native.model,
+            organization_kinds: Some(ORGANIZATION_KINDS),
+        }
+    }
+
+    /// Supplies Android's platform-owned metadata before the P2P runtime starts.
+    #[cfg(target_os = "android")]
+    pub fn set_android_hardware_profile(profile: AndroidHardwareProfile) {
+        let _ = ANDROID_HARDWARE.set(NativeMetadata {
+            device_class: profile.device_class,
+            os_name: Some("Android".to_string()),
+            os_version: profile.os_version.and_then(|value| bounded_text(value, 64)),
+            model: profile.model.and_then(|value| bounded_text(value, 128)),
+        });
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct NativeMetadata {
+    device_class: DeviceClass,
+    os_name: Option<String>,
+    os_version: Option<String>,
+    model: Option<String>,
+}
+
+fn bounded_text(value: String, max_bytes: usize) -> Option<String> {
+    let mut bounded = String::new();
+    for character in value
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+    {
+        if bounded.len() + character.len_utf8() > max_bytes {
+            break;
+        }
+        bounded.push(character);
+    }
+    (!bounded.is_empty()).then_some(bounded)
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "android",
+    target_os = "linux"
+)))]
+fn native_metadata() -> NativeMetadata {
+    NativeMetadata::default()
+}
+
+#[cfg(target_os = "linux")]
+fn native_metadata() -> NativeMetadata {
+    static HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+    HARDWARE
+        .get_or_init(|| NativeMetadata {
+            device_class: std::fs::read_to_string("/sys/class/dmi/id/chassis_type")
+                .ok()
+                .map(|value| linux_chassis_class(&value))
+                .unwrap_or_default(),
+            model: std::fs::read_to_string("/sys/class/dmi/id/product_name")
+                .ok()
+                .and_then(|value| bounded_text(value, 128)),
+            ..NativeMetadata::default()
+        })
+        .clone()
+}
+
+/// SMBIOS chassis values from DMTF's system enclosure contract. Missing or
+/// unfamiliar firmware metadata remains unknown, including ARM systems without DMI.
+#[cfg(any(target_os = "linux", test))]
+fn linux_chassis_class(value: &str) -> DeviceClass {
+    match value.trim().parse::<u8>() {
+        Ok(3..=7 | 13 | 15 | 35 | 36) => DeviceClass::Desktop,
+        Ok(8..=10 | 14 | 31 | 32) => DeviceClass::Laptop,
+        Ok(30) => DeviceClass::Tablet,
+        _ => DeviceClass::Unknown,
+    }
+}
+
+#[cfg(target_os = "android")]
+static ANDROID_HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+fn native_metadata() -> NativeMetadata {
+    ANDROID_HARDWARE.get().cloned().unwrap_or(NativeMetadata {
+        os_name: Some("Android".to_string()),
+        ..NativeMetadata::default()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn native_metadata() -> NativeMetadata {
+    static HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+    HARDWARE.get_or_init(read_macos_hardware).clone()
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_hardware() -> NativeMetadata {
+    let model = macos_model_identifier();
+    NativeMetadata {
+        device_class: model.as_deref().map(macos_device_class).unwrap_or_default(),
+        model,
+        ..NativeMetadata::default()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_model_identifier() -> Option<String> {
+    use sysctl::Sysctl;
+
+    sysctl::Ctl::new("hw.model")
+        .ok()?
+        .value_string()
+        .ok()
+        .and_then(|model| bounded_text(model, 128))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_device_class(model: &str) -> DeviceClass {
+    let normalized = model.to_ascii_lowercase();
+    if normalized.contains("macbook") {
+        DeviceClass::Laptop
+    } else if ["imac", "mac mini", "mac pro", "mac studio"]
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+    {
+        DeviceClass::Desktop
+    } else if is_macos_model_identifier(&normalized) {
+        macos_device_class_from_battery(macos_has_internal_battery())
+    } else {
+        DeviceClass::Unknown
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_model_identifier(model: &str) -> bool {
+    let Some((family, revision)) = model
+        .strip_prefix("mac")
+        .and_then(|value| value.split_once(','))
+    else {
+        return false;
+    };
+    !family.is_empty()
+        && !revision.is_empty()
+        && family.bytes().all(|value| value.is_ascii_digit())
+        && revision.bytes().all(|value| value.is_ascii_digit())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_device_class_from_battery(has_internal_battery: bool) -> DeviceClass {
+    if has_internal_battery {
+        DeviceClass::Laptop
+    } else {
+        DeviceClass::Desktop
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_has_internal_battery() -> bool {
+    let mut command = std::process::Command::new("/usr/bin/pmset");
+    command.args(["-g", "batt"]);
+    command_output_with_timeout(&mut command, std::time::Duration::from_millis(250))
+        .filter(|output| output.status.success())
+        .is_some_and(|output| macos_battery_output_has_internal_battery(&output.stdout))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_battery_output_has_internal_battery(output: &[u8]) -> bool {
+    String::from_utf8_lossy(output)
+        .split_whitespace()
+        .any(|value| value.starts_with("-InternalBattery"))
+}
+
+#[cfg(target_os = "windows")]
+fn native_metadata() -> NativeMetadata {
+    let hardware = windows_hardware();
+    NativeMetadata {
+        device_class: hardware.device_class,
+        model: hardware.model,
+        ..NativeMetadata::default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_hardware() -> NativeMetadata {
+    static HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+    HARDWARE.get_or_init(read_windows_hardware).clone()
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_hardware() -> NativeMetadata {
+    NativeMetadata {
+        device_class: windows_firmware::device_class(),
+        model: windows_model(),
+        ..NativeMetadata::default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_model() -> Option<String> {
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"HARDWARE\DESCRIPTION\System\BIOS")
+        .ok()?
+        .get_value::<String, _>("SystemProductName")
+        .ok()
+        .and_then(|model| bounded_text(model, 128))
+}
+
+/// Runs a platform probe without ever allowing a child process to hold up
+/// discovery or runtime startup. A timed-out child is killed and reaped before
+/// returning the fallback value.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn command_output_with_timeout(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Option<std::process::Output> {
+    use std::process::Stdio;
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    copypaste_process::wait_or_kill(&mut child, timeout).ok()??;
+    child.wait_with_output().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_linux_firmware_without_guessing_missing_metadata() {
+        assert_eq!(linux_chassis_class("3\n"), DeviceClass::Desktop);
+        assert_eq!(linux_chassis_class("10"), DeviceClass::Laptop);
+        assert_eq!(linux_chassis_class("30"), DeviceClass::Tablet);
+        assert_eq!(linux_chassis_class("31"), DeviceClass::Laptop);
+        for value in ["", "unknown", "1", "2", "255", "256"] {
+            assert_eq!(linux_chassis_class(value), DeviceClass::Unknown);
+        }
+    }
+
+    #[test]
+    fn bounds_platform_text_without_splitting_unicode() {
+        assert_eq!(
+            bounded_text("  Pixel 9\n".to_string(), 128).as_deref(),
+            Some("Pixel 9")
+        );
+        assert_eq!(bounded_text("éé".to_string(), 3).as_deref(), Some("é"));
+        assert_eq!(bounded_text("\n\t".to_string(), 64), None);
+    }
+
+    #[test]
+    fn current_profile_is_wire_safe() {
+        let profile = DeviceProfile::current();
+        assert!(profile.app_version.is_some());
+        assert_eq!(profile.protocol_version, Some(PROTOCOL_VERSION));
+        assert!(profile
+            .os_name
+            .as_ref()
+            .is_none_or(|value| value.len() <= 64));
+        assert!(profile
+            .os_version
+            .as_ref()
+            .is_none_or(|value| value.len() <= 64));
+        assert!(profile
+            .model
+            .as_ref()
+            .is_none_or(|value| value.len() <= 128));
+    }
+
+    #[test]
+    fn organization_kinds_are_optional_and_older_profiles_are_legacy() {
+        let current = DeviceProfile::current();
+        assert_eq!(
+            DeviceProfile::accepted_organization_kinds(Some(&current)),
+            ORGANIZATION_KINDS
+        );
+        let wire = serde_json::to_value(&current).unwrap();
+        assert_eq!(wire["organization_kinds"], ORGANIZATION_KINDS);
+
+        // A 1.3.0 profile has no such field; a later one may add fields this
+        // build does not know, which must not fail the hello.
+        let older: DeviceProfile = serde_json::from_value(serde_json::json!({
+            "app_version": "1.3.0", "protocol_version": PROTOCOL_VERSION,
+            "platform": "macos", "device_class": "laptop",
+            "os_name": null, "os_version": null, "model": null,
+            "future_field": {"nested": true}
+        }))
+        .unwrap();
+        assert_eq!(older.organization_kinds, None);
+        assert_eq!(DeviceProfile::accepted_organization_kinds(Some(&older)), 1);
+        assert_eq!(DeviceProfile::accepted_organization_kinds(None), 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn classifies_known_macos_models() {
+        assert_eq!(macos_device_class("MacBookAir10,1"), DeviceClass::Laptop);
+        assert_eq!(macos_device_class("Mac Studio"), DeviceClass::Desktop);
+        assert!(is_macos_model_identifier("mac16,13"));
+        assert!(!is_macos_model_identifier("macbookair10,1"));
+        assert_eq!(macos_device_class_from_battery(true), DeviceClass::Laptop);
+        assert_eq!(macos_device_class_from_battery(false), DeviceClass::Desktop);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_internal_battery_output_marks_an_apple_silicon_mac_as_portable() {
+        assert!(macos_battery_output_has_internal_battery(
+            b"Now drawing from 'AC Power'\n -InternalBattery-0 (id=1) 80%; charging\n"
+        ));
+        assert!(!macos_battery_output_has_internal_battery(
+            b"Now drawing from 'AC Power'\n -UPS-0 (id=1) 80%; charging\n"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timed_platform_probe_kills_and_reaps_a_stalled_child() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "sleep 1"]);
+        let started = std::time::Instant::now();
+        assert!(
+            command_output_with_timeout(&mut command, std::time::Duration::from_millis(10))
+                .is_none()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    }
+}

@@ -1,0 +1,403 @@
+//! The row types, the one column projection every read shares, and the error
+//! set. One contract: the projection lists the columns, [`row_to_item`] maps
+//! exactly those, and [`StoredItem`] is their shape. Splitting them is how the
+//! three drift apart.
+
+use rusqlite::{ErrorCode, Row};
+
+/// The projection every read uses. Bound by *name*, never by position;
+/// maintained three parallel positional column lists and an off-by-one panic in
+/// the row mapper was the result (`CopyPaste-crh3.85`).
+/// Imported rows read their shared encrypted blob beside the row's own bytes;
+/// [`row_to_item`] joins the two, so consumers keep one ciphertext.
+macro_rules! item_columns {
+    () => {
+        "id, content_ciphertext, (SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id) AS shared_ciphertext, nonce, content_type, content_hash, created_at, \
+         pinned, pin_order, pin_updated_at, deleted, origin_device_id, \
+         app_bundle_id, app_name, payload_metadata, source_icon_id"
+    };
+}
+
+/// The same projection through the `ci` alias used by the FTS JOIN, aliased back
+/// to the bare names so one row mapper serves both.
+macro_rules! item_columns_ci_with {
+    ($ciphertext:literal) => {
+        concat!(
+            "ci.id AS id, ", $ciphertext, ", ci.nonce AS nonce, ",
+            "ci.content_type AS content_type, ci.content_hash AS content_hash, ",
+            "ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, ",
+            "ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, ",
+            "ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, ",
+            "ci.app_name AS app_name, ci.payload_metadata AS payload_metadata, ci.source_icon_id AS source_icon_id"
+        )
+    };
+}
+macro_rules! item_columns_ci {
+    () => {
+        $crate::storage::model::item_columns_ci_with!("ci.content_ciphertext AS content_ciphertext, (SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id) AS shared_ciphertext")
+    };
+}
+macro_rules! item_columns_preview_ci {
+    () => {
+        $crate::storage::model::item_columns_ci_with!(
+            "X'' AS content_ciphertext, NULL AS shared_ciphertext"
+        )
+    };
+}
+
+/// Every column of `clipboard_items` a copy should carry, in schema order.
+///
+/// `content_bytes` is derived from ciphertext and metadata, and absent, which
+/// is why a copy of the table has to name its columns rather than `SELECT *`.
+macro_rules! stored_item_columns {
+    () => {
+        "id, content_ciphertext, nonce, content_type, content_hash, \
+         pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, \
+         app_bundle_id, app_name, payload_metadata, fts_rowid, source_icon_id"
+    };
+}
+
+pub(super) use {
+    item_columns, item_columns_ci, item_columns_ci_with, item_columns_preview_ci,
+    stored_item_columns,
+};
+
+/// An item on its way into the store.
+pub struct NewItem {
+    /// Primary key, chosen by the caller — not generated here. The item AEAD
+    /// binds this id as associated data, so the id must exist before the seal
+    /// and therefore before this insert. A store-minted id would produce rows
+    /// whose ciphertext authenticates against an id they do not have, failing
+    /// closed on every later read: a silent, total loss of the content.
+    pub id: String,
+    pub content_ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub content_type: String,
+    pub content_hash: String,
+    /// Plaintext for the ordinary search index.
+    pub search_text: Option<String>,
+    /// Milliseconds since the Unix epoch.
+    pub created_at: i64,
+    /// Frontmost application at local capture time, if the platform supplied it.
+    pub app_bundle_id: Option<String>,
+    /// Human-readable label resolved by the platform alongside the app id.
+    pub app_name: Option<String>,
+    /// JSON-encoded source metadata; imported images also retain file attributes.
+    pub payload_metadata: Option<String>,
+}
+
+/// What [`super::Store::insert_or_bump`] did with a capture.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ingest {
+    /// The content was new to this device's history.
+    Inserted(StoredItem),
+    /// The content was already here, and this row's `created_at` was moved to
+    /// the new capture time. The row is the *existing* one, under its original
+    /// id — never the rejected candidate (manifest 01 I-28: broadcasting the
+    /// candidate's id makes every subscriber look up a row that does not exist).
+    Bumped(StoredItem),
+}
+
+impl Ingest {
+    #[must_use]
+    pub fn item(&self) -> &StoredItem {
+        match self {
+            Ingest::Inserted(item) | Ingest::Bumped(item) => item,
+        }
+    }
+
+    #[must_use]
+    pub fn into_item(self) -> StoredItem {
+        match self {
+            Ingest::Inserted(item) | Ingest::Bumped(item) => item,
+        }
+    }
+
+    #[must_use]
+    pub fn is_bump(&self) -> bool {
+        matches!(self, Ingest::Bumped(_))
+    }
+}
+
+/// A row as it comes back out. The plaintext never leaves the store: callers
+/// decrypt `content_ciphertext` themselves.
+///
+/// This is also what a sync session compares and serves. The four merge keys
+/// (`created_at`, `content_hash`, `deleted`, `origin_device_id`) are all here
+/// so that one row type answers both questions; carrying them in a second view
+/// on a second connection would violate the storage/sync ownership boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredItem {
+    pub source_icon_id: Option<String>,
+    pub id: String,
+    /// Empty on a tombstone: the soft delete wiped the payload.
+    pub content_ciphertext: Vec<u8>,
+    /// Empty on a tombstone, for the same reason.
+    pub nonce: Vec<u8>,
+    pub content_type: String,
+    /// SHA-256 hex of the pre-encryption bytes, kept on tombstones on purpose —
+    /// a delete has to tie the version it deletes on merge key 2 so that key 3
+    /// decides it.
+    pub content_hash: String,
+    pub created_at: i64,
+    pub pinned: bool,
+    pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
+    /// A tombstone. `Store::get` and `Store::list` never return one; the sync
+    /// reads in [`super::versions`] do, because a delete is a version.
+    pub deleted: bool,
+    /// Empty means "captured on this device" — see [`super::origin_or`].
+    pub origin_device_id: String,
+    /// Frontmost application at local capture time. Remote items may not have it.
+    pub app_bundle_id: Option<String>,
+    /// Name resolved by the capturing platform. It is advisory and never used
+    /// as an identifier or as a filesystem path.
+    pub app_name: Option<String>,
+    pub payload_metadata: Option<String>,
+}
+
+impl StoredItem {
+    pub fn clipboard_privacy(&self) -> copypaste_ipc::ClipboardPrivacy {
+        self.payload_metadata
+            .as_deref()
+            .map(crate::PayloadMetadata::privacy_from_json)
+            .unwrap_or_default()
+    }
+}
+
+/// Storage failures.
+///
+/// No variant carries a filesystem path (the privacy contract). `rusqlite` and
+/// `r2d2` errors do not embed one either, so these are safe to show a user.
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("database file operation failed")]
+    File(#[from] std::io::Error),
+
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    #[error("connection pool error: {0}")]
+    Pool(#[from] r2d2::Error),
+
+    /// The supplied key does not open this database, or the file is not a
+    /// database at all. Fail closed: never fall back to an unkeyed read.
+    #[error("database could not be opened with the supplied key")]
+    InvalidKey,
+
+    /// `PRAGMA integrity_check` returned something other than `ok`. The key was
+    /// right and the pages are not: a candidate file in this state must not
+    /// replace a working one.
+    #[error("the database failed its integrity check")]
+    IntegrityCheckFailed,
+
+    #[error("the database schema is incompatible with this CopyPaste version")]
+    InvalidSchema,
+
+    #[error("the clip payload could not be opened")]
+    InvalidPayload,
+
+    #[error("item not found")]
+    NotFound,
+
+    /// A pagination cursor this build did not write. Refused rather than
+    /// treated as "start from the top", which would silently make a load-more
+    /// repeat the whole history.
+    #[error("that page marker is not valid")]
+    InvalidCursor,
+
+    #[error("that history query is not valid")]
+    InvalidHistoryQuery,
+
+    #[error("a device name must contain visible text")]
+    InvalidDeviceName,
+}
+
+pub(super) const ITEM_COLUMN_COUNT: usize = 16;
+
+pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
+
+impl ItemColumns {
+    pub(super) fn resolve(stmt: &rusqlite::Statement<'_>) -> rusqlite::Result<Self> {
+        let mut at = [0usize; ITEM_COLUMN_COUNT];
+        for (slot, name) in (0..ITEM_COLUMN_COUNT).zip([
+            "id",
+            "content_ciphertext",
+            "nonce",
+            "content_type",
+            "content_hash",
+            "created_at",
+            "pinned",
+            "pin_order",
+            "pin_updated_at",
+            "deleted",
+            "origin_device_id",
+            "app_bundle_id",
+            "app_name",
+            "payload_metadata",
+            "source_icon_id",
+            "shared_ciphertext",
+        ]) {
+            at[slot] = stmt.column_index(name.trim())?;
+        }
+        Ok(Self(at))
+    }
+
+    pub(super) fn pin_order_index(&self) -> usize {
+        self.0[7]
+    }
+}
+
+pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Result<StoredItem> {
+    let at = &columns.0;
+    Ok(StoredItem {
+        id: row.get(at[0])?,
+        content_ciphertext: joined_ciphertext(row, at[1], at[15])?,
+        nonce: row.get::<_, Option<Vec<u8>>>(at[2])?.unwrap_or_default(),
+        content_type: row.get(at[3])?,
+        content_hash: row.get(at[4])?,
+        created_at: row.get(at[5])?,
+        pinned: row.get(at[6])?,
+        pin_order: row.get(at[7])?,
+        pin_updated_at: row.get(at[8])?,
+        deleted: row.get(at[9])?,
+        origin_device_id: row.get(at[10])?,
+        app_bundle_id: row.get(at[11])?,
+        app_name: row.get(at[12])?,
+        payload_metadata: row.get(at[13])?,
+        source_icon_id: row.get(at[14])?,
+    })
+}
+
+/// The row's own ciphertext followed by its shared payload, built once at exact
+/// capacity rather than concatenated in SQLite and copied again here. NULL own
+/// bytes mean a tombstone, which no read path returns; it maps to empty rather
+/// than failing the whole query, whatever the payload table still holds.
+fn joined_ciphertext(row: &Row<'_>, own: usize, shared: usize) -> rusqlite::Result<Vec<u8>> {
+    let Some(own) = row.get_ref(own)?.as_bytes_or_null()? else {
+        return Ok(Vec::new());
+    };
+    let shared = row.get_ref(shared)?.as_bytes_or_null()?.unwrap_or_default();
+    let mut joined = Vec::with_capacity(own.len() + shared.len());
+    joined.extend_from_slice(own);
+    joined.extend_from_slice(shared);
+    Ok(joined)
+}
+
+// Both classifications match on the SQLite result code, never on message text;
+// wording is not a stable database contract.
+
+pub(super) fn is_constraint_violation(err: &rusqlite::Error) -> bool {
+    matches!(err, rusqlite::Error::SqliteFailure(e, _)
+        if e.code == ErrorCode::ConstraintViolation)
+}
+
+pub(super) fn is_not_a_database(err: &rusqlite::Error) -> bool {
+    matches!(err, rusqlite::Error::SqliteFailure(e, _)
+        if e.code == ErrorCode::NotADatabase || e.code == ErrorCode::DatabaseCorrupt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::{item, store, T0};
+    use super::*;
+
+    #[test]
+    fn the_resolved_indices_match_the_projection_and_follow_the_names() {
+        assert_eq!(
+            store()
+                .conn()
+                .unwrap()
+                .prepare(concat!("SELECT ", item_columns!(), " FROM clipboard_items"))
+                .unwrap()
+                .column_count(),
+            ITEM_COLUMN_COUNT,
+            "the projection and the resolved width must agree"
+        );
+        assert_eq!(
+            store()
+                .conn()
+                .unwrap()
+                .prepare(concat!(
+                    "SELECT ",
+                    item_columns_ci!(),
+                    " FROM clipboard_items ci"
+                ))
+                .unwrap()
+                .column_count(),
+            ITEM_COLUMN_COUNT,
+            "the aliased projection must list the same columns"
+        );
+
+        let s = store();
+        let stored = s.insert(item("round trip", T0)).unwrap();
+        let conn = s.conn().unwrap();
+
+        for sql in [
+            concat!("SELECT ", item_columns!(), " FROM clipboard_items"),
+            concat!("SELECT ", item_columns_ci!(), " FROM clipboard_items ci"),
+            "SELECT NULL AS shared_ciphertext, source_icon_id, payload_metadata, app_name, \
+             app_bundle_id, origin_device_id, deleted, pin_updated_at, pin_order, pinned, \
+             created_at, content_hash, content_type, nonce, content_ciphertext, id \
+             FROM clipboard_items",
+        ] {
+            let mut stmt = conn.prepare(sql).unwrap();
+            let columns = ItemColumns::resolve(&stmt).unwrap();
+            let read = stmt
+                .query_row([], |row| row_to_item(row, &columns))
+                .unwrap();
+            assert_eq!(read, stored, "projection: {sql}");
+        }
+    }
+
+    #[test]
+    fn imported_rows_read_the_same_bytes_sqlite_concatenation_produced() {
+        let s = store();
+        let keys = crate::Keyring::from_secret(&[42; 32]);
+        let mut row = item("binary", T0);
+        row.id = "file-import-joined".into();
+        row.content_type = "image/png".into();
+        row.search_text = None;
+        let bytes = b"shared binary payload";
+        let digest = crate::binary::content_digest(bytes);
+        row.content_ciphertext =
+            crate::binary_reference::seal(bytes, &digest, &keys.item_key(), &row.id).unwrap();
+        let envelope = row.content_ciphertext.clone();
+        let id = s.insert(row).unwrap().id;
+
+        let concatenated: Vec<u8> = s
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT CAST(content_ciphertext || COALESCE((SELECT p.ciphertext \
+                 FROM shared_binary_payloads p JOIN history_file_payloads f \
+                 ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), X'') AS BLOB) \
+                 FROM clipboard_items WHERE id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(concatenated, envelope);
+        assert_eq!(s.get(&id).unwrap().unwrap().content_ciphertext, envelope);
+        {
+            let conn = s.conn().unwrap();
+            let mut stmt = conn
+                .prepare(concat!(
+                    "SELECT ",
+                    item_columns_ci!(),
+                    " FROM clipboard_items ci WHERE ci.id = ?1"
+                ))
+                .unwrap();
+            let columns = ItemColumns::resolve(&stmt).unwrap();
+            let read = stmt
+                .query_row([&id], |row| row_to_item(row, &columns))
+                .unwrap();
+            assert_eq!(read.content_ciphertext, envelope);
+        }
+
+        assert!(s.delete(&id).unwrap());
+        let tombstone = s.version(&id).unwrap().unwrap();
+        assert!(tombstone.deleted);
+        assert!(tombstone.content_ciphertext.is_empty());
+    }
+}

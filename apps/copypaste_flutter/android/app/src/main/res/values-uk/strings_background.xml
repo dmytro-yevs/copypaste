@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">Захоплення призупинено</string>
+    <string name="background_status_capturing">Зберігає копії</string>
+    <string name="background_status_syncing">Синхронізує у фоні</string>
+    <string name="background_status_last_sync">Остання синхронізація %1$s</string>
+    <string name="background_status_last_saved">Останнє збереження %1$s</string>
+    <string name="background_action_pause">Пауза</string>
+    <string name="background_action_resume">Відновити</string>
+    <string name="background_action_send">Надіслати буфер</string>
+    <string name="background_action_open">Відкрити</string>
+    <string name="shortcut_send_clipboard">Надіслати буфер</string>
+    <string name="shortcut_transform_clipboard">Перетворити буфер</string>
+</resources>

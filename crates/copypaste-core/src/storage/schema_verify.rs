@@ -1,0 +1,156 @@
+//! Proving that a database file is exactly the schema this build writes.
+
+use rusqlite::Connection;
+
+use super::model::StoreError;
+
+const CURRENT_TABLES: &[&str] = &[
+    "organization_records",
+    "sync_records",
+    "history_tags",
+    "history_clip_tags",
+    "history_pin_state",
+    "clipboard_items",
+    "clipboard_fts",
+    "clipboard_live_count",
+    "sync_device_state",
+    "sync_device_name",
+    "source_app_icons",
+    "shared_binary_payloads",
+    "history_file_payloads",
+    "file_transfer_chunks",
+    "file_transfer_files",
+    "downloaded_files",
+    "file_transfer_staging",
+    "file_references",
+    "file_download_partials",
+    "file_copies",
+    "file_operations",
+    "copypaste_schema_migrations",
+    "module_search_documents",
+    "module_search_vectors",
+    "resource_revisions",
+    "history_preview_cache",
+    "snippets",
+    "snippet_bodies",
+    "snippet_fts",
+    "snippet_collections",
+    "content_rules",
+    "content_rule_placement",
+    "transform_pipelines",
+    "library_preferences",
+    "library_set_members",
+    "clip_notes",
+    "clip_local_state",
+    "clip_rule_tags",
+    "rule_originals",
+    "content_rule_conflicts",
+    "snippet_usage",
+    "snippet_origin",
+    "paste_queue_entries",
+    "paste_queue_state",
+    "cloud_withheld",
+    "expired_ids",
+    "module_records",
+    "module_storage",
+    "module_record_fts",
+    "module_record_search",
+    "module_record_conflicts",
+];
+
+#[derive(Debug, PartialEq)]
+struct SchemaObject {
+    kind: String,
+    name: String,
+    table: String,
+    sql: String,
+}
+
+pub(super) fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
+    verify_schema_against(conn, super::schema::SCHEMA)
+}
+
+pub(super) fn verify_schema_against(conn: &Connection, schema: &str) -> Result<(), StoreError> {
+    let expected = Connection::open_in_memory()?;
+    expected.execute_batch(schema)?;
+
+    if schema_objects(conn)? != schema_objects(&expected)? {
+        return Err(StoreError::InvalidSchema);
+    }
+    Ok(())
+}
+
+pub(super) fn is_current_table(name: &str) -> bool {
+    CURRENT_TABLES.contains(&name)
+}
+
+fn schema_objects(conn: &Connection) -> rusqlite::Result<Vec<SchemaObject>> {
+    let mut statement = conn.prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_schema \
+         WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
+         ORDER BY type, name",
+    )?;
+    let objects = statement
+        .query_map([], |row| {
+            Ok(SchemaObject {
+                kind: row.get(0)?,
+                name: row.get(1)?,
+                table: row.get(2)?,
+                sql: row.get(3)?,
+            })
+        })?
+        .collect();
+    objects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::KEY;
+    use super::super::{Store, StoreError};
+    use super::verify_schema;
+
+    #[test]
+    fn the_current_schema_passes_validation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let store = Store::open(&path, &KEY).unwrap();
+
+        verify_schema(&store.conn().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_equivalent_but_noncanonical_ddl() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let store = Store::open(&path, &KEY).unwrap();
+        let conn = store.conn().unwrap();
+        conn.execute_batch(
+            "DROP TABLE sync_device_name;
+             CREATE TABLE sync_device_name (
+                 device_id TEXT NOT NULL PRIMARY KEY,
+                 name TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            verify_schema(&conn),
+            Err(StoreError::InvalidSchema)
+        ));
+    }
+
+    #[test]
+    fn validation_rejects_a_missing_trigger() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let store = Store::open(&path, &KEY).unwrap();
+        let conn = store.conn().unwrap();
+        conn.execute_batch("DROP TRIGGER clipboard_live_count_insert")
+            .unwrap();
+
+        assert!(matches!(
+            verify_schema(&conn),
+            Err(StoreError::InvalidSchema)
+        ));
+    }
+}

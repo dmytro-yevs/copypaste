@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Optional maintenance must not change the result of commit or push.
+root=$(git rev-parse --show-toplevel) || exit 0
+if command -v python3 >/dev/null 2>&1; then
+    python3 "$root/.githooks/clean-builds.py" || :
+elif command -v python >/dev/null 2>&1; then
+    python "$root/.githooks/clean-builds.py" || :
+else
+    printf 'build cleanup: Python 3 unavailable; skipped\n' >&2
+fi
+exit 0

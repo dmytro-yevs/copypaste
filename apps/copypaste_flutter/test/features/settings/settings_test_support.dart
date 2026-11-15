@@ -1,0 +1,194 @@
+import 'dart:async';
+
+import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
+import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
+import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
+import 'package:copypaste_flutter/platform/notifications/capture_notification_port.dart';
+import 'package:copypaste_flutter/platform/notifications/capture_notification_preview.dart';
+import 'package:copypaste_flutter/platform/security/screenshot_protection.dart';
+
+class FakeScreenshotProtection implements ScreenshotProtection {
+  @override
+  bool get supported => true;
+  bool value = false;
+  @override
+  Future<bool> blocked() async => value;
+  @override
+  Future<void> setBlocked(bool blocked) async {
+    value = blocked;
+  }
+}
+
+class FakeSettingsRepository implements SettingsRepository {
+  final syncChanges = StreamController<SyncStatus>.broadcast();
+
+  @override
+  Stream<SyncStatus> syncEvents() => syncChanges.stream;
+  final StreamController<String?> captures =
+      StreamController<String?>.broadcast();
+  CaptureNotificationPreview? preview;
+  int previewReads = 0;
+  Future<CaptureNotificationPreview?> Function(String)? readPreview;
+  CaptureSettingsState capture = const CaptureSettingsState(
+    running: true,
+    paused: false,
+    epoch: 0,
+  );
+  RuntimeSettings currentSettings = const RuntimeSettings(
+    retentionDays: 0,
+    storageQuotaBytes: 10 * 1024 * 1024 * 1024,
+    excludedAppIds: [],
+    lanVisibility: true,
+    syncEnabled: true,
+    notifyOnCopy: false,
+    soundOnCopy: false,
+  );
+  int exportCalls = 0;
+  int exportSkippedNonText = 1;
+  int exportSkippedUndecryptable = 0;
+  int backupCalls = 0;
+  List<(int, int)> transferSteps = const [];
+  int restoreCalls = 0;
+
+  @override
+  Stream<String?> capturedEvents() => captures.stream;
+
+  @override
+  Future<CaptureNotificationPreview?> capturePreview(String id) async {
+    previewReads += 1;
+    return readPreview == null ? preview : await readPreview!(id);
+  }
+
+  @override
+  Future<BackupResult> backupHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
+    backupCalls += 1;
+    for (final (processed, total) in transferSteps) {
+      onProgress?.call(processed, total);
+    }
+    return const BackupResult(sizeBytes: 2048);
+  }
+
+  @override
+  Future<CaptureSettingsState> captureState() async => capture;
+
+  @override
+  Future<TextExportResult> exportTextHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
+    exportCalls += 1;
+    for (final (processed, total) in transferSteps) {
+      onProgress?.call(processed, total);
+    }
+    return TextExportResult(
+      exported: 4,
+      skippedNonText: exportSkippedNonText,
+      skippedUndecryptable: exportSkippedUndecryptable,
+    );
+  }
+
+  @override
+  Future<void> restoreHistory(String path) async {
+    restoreCalls += 1;
+  }
+
+  @override
+  Future<void> dispose() async {
+    await captures.close();
+    await syncChanges.close();
+  }
+
+  @override
+  Future<CaptureSettingsState> setCapturePaused(bool paused) async {
+    capture = CaptureSettingsState(
+      running: !paused,
+      paused: paused,
+      epoch: capture.epoch + 1,
+    );
+    return capture;
+  }
+
+  @override
+  Future<RuntimeSettings> settings() async => currentSettings;
+
+  @override
+  Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
+    currentSettings = RuntimeSettings(
+      maxFileSizeBytes:
+          change.maxFileSizeBytes ?? currentSettings.maxFileSizeBytes,
+      skipSecret: change.skipSecret ?? currentSettings.skipSecret,
+      skipTransient: change.skipTransient ?? currentSettings.skipTransient,
+      retentionDays: change.retentionDays ?? currentSettings.retentionDays,
+      storageQuotaBytes:
+          change.storageQuotaBytes ?? currentSettings.storageQuotaBytes,
+      excludedAppIds: change.excludedAppIds ?? currentSettings.excludedAppIds,
+      lanVisibility: change.lanVisibility ?? currentSettings.lanVisibility,
+      syncEnabled: change.syncEnabled ?? currentSettings.syncEnabled,
+      relayUrl: change.relayUrl ?? currentSettings.relayUrl,
+      portMapping: change.portMapping ?? currentSettings.portMapping,
+      instantClipboard:
+          change.instantClipboard ?? currentSettings.instantClipboard,
+      notifyOnCopy: change.notifyOnCopy ?? currentSettings.notifyOnCopy,
+      notificationPreview:
+          change.notificationPreview ?? currentSettings.notificationPreview,
+      soundOnCopy: change.soundOnCopy ?? currentSettings.soundOnCopy,
+      fileStorage: change.fileStorage ?? currentSettings.fileStorage,
+      fileSaveFolder: change.fileSaveFolder ?? currentSettings.fileSaveFolder,
+      autoDownloadFiles:
+          change.autoDownloadFiles ?? currentSettings.autoDownloadFiles,
+      logLevel: change.logLevel ?? currentSettings.logLevel,
+      storageUsage: currentSettings.storageUsage,
+    );
+    return currentSettings;
+  }
+}
+
+class FakeSettingsFilePicker implements SettingsFilePicker {
+  String? exportPath = '/tmp/history.json';
+  String? backupPath = '/tmp/history.copypaste-backup';
+  String? restorePath = '/tmp/restore.copypaste-backup';
+  final List<String> presentedPaths = [];
+
+  @override
+  Future<String?> chooseBackupPath() async => backupPath;
+
+  @override
+  Future<String?> chooseRestorePath() async => restorePath;
+
+  @override
+  Future<String?> chooseTextExportPath() async => exportPath;
+
+  String? folder = '/tmp/downloads';
+
+  @override
+  Future<String?> chooseFolder() async => folder;
+
+  @override
+  Future<void> presentCreatedFile(
+    String path, {
+    required String mimeType,
+  }) async {
+    presentedPaths.add(path);
+  }
+}
+
+class FakeCaptureNotificationPort implements CaptureNotificationPort {
+  bool permissionGranted = true;
+  int notifications = 0;
+  final List<CaptureNotificationPreview?> previews = [];
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermission() async => permissionGranted;
+
+  @override
+  Future<void> showCaptured({CaptureNotificationPreview? preview}) async {
+    notifications += 1;
+    previews.add(preview);
+  }
+}

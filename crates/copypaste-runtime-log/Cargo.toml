@@ -1,0 +1,23 @@
+[package]
+name = "copypaste-runtime-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
+copypaste-fs = { path = "../copypaste-fs" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+tempfile.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { version = "0.3", default-features = false, features = ["std"] }
+
+[features]
+# Explicit test-only formatter access; product builds do not enable this.
+test-support = []

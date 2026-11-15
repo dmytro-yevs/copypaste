@@ -1,0 +1,455 @@
+[
+  {
+    "transform": "encode.base64_encode",
+    "input": "hello world",
+    "output": "aGVsbG8gd29ybGQ="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "",
+    "output": ""
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "a",
+    "output": "YQ=="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "ab",
+    "output": "YWI="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "abc",
+    "output": "YWJj"
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "Привіт, світ",
+    "output": "0J/RgNC40LLRltGCLCDRgdCy0ZbRgg=="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "input": "😀 emoji",
+    "output": "8J+YgCBlbW9qaQ=="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "params": {
+      "variant": "url_safe",
+      "padding": false
+    },
+    "input": "??>>",
+    "output": "Pz8-Pg"
+  },
+  {
+    "transform": "encode.base64_encode",
+    "params": {
+      "variant": "url_safe"
+    },
+    "input": "??>>",
+    "output": "Pz8-Pg=="
+  },
+  {
+    "transform": "encode.base64_encode",
+    "params": {
+      "padding": false
+    },
+    "input": "ab",
+    "output": "YWI"
+  },
+  {
+    "transform": "encode.base64_encode",
+    "params": {
+      "wrap": true
+    },
+    "input": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. ",
+    "output": "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZy4gVGhlIHF1aWNrIGJy\nb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZy4gVGhlIHF1aWNrIGJyb3duIGZveCBqdW1w\ncyBvdmVyIHRoZSBsYXp5IGRvZy4g"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "aGVsbG8gd29ybGQ=",
+    "output": "hello world"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "aGVsbG8gd29ybGQ",
+    "output": "hello world"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "c3ViamVj\ndHM_Xzw-\r\nfn5-IMOp",
+    "output": "subjects?_<>~~~ é"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "  0J/RgNC40LLRltGC\n",
+    "output": "Привіт"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "data:text/plain;base64,aGk=",
+    "output": "hi"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "DATA:;base64,aGk",
+    "output": "hi"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "",
+    "output": ""
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "/9j/4AAQ",
+    "error": "binary_data"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "params": {
+      "output": "hex"
+    },
+    "input": "/9j/4AAQ",
+    "output": "ffd8ffe00010"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "params": {
+      "output": "hex"
+    },
+    "input": "aGk=",
+    "output": "6869"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "aGVs*bG8",
+    "error": "base64.invalid"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "aGk=aGk=",
+    "error": "base64.invalid"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "aGVsb",
+    "error": "base64.length"
+  },
+  {
+    "transform": "encode.base64_decode",
+    "input": "=aGk",
+    "error": "base64.invalid"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "a b&c=ü",
+    "output": "a%20b%26c%3D%C3%BC"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "-._~",
+    "output": "-._~"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "100% sure?",
+    "output": "100%25%20sure%3F"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "/path/to file",
+    "output": "%2Fpath%2Fto%20file"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "😀",
+    "output": "%F0%9F%98%80"
+  },
+  {
+    "transform": "encode.url_encode",
+    "input": "",
+    "output": ""
+  },
+  {
+    "transform": "encode.url_encode",
+    "params": {
+      "space": "plus"
+    },
+    "input": "a b+c",
+    "output": "a+b%2Bc"
+  },
+  {
+    "transform": "encode.url_encode_full",
+    "input": "https://x.test/a b?q=ü&r=50%25",
+    "output": "https://x.test/a%20b?q=%C3%BC&r=50%25"
+  },
+  {
+    "transform": "encode.url_encode_full",
+    "input": "https://user@x.test:8080/p;x=1?a[0]=1&b=$!*'(),#frag",
+    "output": "https://user@x.test:8080/p;x=1?a[0]=1&b=$!*'(),#frag"
+  },
+  {
+    "transform": "encode.url_encode_full",
+    "input": "https://x.test/100%/\"quoted\"<tag>{x}|^`\\",
+    "output": "https://x.test/100%25/%22quoted%22%3Ctag%3E%7Bx%7D%7C%5E%60%5C"
+  },
+  {
+    "transform": "encode.url_encode_full",
+    "input": "https://пример.test/путь",
+    "output": "https://%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80.test/%D0%BF%D1%83%D1%82%D1%8C"
+  },
+  {
+    "transform": "encode.url_encode_full",
+    "input": "https://x.test/a%20b%2",
+    "output": "https://x.test/a%20b%252"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "a%20b+c%3D%C3%BC",
+    "output": "a b c=ü"
+  },
+  {
+    "transform": "encode.url_decode",
+    "params": {
+      "plus_as_space": false
+    },
+    "input": "a+b",
+    "output": "a+b"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "%f0%9f%98%80 ok",
+    "output": "😀 ok"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "50%",
+    "error": "url.malformed"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "%E0%A4%A",
+    "error": "url.malformed"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "%zz",
+    "error": "url.malformed"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "ok%FF",
+    "error": "url.not_utf8"
+  },
+  {
+    "transform": "encode.url_decode",
+    "input": "no escapes here",
+    "output": "no escapes here"
+  },
+  {
+    "transform": "encode.hex_encode",
+    "input": "Hi!",
+    "output": "486921"
+  },
+  {
+    "transform": "encode.hex_encode",
+    "params": {
+      "separator": "space",
+      "case": "upper"
+    },
+    "input": "é€",
+    "output": "C3 A9 E2 82 AC"
+  },
+  {
+    "transform": "encode.hex_encode",
+    "params": {
+      "separator": "space"
+    },
+    "input": "ab",
+    "output": "61 62"
+  },
+  {
+    "transform": "encode.hex_encode",
+    "input": "",
+    "output": ""
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "486921",
+    "output": "Hi!"
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "0x48 0X69\n21",
+    "output": "Hi!"
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "C3A9E282AC",
+    "output": "é€"
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "48692",
+    "error": "hex.odd_length"
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "48 6g",
+    "error": "hex.invalid"
+  },
+  {
+    "transform": "encode.hex_decode",
+    "input": "ff00",
+    "error": "binary_data"
+  },
+  {
+    "transform": "encode.html_encode",
+    "input": "<a href=\"x\">Tom & Jerry's</a>",
+    "output": "&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;"
+  },
+  {
+    "transform": "encode.html_encode",
+    "input": "café 😀",
+    "output": "café 😀"
+  },
+  {
+    "transform": "encode.html_encode",
+    "params": {
+      "scope": "non_ascii"
+    },
+    "input": "café <😀>",
+    "output": "caf&#233; &lt;&#128512;&gt;"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&lt;p&gt;caf&eacute; &#8364;5&lt;/p&gt;",
+    "output": "<p>café €5</p>"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&#x1F600; &#X41; &#65",
+    "output": "😀 A A"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&NotEqualTilde; &CounterClockwiseContourIntegral;",
+    "output": "≂̸ ∳"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&bogus; & &amp &#; &#x;",
+    "output": "&bogus; & & &#; &#x;"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "?a=1&copy=2&copyx &copy 2026",
+    "output": "?a=1&copy=2&copyx © 2026"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&#0; &#xD800; &#x110000; &#128;",
+    "output": "� � � €"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&amp;lt;",
+    "output": "&lt;"
+  },
+  {
+    "transform": "encode.html_decode",
+    "input": "&notin; &notit;",
+    "output": "∉ &notit;"
+  },
+  {
+    "transform": "encode.backslash_escape",
+    "input": "say \"hi\"\n\tC:\\dir",
+    "output": "say \\\"hi\\\"\\n\\tC:\\\\dir"
+  },
+  {
+    "transform": "encode.backslash_escape",
+    "input": "bell\u0007 it's é\r",
+    "output": "bell\\u0007 it's é\\r"
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "say \\\"hi\\\"\\n\\x41\\u00e9",
+    "output": "say \"hi\"\nAé"
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "\\ud83d\\ude00 \\u{1F44D} \\xe2\\x82\\xac",
+    "output": "😀 👍 €"
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "a\\qb",
+    "output": "a\\qb",
+    "warnings": [
+      "escape.unknown"
+    ]
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "lone \\ud83d end\\",
+    "output": "lone \\ud83d end\\",
+    "warnings": [
+      "escape.invalid",
+      "escape.unknown"
+    ]
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "\\xff\\xfe ok",
+    "output": "\\xff\\xfe ok",
+    "warnings": [
+      "escape.invalid"
+    ]
+  },
+  {
+    "transform": "encode.backslash_unescape",
+    "input": "it\\'s\\/\\0",
+    "output": "it's/\u0000",
+    "warnings": []
+  },
+  {
+    "transform": "encode.unicode_escape",
+    "input": "café 😀",
+    "output": "caf\\u00e9 \\ud83d\\ude00"
+  },
+  {
+    "transform": "encode.unicode_escape",
+    "params": {
+      "astral": "braces"
+    },
+    "input": "café 😀",
+    "output": "caf\\u00e9 \\u{1f600}"
+  },
+  {
+    "transform": "encode.unicode_escape",
+    "input": "plain ascii\\n",
+    "output": "plain ascii\\n"
+  },
+  {
+    "transform": "encode.unicode_unescape",
+    "input": "caf\\u00e9 \\u{1F600}",
+    "output": "café 😀"
+  },
+  {
+    "transform": "encode.unicode_unescape",
+    "input": "\\ud83d\\ude00\\n \\\\u0041",
+    "output": "😀\\n \\\\u0041",
+    "warnings": []
+  },
+  {
+    "transform": "encode.unicode_unescape",
+    "input": "\\u12 \\u{110000}",
+    "output": "\\u12 \\u{110000}",
+    "warnings": [
+      "escape.invalid"
+    ]
+  }
+]

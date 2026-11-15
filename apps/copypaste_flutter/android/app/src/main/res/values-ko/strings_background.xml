@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">캡처 일시중지됨</string>
+    <string name="background_status_capturing">복사 내용 저장 중</string>
+    <string name="background_status_syncing">백그라운드 동기화 중</string>
+    <string name="background_status_last_sync">마지막 동기화 %1$s</string>
+    <string name="background_status_last_saved">마지막 저장 %1$s</string>
+    <string name="background_action_pause">일시중지</string>
+    <string name="background_action_resume">다시 시작</string>
+    <string name="background_action_send">클립보드 보내기</string>
+    <string name="background_action_open">열기</string>
+    <string name="shortcut_send_clipboard">클립보드 보내기</string>
+    <string name="shortcut_transform_clipboard">클립보드 변환</string>
+</resources>

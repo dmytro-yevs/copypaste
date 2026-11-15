@@ -1,0 +1,2021 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
+import 'dart:async';
+
+import 'package:flutter/services.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import '../../app/theme/app_motion.dart';
+import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_theme.dart';
+import '../../app/theme/app_tokens.dart';
+import '../../platform/camera/pairing_camera_scanner.dart';
+import '../../platform/camera/qr_scanner.dart';
+import '../../shared/adaptive_breakpoints.dart';
+import '../../shared/inspector_table.dart';
+import '../../shared/setup_setting_row.dart';
+import '../../shared/failure_toasts.dart';
+import '../../shared/state_view.dart';
+import '../../shared/system_date_time.dart';
+import '../settings/view/settings_section.dart';
+import 'device_presentation.dart';
+import 'devices_controller.dart';
+import 'devices_gateway.dart';
+import 'devices_header_actions.dart';
+import 'pairing_progress.dart';
+import 'pairing_decisions.dart';
+
+/// Devices management composed from shadcn_flutter primitives.
+class DevicesScreen extends StatefulWidget {
+  const DevicesScreen({
+    super.key,
+    required this.controller,
+    this.onDrawerVisibilityChanged,
+    this.isActive,
+  });
+
+  final DevicesController controller;
+  final ValueChanged<bool>? onDrawerVisibilityChanged;
+  final ValueGetter<bool>? isActive;
+
+  @override
+  State<DevicesScreen> createState() => _DevicesScreenState();
+}
+
+class _DevicesScreenState extends State<DevicesScreen> {
+  bool _pairingDrawerOpen = false;
+  bool _deviceDrawerOpen = false;
+  OverlayCompleter<void>? _pairingDrawer;
+  OverlayCompleter<void>? _deviceDrawer;
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(widget.controller.start());
+    });
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
+    if (_pairingDrawer?.isCompleted == false) _pairingDrawer!.remove();
+    if (_deviceDrawer?.isCompleted == false) _deviceDrawer!.remove();
+    super.dispose();
+  }
+
+  bool _handleHardwareKey(KeyEvent event) {
+    if (!mounted ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !(widget.isActive?.call() ?? true) ||
+        !(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return false;
+    }
+    final controller = widget.controller;
+    if (controller.pairingEntryMode != null && controller.canClosePairing) {
+      unawaited(controller.closePairing());
+      return true;
+    }
+    if (controller.deviceDetailsOpen) {
+      controller.closeDeviceDetails();
+      return true;
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    return FailureToasts(
+      listenable: controller,
+      failure: () =>
+          controller.loadState == DevicesLoadState.ready &&
+              !_failureShownInPlace(controller)
+          ? controller.errorMessage
+          : null,
+      title: (_) => controller.errorTitle,
+      child: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (context, _) {
+          final controller = widget.controller;
+          return switch (controller.loadState) {
+            DevicesLoadState.loading => StateView.loading(
+              message: context.l10n.devicesLoading,
+            ),
+            DevicesLoadState.error => StateView.error(
+              title: context.l10n.devicesUnavailableTitle,
+              message: controller.errorMessage,
+              onRetry: controller.refresh,
+            ),
+            DevicesLoadState.ready => _readyContent(context, controller),
+          };
+        },
+      ),
+    );
+  }
+
+  /// Pairing that could not start shows its failure in place of its content.
+  static bool _failureShownInPlace(DevicesController controller) {
+    final mode = controller.pairingEntryMode;
+    if (mode == null ||
+        controller.pairing != null ||
+        controller.pairingInFlight) {
+      return false;
+    }
+    return switch (mode) {
+      PairingEntryMode.invite || PairingEntryMode.nearby => true,
+      PairingEntryMode.scanQr => controller.usesSystemScanner,
+      PairingEntryMode.enterCode => false,
+    };
+  }
+
+  Widget _readyContent(BuildContext context, DevicesController controller) {
+    final snapshot = controller.snapshot!;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= AdaptiveBreakpoints.inspector;
+        final pairingOpen = controller.pairingInspectorOpen;
+        final deviceDetailsOpen = controller.deviceDetailsTarget != null;
+        final inspectorOpen = pairingOpen || deviceDetailsOpen;
+        if (!wide && pairingOpen && !_pairingDrawerOpen && !_deviceDrawerOpen) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) unawaited(_openPairingDrawer());
+          });
+        }
+        if (!wide &&
+            deviceDetailsOpen &&
+            !_deviceDrawerOpen &&
+            !_pairingDrawerOpen) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) unawaited(_openDeviceDrawer());
+          });
+        }
+        // Tab finishes the list before it enters the pane beside it.
+        final list = FocusTraversalGroup(
+          child: _devicesList(
+            context,
+            controller,
+            snapshot,
+            padding: wide && inspectorOpen
+                ? const EdgeInsets.all(AppSpacing.sm)
+                : const EdgeInsets.all(AppSpacing.xxl),
+          ),
+        );
+        if (!wide || !inspectorOpen) return list;
+        return Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: ResizablePanel.horizontal(
+            dividerBuilder: (context) => null,
+            draggerThickness: AppSpacing.md,
+            children: [
+              ResizablePane.flex(
+                minSize: 440,
+                initialFlex: 1.45,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.lg),
+                  child: SizedBox.expand(
+                    key: const ValueKey<String>('devices-list'),
+                    child: list,
+                  ),
+                ),
+              ),
+              ResizablePane(
+                initialSize: 400,
+                minSize: 340,
+                maxSize: 560,
+                child: pairingOpen
+                    ? PairingInspector(
+                        key: ValueKey<PairingEntryMode>(
+                          controller.pairingEntryMode!,
+                        ),
+                        controller: controller,
+                        inDrawer: false,
+                        onClose: controller.closePairing,
+                      )
+                    : _DeviceDetailsInspector(
+                        key: ValueKey<DeviceDetailsTarget>(
+                          controller.deviceDetailsTarget!,
+                        ),
+                        controller: controller,
+                        snapshot: snapshot,
+                        inDrawer: false,
+                        onClose: controller.closeDeviceDetails,
+                        onRename: (name) =>
+                            _renameThisDevice(context, controller, name),
+                        onRemove: (peer) =>
+                            _confirmPeerRemoval(context, controller, peer),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _devicesList(
+    BuildContext context,
+    DevicesController controller,
+    DevicesSnapshot snapshot, {
+    required EdgeInsets padding,
+  }) {
+    return ListView(
+      controller: PrimaryScrollController.maybeOf(context),
+      primary: false,
+      padding: padding.add(
+        EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+      ),
+      children: [
+        if (snapshot.space case final space? when !space.member) ...[
+          _notInSpace(context, controller),
+          const Gap(AppSpacing.lg),
+        ] else if (snapshot.space case final space?
+            when snapshot.peers.isNotEmpty) ...[
+          _spaceSummary(context, snapshot, space),
+          const Gap(AppSpacing.lg),
+        ],
+        _deviceCards(context, controller, snapshot),
+        if (snapshot.peers.isEmpty && (snapshot.space?.member ?? true)) ...[
+          const Gap(AppSpacing.md),
+          _noPairedDevices(context, controller),
+        ],
+        const Gap(AppSpacing.xxl),
+        _nearbyDevices(context, controller),
+      ],
+    );
+  }
+
+  Widget _spaceSummary(
+    BuildContext context,
+    DevicesSnapshot snapshot,
+    DeviceSpace space,
+  ) {
+    final l10n = context.l10n;
+    final summary = l10n.devicesSpaceSummary(snapshot.peers.length + 1);
+    return Card(
+      key: const ValueKey<String>('devices-space-summary'),
+      child: SetupSettingRow(
+        icon: LucideIcons.usersRound,
+        title: l10n.devicesSpaceTitle,
+        description: space.waitingPeerIds.isEmpty
+            ? summary
+            : '$summary · ${l10n.devicesSpaceKeyPending}',
+      ),
+    );
+  }
+
+  /// This device was removed or left; its history stays, sync waits for a
+  /// new confirmed join.
+  Widget _notInSpace(BuildContext context, DevicesController controller) {
+    final l10n = context.l10n;
+    return Card(
+      key: const ValueKey<String>('devices-not-in-space'),
+      child: StateView.empty(
+        title: l10n.devicesSpaceRemovedTitle,
+        message: l10n.devicesSpaceRemovedMessage,
+        icon: LucideIcons.usersRound,
+        actionLabel: controller.pairingInspectorOpen
+            ? null
+            : l10n.devicesSpaceJoin,
+        onAction: controller.pairingInspectorOpen
+            ? null
+            : () => unawaited(controller.openCodeEntry()),
+      ),
+    );
+  }
+
+  /// Shown for every loaded snapshot without peers, whatever discovery finds,
+  /// so it never appears or disappears while loading or scanning.
+  Widget _noPairedDevices(BuildContext context, DevicesController controller) {
+    return Card(
+      key: const ValueKey<String>('devices-empty-state'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StateView.empty(
+            title: context.l10n.devicesEmptyTitle,
+            message: context.l10n.devicesEmptyMessage,
+            icon: LucideIcons.link,
+          ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: DevicesHeaderActions.labeledActions(
+              context,
+              controller,
+              enabled: !controller.pairingInspectorOpen,
+              keyPrefix: 'empty-',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _nearbyDevices(BuildContext context, DevicesController controller) {
+    final devices = controller.nearbyDevices;
+    return Card(
+      key: const ValueKey<String>('nearby-devices'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  container: true,
+                  header: true,
+                  child: Text(context.l10n.devicesNearbyTitle).large().medium(),
+                ),
+              ),
+              const Gap(AppSpacing.md),
+              Button.text(
+                key: const ValueKey<String>('rescan-devices'),
+                style: const ButtonStyle.text(density: ButtonDensity.compact),
+                onPressed:
+                    controller.rescanInFlight || controller.actionInFlight
+                    ? null
+                    : controller.rescan,
+                leading: const AppIconFrame(child: Icon(LucideIcons.radar)),
+                child: Text(
+                  controller.rescanInFlight
+                      ? context.l10n.devicesScanning
+                      : context.l10n.devicesScan,
+                ),
+              ),
+            ],
+          ),
+          const Gap(AppSpacing.md),
+          if (devices.isEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: AppControlSize.touch * 4,
+              ),
+              child: StateView.empty(
+                title: context.l10n.devicesNoneNearby,
+                compact: true,
+                icon: DevicePresentation.collectionIcon,
+              ),
+            )
+          else
+            for (var index = 0; index < devices.length; index++) ...[
+              if (index > 0) const Divider(),
+              _discoveredRow(context, controller, devices[index]),
+            ],
+        ],
+      ),
+    );
+  }
+
+  Widget _deviceCards(
+    BuildContext context,
+    DevicesController controller,
+    DevicesSnapshot snapshot,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 680 ? 2 : 1;
+        final width =
+            (constraints.maxWidth - (columns - 1) * AppSpacing.md) / columns;
+        return Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
+          children: [
+            SizedBox(
+              width: width,
+              child: _thisDeviceCard(context, controller, snapshot.thisDevice),
+            ),
+            for (final peer in snapshot.peers)
+              SizedBox(
+                width: width,
+                child: _peerCard(context, controller, peer),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _openPairingDrawer() async {
+    if (_pairingDrawerOpen ||
+        _deviceDrawerOpen ||
+        !widget.controller.pairingInspectorOpen) {
+      return;
+    }
+    _pairingDrawerOpen = true;
+    widget.onDrawerVisibilityChanged?.call(true);
+    var closing = false;
+    void closeOnce(BuildContext drawerContext) {
+      if (closing || !drawerContext.mounted) return;
+      closing = true;
+      unawaited(closeDrawer(drawerContext));
+    }
+
+    try {
+      final drawer = _pairingDrawer = showOverlay<void>(
+        context,
+        AppOverlays.drawerConfiguration(context),
+        builder: (context) => ConstrainedBox(
+          key: const ValueKey<String>('devices-pairing-drawer'),
+          constraints: AppOverlays.drawerContentConstraints(context),
+          child: Focus(
+            autofocus: true,
+            skipTraversal: true,
+            child: AppOverlays.drawerDismissal(
+              onDismiss: () async {
+                if (widget.controller.canClosePairing) {
+                  await widget.controller.closePairing();
+                }
+              },
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, _) {
+                  if (!widget.controller.pairingInspectorOpen) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      closeOnce(context);
+                    });
+                    return const SizedBox.shrink();
+                  }
+                  return PairingInspector(
+                    key: ValueKey<PairingEntryMode?>(
+                      widget.controller.pairingEntryMode,
+                    ),
+                    controller: widget.controller,
+                    inDrawer: true,
+                    onClose: widget.controller.closePairing,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await drawer.future;
+    } finally {
+      _pairingDrawer = null;
+      _pairingDrawerOpen = false;
+      if (mounted) {
+        widget.onDrawerVisibilityChanged?.call(false);
+        if (!closing && widget.controller.pairingEntryMode != null) {
+          await widget.controller.closePairing();
+        }
+        if (mounted) setState(() {});
+      }
+    }
+  }
+
+  Future<void> _openDeviceDrawer() async {
+    if (_deviceDrawerOpen ||
+        _pairingDrawerOpen ||
+        widget.controller.deviceDetailsTarget == null) {
+      return;
+    }
+    _deviceDrawerOpen = true;
+    widget.onDrawerVisibilityChanged?.call(true);
+    final target = widget.controller.deviceDetailsTarget;
+    var closing = false;
+    void closeOnce(BuildContext drawerContext) {
+      if (closing || !drawerContext.mounted) return;
+      closing = true;
+      unawaited(closeDrawer(drawerContext));
+    }
+
+    try {
+      final drawer = _deviceDrawer = showOverlay<void>(
+        context,
+        AppOverlays.drawerConfiguration(context),
+        builder: (context) => ConstrainedBox(
+          key: const ValueKey<String>('devices-details-drawer'),
+          constraints: AppOverlays.drawerContentConstraints(context),
+          child: Focus(
+            autofocus: true,
+            skipTraversal: true,
+            child: CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                const SingleActivator(LogicalKeyboardKey.escape): () {
+                  widget.controller.closeDeviceDetails();
+                },
+              },
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, _) {
+                  final snapshot = widget.controller.snapshot;
+                  if (snapshot == null ||
+                      widget.controller.deviceDetailsTarget == null) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      closeOnce(context);
+                    });
+                    return const SizedBox.shrink();
+                  }
+                  return _DeviceDetailsInspector(
+                    key: ValueKey<DeviceDetailsTarget>(
+                      widget.controller.deviceDetailsTarget!,
+                    ),
+                    controller: widget.controller,
+                    snapshot: snapshot,
+                    inDrawer: true,
+                    onClose: widget.controller.closeDeviceDetails,
+                    onRename: (name) =>
+                        _renameThisDevice(context, widget.controller, name),
+                    onRemove: (peer) =>
+                        _confirmPeerRemoval(context, widget.controller, peer),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await drawer.future;
+    } finally {
+      _deviceDrawer = null;
+      _deviceDrawerOpen = false;
+      if (mounted) {
+        widget.onDrawerVisibilityChanged?.call(false);
+        if (!closing && widget.controller.deviceDetailsTarget == target) {
+          widget.controller.closeDeviceDetails();
+        }
+        setState(() {});
+      }
+    }
+  }
+
+  Widget _thisDeviceCard(
+    BuildContext context,
+    DevicesController controller,
+    ThisDevice device,
+  ) {
+    return _deviceCard(
+      context,
+      key: const ValueKey<String>('this-device-card'),
+      name: device.name,
+      details: device.details,
+      statusLabel: context.l10n.devicesThisDevice,
+      selected:
+          controller.deviceDetailsTarget ==
+          const DeviceDetailsTarget.thisDevice(),
+      onPressed: controller.pairingInspectorOpen
+          ? null
+          : controller.openThisDeviceDetails,
+    );
+  }
+
+  Widget _peerCard(
+    BuildContext context,
+    DevicesController controller,
+    DevicePeer peer,
+  ) {
+    final state = controller.peerConnectionState(peer);
+    // Only devices that still need the rotated key say so.
+    final waiting = controller.space?.waitingPeerIds.contains(peer.id) ?? false;
+    return _deviceCard(
+      context,
+      key: ValueKey<String>('peer-device-card-${peer.id}'),
+      name: peer.name,
+      details: peer.details,
+      statusLabel: waiting
+          ? context.l10n.devicesSpaceWaitingForKey
+          : DevicePresentation.connectionLabel(state),
+      statusTone: waiting
+          ? AppStatusTone.warning
+          : DevicePresentation.connectionTone(state),
+      ping: state == DeviceConnectionState.online
+          ? controller.peerLatencyLabel(peer)
+          : null,
+      selected:
+          controller.deviceDetailsTarget == DeviceDetailsTarget.peer(peer.id),
+      onPressed: controller.pairingInspectorOpen
+          ? null
+          : () => controller.openPeerDetails(peer.id),
+    );
+  }
+
+  Widget _discoveredRow(
+    BuildContext context,
+    DevicesController controller,
+    DiscoveredDevice device,
+  ) {
+    return Basic(
+      key: ValueKey<String>('discovered-device-row-${device.id}'),
+      theme: AppTheme.deviceListRowTheme,
+      leading: _deviceIconTile(
+        context,
+        device.details?.profile?.deviceClass,
+        compact: true,
+      ),
+      title: Text(device.name),
+      subtitle: Text(DevicePresentation.osLabel(device.details?.profile)),
+      trailing: Button.primary(
+        onPressed:
+            !controller.pairingInspectorOpen && controller.canChangePairingMode
+            ? () => controller.connectNearby(device)
+            : null,
+        child: Text(context.l10n.devicesConnect),
+      ),
+    );
+  }
+
+  Widget _deviceCard(
+    BuildContext context, {
+    required Key key,
+    required String name,
+    required DeviceDetails? details,
+    required String statusLabel,
+    AppStatusTone? statusTone,
+    String? ping,
+    required bool selected,
+    required VoidCallback? onPressed,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final style = selected
+        ? const ButtonStyle.card().withBackgroundColor(
+            color: colors.border,
+            hoverColor: colors.border,
+            focusColor: colors.border,
+          )
+        : const ButtonStyle.card();
+    return Semantics(
+      label: statusTone == null ? statusLabel : null,
+      selected: selected,
+      button: true,
+      child: Button.card(
+        key: key,
+        onPressed: onPressed,
+        enabled: onPressed != null,
+        alignment: Alignment.centerLeft,
+        style: style,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final stackedPing =
+                constraints.maxWidth <
+                AppLayoutSize.deviceCardInlinePingMinWidth *
+                    MediaQuery.textScalerOf(context).scale(1);
+            return Row(
+              children: [
+                _deviceIconTile(context, details?.profile?.deviceClass),
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (statusTone != null) ...[
+                            Semantics(
+                              label: statusLabel,
+                              child: AvatarBadge(
+                                size: AppIconSize.statusIndicator,
+                                borderRadius: AppRadius.full,
+                                color: AppTheme.statusColor(
+                                  context,
+                                  statusTone,
+                                ),
+                              ),
+                            ),
+                            const Gap(AppSpacing.xs),
+                          ],
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: AppTheme.deviceCardTextStyle(context),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ).semiBold(),
+                          ),
+                        ],
+                      ),
+                      const Gap(AppSpacing.xs),
+                      Text(
+                        DevicePresentation.summary(details),
+                        style: AppTheme.deviceCardTextStyle(
+                          context,
+                          muted: true,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (ping != null) ...[
+                  const Gap(AppSpacing.md),
+                  Text(
+                    stackedPing
+                        ? context.l10n.devicesCardPingStacked(ping)
+                        : context.l10n.devicesCardPing(ping),
+                    style: AppTheme.deviceCardTextStyle(context, muted: true),
+                    maxLines: 2,
+                    textAlign: TextAlign.end,
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _deviceIconTile(
+    BuildContext context,
+    DeviceClass? deviceClass, {
+    bool compact = false,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: compact ? AppControlSize.large : AppControlSize.touch,
+      child: Card(
+        theme: CardTheme(
+          padding: EdgeInsets.zero,
+          filled: true,
+          fillColor: colors.secondary,
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
+          borderWidth: AppSpacing.zero,
+        ),
+        child: Center(
+          child: AppIconFrame(
+            size: compact ? AppIconSize.md : AppIconSize.lg,
+            child: Icon(
+              DevicePresentation.icon(deviceClass),
+              size: compact ? AppIconSize.md : AppIconSize.lg,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renameThisDevice(
+    BuildContext context,
+    DevicesController controller,
+    String currentName,
+  ) async {
+    final l10n = context.l10n;
+    final nameController = TextEditingController(text: currentName);
+    try {
+      await AppOverlays.showActionDialog(
+        context,
+        icon: LucideIcons.pencil,
+        title: Text(l10n.devicesRenameDialogTitle),
+        actionLabel: l10n.commonSave,
+        destructive: false,
+        changes: nameController,
+        canConfirm: () =>
+            nameController.text.trim().isNotEmpty && !controller.actionInFlight,
+        content: TextField(
+          controller: nameController,
+          placeholder: Text(l10n.devicesNamePlaceholder),
+          autofocus: true,
+          decoration: AppOverlays.dialogFieldDecoration(context),
+        ),
+        onConfirm: () =>
+            controller.setThisDeviceName(nameController.text.trim()),
+        failureMessage: () =>
+            controller.errorMessage ?? l10n.devicesRenameFailed,
+      );
+    } finally {
+      nameController.dispose();
+    }
+  }
+
+  Future<void> _confirmPeerRemoval(
+    BuildContext context,
+    DevicesController controller,
+    DevicePeer peer,
+  ) async {
+    final l10n = context.l10n;
+    // The cloud follow-ups only mean something with a signed-in account.
+    final cloud = await controller.cloudSignedIn();
+    if (!context.mounted) return;
+    final passphrase = TextEditingController();
+    final signOutOthers = ValueNotifier<bool>(false);
+    bool passphraseValid() =>
+        passphrase.text.isEmpty ||
+        passphrase.text.characters.length >= _minPassphraseLength;
+    try {
+      await AppOverlays.showActionDialog(
+        context,
+        icon: LucideIcons.userMinus,
+        title: Text(l10n.devicesRemoveDialogTitle(peer.name)),
+        content: _SpaceRemovalContent(
+          cloud: cloud,
+          passphrase: passphrase,
+          signOutOthers: signOutOthers,
+          passphraseValid: passphraseValid,
+        ),
+        actionLabel: l10n.devicesRemoveFromSpace,
+        changes: Listenable.merge([controller, passphrase, signOutOthers]),
+        canConfirm: () => !controller.actionInFlight && passphraseValid(),
+        onConfirm: () => controller.removeFromSpace(
+          peer.id,
+          newPassphrase: cloud ? passphrase.text : null,
+          signOutOthers: cloud && signOutOthers.value,
+        ),
+        failureMessage: () =>
+            controller.errorMessage ?? l10n.devicesActionFailedMessage,
+      );
+    } finally {
+      passphrase.dispose();
+      signOutOthers.dispose();
+    }
+  }
+}
+
+class _DeviceDetailsInspector extends StatelessWidget {
+  const _DeviceDetailsInspector({
+    super.key,
+    required this.controller,
+    required this.snapshot,
+    required this.inDrawer,
+    required this.onClose,
+    required this.onRename,
+    required this.onRemove,
+  });
+
+  final DevicesController controller;
+  final DevicesSnapshot snapshot;
+  final bool inDrawer;
+  final VoidCallback onClose;
+  final Future<void> Function(String name) onRename;
+  final Future<void> Function(DevicePeer peer) onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = controller.deviceDetailsTarget;
+    final device = _selectedDevice(context.l10n, target);
+    if (device == null) return const SizedBox.shrink();
+    final content = FocusTraversalGroup(
+      child: Card(
+        key: ValueKey<String>(
+          inDrawer
+              ? 'devices-details-drawer-card'
+              : 'devices-details-inspector',
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                AppIconFrame(
+                  size: AppIconSize.xl,
+                  child: Icon(
+                    DevicePresentation.icon(
+                      device.details?.profile?.deviceClass,
+                    ),
+                    size: AppIconSize.xl,
+                  ),
+                ),
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        device.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ).h3(),
+                      Text(
+                        DevicePresentation.summary(device.details),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ).muted(),
+                    ],
+                  ),
+                ),
+                Tooltip(
+                  showDuration: AppMotion.resolve(context, AppMotion.standard),
+                  tooltip: (context) => TooltipContainer(
+                    child: Text(context.l10n.devicesCloseDetails),
+                  ),
+                  child: Semantics(
+                    label: context.l10n.devicesCloseDetails,
+                    button: true,
+                    child: Button.ghost(
+                      key: const ValueKey<String>('close-device-details'),
+                      style: AppTheme.controlButtonStyle(
+                        const ButtonStyle.ghostIcon(),
+                      ),
+                      onPressed: onClose,
+                      child: const AppIconFrame(child: Icon(LucideIcons.x)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Gap(AppSpacing.md),
+            Expanded(
+              child: AppOverlays.focusRingClip(
+                child: SingleChildScrollView(
+                  key: const ValueKey<String>('device-details-scroll-content'),
+                  clipBehavior: Clip.none,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SecondaryBadge(child: Text(device.relationship)),
+                      ),
+                      const Gap(AppSpacing.xl),
+                      _DeviceSyncSection(
+                        controller: controller,
+                        snapshot: snapshot,
+                        device: device,
+                      ),
+                      const Gap(AppSpacing.xl),
+                      _DeviceDetailsTable(rows: _detailRows(context, device)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const Gap(AppSpacing.xxl),
+            _actions(context, device),
+          ],
+        ),
+      ),
+    );
+    if (!inDrawer) return content;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.zero,
+        AppSpacing.lg,
+        AppSpacing.lg,
+      ),
+      child: content,
+    );
+  }
+
+  _DetailsDevice? _selectedDevice(
+    AppLocalizations l10n,
+    DeviceDetailsTarget? target,
+  ) {
+    if (target == null) return null;
+    if (target.isThisDevice) {
+      final device = snapshot.thisDevice;
+      return _DetailsDevice.thisDevice(l10n, device);
+    }
+    for (final peer in snapshot.peers) {
+      if (peer.id == target.id) {
+        return _DetailsDevice.peer(
+          l10n,
+          peer,
+          state: controller.peerStateLabel(peer),
+          latency: controller.peerLatencyLabel(peer),
+          latencyObservedAt: controller.isLatencyFresh(peer.details?.latency)
+              ? peer.details?.latency?.observedAt
+              : null,
+        );
+      }
+    }
+    return null;
+  }
+
+  List<_DeviceDetailRow> _detailRows(
+    BuildContext context,
+    _DetailsDevice device,
+  ) {
+    final l10n = context.l10n;
+    return [
+      (
+        label: l10n.devicesDetailType,
+        value: DevicePresentation.classLabel(
+          device.details?.profile?.deviceClass,
+        ),
+      ),
+      (
+        label: l10n.devicesDetailOperatingSystem,
+        value: DevicePresentation.osLabel(device.details?.profile),
+      ),
+      if (device.details?.profile?.model case final model?)
+        (label: l10n.devicesDetailModel, value: model),
+      if (device.appVersion case final appVersion?)
+        (label: l10n.devicesDetailAppVersion, value: appVersion),
+      if (device.protocolVersion case final protocolVersion?)
+        (label: l10n.devicesDetailProtocolVersion, value: '$protocolVersion'),
+      if (!device.isThisDevice)
+        (label: l10n.devicesDetailStatus, value: device.state),
+      if (!device.isThisDevice)
+        (label: l10n.devicesDetailPing, value: device.latency),
+      if (device.latencyObservedAt case final measuredAt?)
+        (
+          label: l10n.devicesDetailMeasured,
+          value: formatSystemDateTime(context, measuredAt),
+        ),
+      if (device.lastSeen case final lastSeen?)
+        (
+          label: l10n.devicesDetailLastSeen,
+          value: formatSystemDateTime(context, lastSeen),
+        ),
+      if (device.endpoint case final endpoint?)
+        (label: l10n.devicesDetailLanEndpoint, value: endpoint),
+      (label: device.idLabel, value: device.id ?? l10n.devicesValueUnavailable),
+      (
+        label: l10n.devicesDetailProfileProvenance,
+        value: _provenanceLabel(l10n, device.details?.profile?.provenance),
+      ),
+      if (!device.isThisDevice)
+        (
+          label: l10n.devicesDetailProfileTrust,
+          value: _trustLabel(l10n, device.details?.profile?.trust),
+        ),
+      if (device.details?.profile?.observedAt case final observedAt?)
+        (
+          label: l10n.devicesDetailProfileUpdated,
+          value: formatSystemDateTime(context, observedAt),
+        ),
+    ];
+  }
+
+  Widget _actions(BuildContext context, _DetailsDevice device) {
+    final l10n = context.l10n;
+    return Wrap(
+      key: const ValueKey<String>('device-details-actions'),
+      alignment: WrapAlignment.center,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: device.isThisDevice
+          ? [
+              Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
+                key: const ValueKey<String>('rename-device'),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => onRename(device.name),
+                leading: const AppIconFrame(child: Icon(LucideIcons.pencil)),
+                child: Text(l10n.devicesRenameDevice),
+              ),
+              if ((controller.space?.member ?? false) &&
+                  snapshot.peers.isNotEmpty)
+                Button.destructive(
+                  style: AppTheme.actionButtonStyle(
+                    const ButtonStyle.destructive(),
+                  ),
+                  key: const ValueKey<String>('leave-space'),
+                  onPressed: controller.actionInFlight
+                      ? null
+                      : () => confirmLeaveSpace(context, controller),
+                  leading: const AppIconFrame(child: Icon(LucideIcons.logOut)),
+                  child: Text(l10n.devicesLeaveSpace),
+                ),
+            ]
+          : [
+              Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => controller.sync(peerId: device.id),
+                leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
+                child: Text(l10n.devicesSyncNow),
+              ),
+              Button.destructive(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.destructive(),
+                ),
+                key: const ValueKey<String>('remove-from-space'),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => onRemove(device.peer!),
+                leading: const AppIconFrame(child: Icon(LucideIcons.userMinus)),
+                child: Text(l10n.devicesRemoveFromSpace),
+              ),
+            ],
+    );
+  }
+
+  static String _trustLabel(
+    AppLocalizations l10n,
+    DeviceObservationTrust? trust,
+  ) => switch (trust) {
+    DeviceObservationTrust.local => l10n.devicesLocal,
+    DeviceObservationTrust.authenticated => l10n.devicesTrustAuthenticated,
+    DeviceObservationTrust.unverified => l10n.devicesTrustUnverified,
+    null => l10n.devicesValueUnavailable,
+  };
+
+  static String _provenanceLabel(
+    AppLocalizations l10n,
+    DeviceObservationProvenance? provenance,
+  ) => switch (provenance) {
+    DeviceObservationProvenance.selfReported =>
+      l10n.devicesProvenanceSelfReported,
+    DeviceObservationProvenance.observed => l10n.devicesProvenanceObserved,
+    DeviceObservationProvenance.measured => l10n.devicesProvenanceMeasured,
+    null => l10n.devicesValueUnavailable,
+  };
+}
+
+typedef _DeviceDetailRow = ({String label, String value});
+
+/// Whether the selected device syncs, and which content kinds.
+class _DeviceSyncSection extends StatelessWidget {
+  const _DeviceSyncSection({
+    required this.controller,
+    required this.snapshot,
+    required this.device,
+  });
+
+  final DevicesController controller;
+  final DevicesSnapshot snapshot;
+  final _DetailsDevice device;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final deviceId = device.isThisDevice ? null : device.peer?.deviceId;
+    final known = device.isThisDevice || deviceId != null;
+    final policy = deviceId == null
+        ? snapshot.sync.thisDevice
+        : snapshot.sync.forDevice(deviceId);
+    Switch toggle(
+      String name,
+      bool value,
+      DeviceSyncPolicy Function(bool value) next, {
+      bool enabled = true,
+    }) => Switch(
+      key: ValueKey<String>('device-sync-$name'),
+      value: value,
+      onChanged: controller.actionInFlight || !enabled
+          ? null
+          : (value) =>
+                unawaited(controller.setSyncPolicy(deviceId, next(value))),
+    );
+    return Column(
+      key: const ValueKey<String>('device-sync-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(l10n.devicesSyncTitle).h4(),
+        const Gap(AppSpacing.xs),
+        Text(
+          known ? l10n.devicesSyncDescription : l10n.devicesSyncAfterFirstSync,
+        ).muted().textSmall(),
+        if (known) ...[
+          const Gap(AppSpacing.md),
+          SettingsGroup(
+            children: [
+              SettingRow(
+                title: device.isThisDevice
+                    ? l10n.devicesSyncThisDevice
+                    : l10n.devicesSyncPeer,
+                trailing: toggle(
+                  'enabled',
+                  policy.enabled,
+                  (value) => policy.copyWith(enabled: value),
+                ),
+              ),
+              SettingRow(
+                title: l10n.devicesSyncPause,
+                trailing: toggle(
+                  'paused',
+                  policy.paused,
+                  (value) => policy.copyWith(paused: value),
+                  enabled: policy.enabled,
+                ),
+              ),
+              SettingRow(
+                title: l10n.devicesSyncText,
+                trailing: toggle(
+                  'text',
+                  policy.text,
+                  (value) => policy.copyWith(text: value),
+                  enabled: policy.enabled,
+                ),
+              ),
+              SettingRow(
+                title: l10n.devicesSyncImages,
+                trailing: toggle(
+                  'images',
+                  policy.images,
+                  (value) => policy.copyWith(images: value),
+                  enabled: policy.enabled,
+                ),
+              ),
+              SettingRow(
+                title: l10n.devicesSyncFiles,
+                trailing: toggle(
+                  'files',
+                  policy.files,
+                  (value) => policy.copyWith(files: value),
+                  enabled: policy.enabled,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _DeviceDetailsTable extends StatelessWidget {
+  const _DeviceDetailsTable({required this.rows});
+
+  final List<_DeviceDetailRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return InspectorTable(
+      tableKey: const ValueKey<String>('device-details-metadata'),
+      rows: [
+        for (final row in rows)
+          (label: row.label, value: SelectableText(row.value)),
+      ],
+    );
+  }
+}
+
+class _DetailsDevice {
+  const _DetailsDevice({
+    required this.name,
+    required this.relationship,
+    required this.state,
+    required this.latency,
+    required this.details,
+    required this.id,
+    required this.idLabel,
+    required this.isThisDevice,
+    this.endpoint,
+    this.peer,
+    this.lastSeen,
+    this.latencyObservedAt,
+    this.appVersion,
+    this.protocolVersion,
+  });
+
+  factory _DetailsDevice.thisDevice(AppLocalizations l10n, ThisDevice device) =>
+      _DetailsDevice(
+        name: device.name,
+        relationship: l10n.devicesThisDevice,
+        state: l10n.devicesLocal,
+        latency: l10n.devicesLocal,
+        details: device.details,
+        id: device.id,
+        idLabel: l10n.devicesDetailDeviceId,
+        isThisDevice: true,
+        endpoint: device.details?.endpoint?.lanEndpoint ?? device.listenAddress,
+        appVersion: device.details?.profile?.appVersion ?? device.appVersion,
+        protocolVersion:
+            device.details?.profile?.protocolVersion ?? device.protocolVersion,
+      );
+
+  factory _DetailsDevice.peer(
+    AppLocalizations l10n,
+    DevicePeer peer, {
+    required String state,
+    required String latency,
+    required DateTime? latencyObservedAt,
+  }) => _DetailsDevice(
+    name: peer.name,
+    relationship: l10n.devicesTrusted,
+    state: state,
+    latency: latency,
+    details: peer.details,
+    id: peer.id,
+    idLabel: l10n.devicesDetailPairingId,
+    isThisDevice: false,
+    endpoint: peer.details?.endpoint?.lanEndpoint,
+    peer: peer,
+    lastSeen: peer.details?.presence?.lastSeen ?? peer.lastSeen,
+    latencyObservedAt: latencyObservedAt,
+    appVersion: peer.details?.profile?.appVersion,
+    protocolVersion: peer.details?.profile?.protocolVersion,
+  );
+
+  final String name;
+  final String relationship;
+  final String state;
+  final String latency;
+  final DeviceDetails? details;
+  final String? id;
+  final String idLabel;
+  final bool isThisDevice;
+  final String? endpoint;
+  final DevicePeer? peer;
+  final DateTime? lastSeen;
+  final DateTime? latencyObservedAt;
+  final String? appVersion;
+  final int? protocolVersion;
+}
+
+/// The pairing ceremony for the open [DevicesController.pairingEntryMode]:
+/// invitation, code entry, QR scan, verification and outcome.
+class PairingInspector extends StatefulWidget {
+  const PairingInspector({
+    super.key,
+    required this.controller,
+    required this.inDrawer,
+    required this.onClose,
+    this.fillsHeight = true,
+  });
+
+  final DevicesController controller;
+  final bool inDrawer;
+  final Future<void> Function() onClose;
+
+  /// False inside a surface that already scrolls, where the content takes
+  /// its natural height instead of scrolling above pinned actions.
+  final bool fillsHeight;
+
+  @override
+  State<PairingInspector> createState() => _PairingInspectorState();
+}
+
+class _PairingInspectorState extends State<PairingInspector> {
+  static const int _pairingCodeLength = 8;
+
+  late final TextEditingController _addressController = TextEditingController(
+    text: widget.controller.pendingAddress,
+  );
+  final FocusNode _codeFocusNode = FocusNode();
+  String _pairingCode = '';
+  String? _validationMessage;
+  PairingCameraScanner? _scanner;
+
+  @override
+  void initState() {
+    super.initState();
+    _codeFocusNode.addListener(_enterCodeCell);
+    FocusManager.instance.addListener(_revealCodeCell);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeListener(_revealCodeCell);
+    _codeFocusNode.dispose();
+    _addressController.dispose();
+    final scanner = _scanner;
+    if (scanner != null) unawaited(scanner.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mode = widget.controller.pairingEntryMode;
+    final body = _withStepIndicator(switch (mode) {
+      PairingEntryMode.invite => _invitationContent(),
+      PairingEntryMode.nearby =>
+        widget.controller.pairing != null
+            ? _pairingProgress(widget.controller.pairing!)
+            : widget.controller.pairingInFlight
+            ? StateView.loading(message: context.l10n.pairingSendingRequest)
+            : _pairingError(),
+      PairingEntryMode.scanQr => _scannerContent(),
+      PairingEntryMode.enterCode => _codeContent(),
+      null => StateView.empty(
+        title: context.l10n.pairingEmptyTitle,
+        message: context.l10n.pairingEmptyMessage,
+      ),
+    });
+    final content = FocusTraversalGroup(
+      child: Card(
+        key: ValueKey<String>(
+          widget.inDrawer
+              ? 'devices-pairing-drawer-card'
+              : 'devices-pairing-inspector',
+        ),
+        child: Column(
+          mainAxisSize: widget.fillsHeight
+              ? MainAxisSize.max
+              : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                AppIconFrame(
+                  child: Icon(DevicePresentation.pairingEntryIcon(mode)),
+                ),
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    _modeTitle(mode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ).h3(),
+                ),
+                Button.ghost(
+                  key: const ValueKey<String>('close-pairing-inspector'),
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.ghostIcon(),
+                  ),
+                  onPressed: widget.controller.canClosePairing
+                      ? widget.onClose
+                      : null,
+                  child: const AppIconFrame(child: Icon(LucideIcons.x)),
+                ),
+              ],
+            ),
+            const Gap(AppSpacing.lg),
+            if (widget.fillsHeight)
+              Expanded(
+                // Grouped by its viewport, so controls scrolled below the
+                // pinned actions still come before them in Tab order.
+                child: FocusTraversalGroup(
+                  child: AppOverlays.focusRingClip(
+                    child: SingleChildScrollView(
+                      key: const ValueKey<String>('pairing-scroll-content'),
+                      clipBehavior: Clip.none,
+                      child: body,
+                    ),
+                  ),
+                ),
+              )
+            else
+              body,
+            if (_pairingActions() case final actions?) ...[
+              const Gap(AppSpacing.xl),
+              actions,
+            ],
+          ],
+        ),
+      ),
+    );
+    if (!widget.inDrawer) return content;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.zero,
+        AppSpacing.lg,
+        AppSpacing.lg,
+      ),
+      child: content,
+    );
+  }
+
+  /// The indicator scrolls with the content so the pinned actions always fit.
+  Widget _withStepIndicator(Widget content) {
+    final progress = widget.controller.pairingProgress;
+    if (progress == null) return content;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DevicePresentation.pairingStepProgress(
+          progress,
+          key: const ValueKey<String>('pairing-step-indicator'),
+        ),
+        const Gap(AppSpacing.lg),
+        content,
+      ],
+    );
+  }
+
+  Widget _invitationContent() {
+    if (widget.controller.pairingInFlight) {
+      return StateView.loading(message: context.l10n.pairingCreatingInvitation);
+    }
+    final ceremony = widget.controller.pairing;
+    if (ceremony == null) return _pairingError();
+    return _pairingProgress(ceremony);
+  }
+
+  Widget _codeContent() {
+    final ceremony = widget.controller.pairing;
+    if (ceremony != null) return _pairingProgress(ceremony);
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(l10n.pairingCode).semiBold(),
+        const Gap(AppSpacing.xs),
+        Text(l10n.pairingCodeHint).muted(),
+        const Gap(AppSpacing.md),
+        Semantics(
+          label: l10n.pairingCode,
+          textField: true,
+          child: AppOverlays.focusRingClip(
+            child: SingleChildScrollView(
+              key: const ValueKey<String>('pairing-code-scroll'),
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              child: Focus(
+                focusNode: _codeFocusNode,
+                onKeyEvent: _leaveCodeInput,
+                child: FocusTraversalGroup(
+                  descendantsAreTraversable: false,
+                  child: InputOTP(
+                    key: const ValueKey<String>('pairing-code-input'),
+                    onChanged: (value) {
+                      setState(() {
+                        _pairingCode = value.otpToString();
+                        _validationMessage = null;
+                      });
+                    },
+                    children: _pairingCodeChildren(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const Gap(AppSpacing.xl),
+        Text(l10n.pairingDeviceAddress).semiBold(),
+        const Gap(AppSpacing.xs),
+        Text(l10n.pairingDeviceAddressHint).muted(),
+        const Gap(AppSpacing.sm),
+        TextField(
+          key: const ValueKey<String>('pairing-address-input'),
+          controller: _addressController,
+          placeholder: const Text('192.168.1.25:47654'),
+          autocorrect: false,
+          enableSuggestions: false,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submitCode(),
+        ),
+        if (_validationMessage != null) ...[
+          const Gap(AppSpacing.md),
+          Alert.destructive(
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
+            title: Text(l10n.pairingCheckDetailsTitle),
+            content: Text(_validationMessage!),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _scannerContent() {
+    final ceremony = widget.controller.pairing;
+    if (ceremony != null) return _pairingProgress(ceremony);
+    if (widget.controller.usesSystemScanner) {
+      if (widget.controller.errorMessage != null) return _pairingError();
+      return StateView.loading(message: context.l10n.pairingConnectingDevice);
+    }
+    final scanner = _scanner;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (scanner?.preview case final preview?)
+          ClipRect(
+            child: SizedBox(
+              key: const ValueKey<String>('pairing-camera-preview'),
+              height: 260,
+              child: preview,
+            ),
+          )
+        else
+          Card(
+            child: SizedBox(
+              height: 220,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AppIconFrame(
+                      size: AppIconSize.state,
+                      child: Icon(
+                        LucideIcons.scanLine,
+                        size: AppIconSize.state,
+                      ),
+                    ),
+                    const Gap(AppSpacing.md),
+                    Text(context.l10n.pairingQrScannerTitle).h4(),
+                    const Gap(AppSpacing.xs),
+                    Text(context.l10n.pairingCameraPreviewPlaceholder).muted(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (_validationMessage != null) ...[
+          const Gap(AppSpacing.md),
+          Alert.destructive(
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
+            title: Text(context.l10n.pairingScannerNeedsAttention),
+            content: Text(_validationMessage!),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The library gives every code cell its own focus scope plus an unpainted
+  /// focus node, so Tab would stall on hidden stops and then cycle inside one
+  /// cell. The code input is therefore a single Tab stop that hands focus to
+  /// the cell to type in; arrows and typing still move between cells.
+  void _enterCodeCell() {
+    if (!_codeFocusNode.hasPrimaryFocus) return;
+    final cells = [
+      for (final node in _codeFocusNode.descendants)
+        if (node is! FocusScopeNode &&
+            node.children.isEmpty &&
+            node.canRequestFocus)
+          node,
+    ]..sort((a, b) => a.rect.left.compareTo(b.rect.left));
+    if (cells.isEmpty) return;
+    final ordered = Directionality.of(context) == TextDirection.rtl
+        ? cells.reversed.toList()
+        : cells;
+    final index = _pairingCode.length.clamp(0, ordered.length - 1);
+    ordered[index].requestFocus();
+  }
+
+  /// A cell only scrolls its caret into view; a narrow code row shows the
+  /// whole focused cell with room for its focus ring instead.
+  void _revealCodeCell() {
+    if (!_codeFocusNode.hasFocus || _codeFocusNode.hasPrimaryFocus) return;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !focused.mounted) return;
+      RenderObject? cell;
+      focused.visitAncestorElements((element) {
+        if (element.widget is! FocusOutline) return true;
+        cell = element.renderObject;
+        return false;
+      });
+      if (cell case final RenderBox box when box.attached) {
+        box.showOnScreen(
+          rect: (Offset.zero & box.size).inflate(AppTheme.focusRingInset),
+        );
+      }
+    });
+  }
+
+  KeyEventResult _leaveCodeInput(FocusNode node, KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    if (event.logicalKey != LogicalKeyboardKey.tab ||
+        node.hasPrimaryFocus ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyUpEvent) {
+      // Left traversable, this node would hand focus straight back to a cell.
+      node.skipTraversal = true;
+      keyboard.isShiftPressed ? node.previousFocus() : node.nextFocus();
+      node.skipTraversal = false;
+    }
+    return KeyEventResult.handled;
+  }
+
+  Future<void> _startScanner() async {
+    setState(() => _validationMessage = null);
+    final scanner = _scanner ??= PairingCameraScanner(
+      source: const CameraPluginPairingSource(),
+      coordinatorFactory: (onProgress) => QrScanCoordinator(
+        decoder: const ZxingQrFrameDecoder(),
+        payloadSink: _DevicesQrPayloadSink(controller: widget.controller),
+        onProgress: onProgress,
+      ),
+    );
+    await scanner.start();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _submitCode() async {
+    final address = _addressController.text.trim();
+    // The address may stay empty: a configured relay redeems the code.
+    if (_pairingCode.length != _pairingCodeLength) {
+      setState(() => _validationMessage = context.l10n.pairingCodeIncomplete);
+      return;
+    }
+    setState(() => _validationMessage = null);
+    await widget.controller.joinFromProtectedInput(
+      code: _pairingCode,
+      address: address,
+    );
+  }
+
+  List<InputOTPChild> _pairingCodeChildren() {
+    final children = <InputOTPChild>[];
+    for (var index = 0; index < _pairingCodeLength; index++) {
+      if (index > 0 && index % 4 == 0) children.add(InputOTPChild.separator);
+      children.add(
+        InputOTPChild.character(
+          allowDigit: true,
+          allowLowercaseAlphabet: true,
+          allowUppercaseAlphabet: true,
+          onlyUppercaseAlphabet: true,
+          obscured: true,
+        ),
+      );
+    }
+    return children;
+  }
+
+  Widget _pairingProgress(PairingCeremony ceremony) {
+    final l10n = context.l10n;
+    final progress = widget.controller.pairingProgress;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (ceremony.state != PairingState.waitingForPeer) ...[
+          Row(
+            children: [
+              AppIconFrame(
+                child: Icon(
+                  DevicePresentation.pairingStateIcon(ceremony.state),
+                ),
+              ),
+              const Gap(AppSpacing.md),
+              Expanded(
+                child: Text(
+                  progress != null && progress.failed
+                      ? DevicePresentation.pairingOutcomeTitle(progress)
+                      : widget.controller.locallyConfirmed &&
+                            ceremony.state == PairingState.awaitingConfirmation
+                      ? l10n.pairingWaitingForOtherDevice
+                      : DevicePresentation.pairingStateTitle(ceremony.state),
+                ).h4(),
+              ),
+            ],
+          ),
+          const Gap(AppSpacing.sm),
+          Text(
+            ceremony.failureMessage ??
+                ceremony.peerName ??
+                DevicePresentation.pairingStateDescription(ceremony.state),
+          ).muted(),
+        ],
+        if (widget.controller.invitation case final invitation?) ...[
+          if (ceremony.state != PairingState.waitingForPeer)
+            const Gap(AppSpacing.lg),
+          Text(l10n.pairingInviteInstructions).muted(),
+          const Gap(AppSpacing.lg),
+          const Divider(key: ValueKey('pairing-invite-divider')),
+          const Gap(AppSpacing.lg),
+          AppBar(
+            title: Text(l10n.pairingDetailsTitle),
+            leading: const [AppIconFrame(child: Icon(LucideIcons.info))],
+          ),
+          const Gap(AppSpacing.md),
+          Column(
+            key: const ValueKey<String>('pairing-invite-details'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.pairingCode).small().muted(),
+              const Gap(AppSpacing.xs),
+              SelectableText(
+                invitation.code,
+                key: const ValueKey<String>('pairing-invite-code'),
+                style: AppTheme.pairingCodeTextStyle(context),
+              ),
+              const Gap(AppSpacing.md),
+              Text(l10n.pairingAddress).small().muted(),
+              const Gap(AppSpacing.xs),
+              SelectableText(
+                invitation.address ?? l10n.devicesValueUnavailable,
+                key: const ValueKey<String>('pairing-invite-address'),
+                style: AppTheme.pairingAddressTextStyle(context),
+              ),
+            ],
+          ),
+          const Gap(AppSpacing.lg),
+          Center(
+            child: ColoredBox(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Image.memory(
+                  invitation.qrPng,
+                  key: const ValueKey<String>('pairing-invite-qr'),
+                  width: 260,
+                  height: 260,
+                  filterQuality: FilterQuality.none,
+                ),
+              ),
+            ),
+          ),
+        ],
+        if (widget.controller.verificationCode
+            case final verificationCode?) ...[
+          const Gap(AppSpacing.lg),
+          Card(
+            key: const ValueKey<String>('pairing-verification-code'),
+            child: Column(
+              children: [
+                Text(l10n.pairingVerificationCode).semiBold(),
+                const Gap(AppSpacing.sm),
+                Text(l10n.pairingVerificationCodeHint).muted(),
+                const Gap(AppSpacing.sm),
+                Text(
+                  verificationCode,
+                  textAlign: TextAlign.center,
+                  style: AppTheme.pairingCodeTextStyle(context),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (widget.controller.pairingProgress case PairingProgress(
+          :final localDecision?,
+          :final peerDecision?,
+        )) ...[
+          const Gap(AppSpacing.lg),
+          PairingDecisions(
+            key: const ValueKey<String>('pairing-decisions'),
+            local: localDecision,
+            peer: peerDecision,
+            peerName: ceremony.peerName,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget? _pairingActions() {
+    final l10n = context.l10n;
+    final ceremony = widget.controller.pairing;
+    if (ceremony != null) {
+      final terminal = ceremony.state.isTerminal;
+      final awaitingConfirmation =
+          ceremony.state == PairingState.awaitingConfirmation;
+      if (!terminal && !awaitingConfirmation) return null;
+      return Wrap(
+        key: const ValueKey<String>('pairing-actions'),
+        alignment: WrapAlignment.center,
+        spacing: AppSpacing.sm,
+        runSpacing: AppSpacing.sm,
+        children: [
+          if (awaitingConfirmation)
+            Button.destructive(
+              style: AppTheme.actionButtonStyle(
+                const ButtonStyle.destructive(),
+              ),
+              onPressed:
+                  widget.controller.decisionInFlight ||
+                      !widget.controller.canConfirmPairing
+                  ? null
+                  : () => widget.controller.confirmPairing(accept: false),
+              child: Text(l10n.pairingReject),
+            ),
+          if (awaitingConfirmation)
+            Button.primary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+              onPressed:
+                  widget.controller.decisionInFlight ||
+                      !widget.controller.canConfirmPairing
+                  ? null
+                  : () => widget.controller.confirmPairing(accept: true),
+              child: Text(l10n.pairingConfirm),
+            ),
+          if (terminal)
+            Button.primary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+              onPressed: widget.onClose,
+              child: Text(l10n.commonDone),
+            ),
+        ],
+      );
+    }
+    switch (widget.controller.pairingEntryMode) {
+      case PairingEntryMode.enterCode:
+        return Align(
+          alignment: Alignment.center,
+          child: Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+            key: const ValueKey<String>('submit-pairing-code'),
+            onPressed: widget.controller.pairingInFlight ? null : _submitCode,
+            leading: widget.controller.pairingInFlight
+                ? const SizedBox.square(
+                    dimension: AppIconSize.sm,
+                    child: AppIconFrame(
+                      size: AppIconSize.sm,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : const AppIconFrame(child: Icon(LucideIcons.link)),
+            child: Text(l10n.pairingJoinDevice),
+          ),
+        );
+      case PairingEntryMode.scanQr:
+        if (widget.controller.usesSystemScanner) return null;
+        return Align(
+          alignment: Alignment.center,
+          child: Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+            key: const ValueKey<String>('start-pairing-scanner'),
+            onPressed: _startScanner,
+            leading: const AppIconFrame(child: Icon(LucideIcons.camera)),
+            child: Text(l10n.pairingStartScanner),
+          ),
+        );
+      case PairingEntryMode.invite:
+      case PairingEntryMode.nearby:
+      case null:
+        return null;
+    }
+  }
+
+  Widget _pairingError() => StateView.error(
+    title: context.l10n.pairingActionFailed,
+    message:
+        widget.controller.errorMessage ?? context.l10n.pairingActionNotStarted,
+  );
+
+  String _modeTitle(PairingEntryMode? mode) {
+    final l10n = context.l10n;
+    return switch (mode) {
+      PairingEntryMode.invite => l10n.pairingPairDevice,
+      PairingEntryMode.scanQr => l10n.pairingScanQrCode,
+      PairingEntryMode.enterCode => l10n.pairingEnterPairingCode,
+      PairingEntryMode.nearby => l10n.pairingConnectNearbyDevice,
+      null => l10n.pairingTitle,
+    };
+  }
+}
+
+class _DevicesQrPayloadSink implements PairingQrPayloadSink {
+  const _DevicesQrPayloadSink({required this.controller});
+
+  final DevicesController controller;
+
+  @override
+  Future<QrPayloadDisposition> submit(String payload) async {
+    if (payload.isEmpty) {
+      return QrPayloadDisposition.rejected;
+    }
+    await controller.joinPairingUri(payload);
+    return controller.pairing == null
+        ? QrPayloadDisposition.rejected
+        : QrPayloadDisposition.accepted;
+  }
+}
+
+/// Matches the sync provider's minimum, checked before anything is sent.
+const _minPassphraseLength = 12;
+
+Future<void> confirmLeaveSpace(
+  BuildContext context,
+  DevicesController controller,
+) async {
+  final l10n = context.l10n;
+  await AppOverlays.showActionDialog(
+    context,
+    icon: LucideIcons.logOut,
+    title: Text(l10n.devicesLeaveDialogTitle),
+    content: Text(l10n.devicesLeaveDialogMessage),
+    actionLabel: l10n.devicesLeave,
+    changes: controller,
+    canConfirm: () => !controller.actionInFlight,
+    onConfirm: controller.leaveSpace,
+    failureMessage: () =>
+        controller.errorMessage ?? l10n.devicesActionFailedMessage,
+  );
+}
+
+class _SpaceRemovalContent extends StatelessWidget {
+  const _SpaceRemovalContent({
+    required this.cloud,
+    required this.passphrase,
+    required this.signOutOthers,
+    required this.passphraseValid,
+  });
+
+  final bool cloud;
+  final TextEditingController passphrase;
+  final ValueNotifier<bool> signOutOthers;
+  final bool Function() passphraseValid;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(l10n.devicesRemoveDialogMessage),
+        if (cloud) ...[
+          const Gap(AppSpacing.lg),
+          TextField(
+            controller: passphrase,
+            obscureText: true,
+            placeholder: Text(l10n.devicesRemoveNewPassphrase),
+            decoration: AppOverlays.dialogFieldDecoration(context),
+          ),
+          const Gap(AppSpacing.xs),
+          ListenableBuilder(
+            listenable: passphrase,
+            builder: (context, _) => Text(
+              passphraseValid()
+                  ? l10n.devicesRemoveNewPassphraseHint
+                  : l10n.devicesPassphraseTooShort,
+              style: Theme.of(context).typography.xSmall,
+            ).muted(),
+          ),
+          const Gap(AppSpacing.md),
+          ValueListenableBuilder<bool>(
+            valueListenable: signOutOthers,
+            builder: (context, value, _) => Checkbox(
+              state: value ? CheckboxState.checked : CheckboxState.unchecked,
+              onChanged: (state) =>
+                  signOutOthers.value = state == CheckboxState.checked,
+              trailing: Text(l10n.devicesRemoveSignOutOthers),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}

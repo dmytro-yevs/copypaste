@@ -1,0 +1,141 @@
+[package]
+name = "copypaste-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-modules = { path = "../copypaste-modules" }
+copypaste-runtime = { path = "../copypaste-runtime" }
+copypaste-clock = { path = "../copypaste-clock" }
+copypaste-feedback = { path = "../copypaste-feedback" }
+copypaste-retry = { path = "../copypaste-retry" }
+copypaste-core = { path = "../copypaste-core" }
+copypaste-payload = { path = "../copypaste-payload" }
+copypaste-fs = { path = "../copypaste-fs" }
+copypaste-source-app = { path = "../copypaste-source-app" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+copypaste-p2p = { path = "../copypaste-p2p" }
+copypaste-sync = { path = "../copypaste-sync" }
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+backon.workspace = true
+serde.workspace = true
+# `raw_value` so a received sync message can be handed to
+# `SyncMessage::decode` verbatim: the bounds and the timestamp clamp live in
+# that function, and re-deriving them here would be a second implementation of
+# the wire contract (the dependency policy).
+serde_json = { workspace = true, features = ["raw_value"] }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+copypaste-runtime-log = { path = "../copypaste-runtime-log" }
+clap.workspace = true
+uuid.workspace = true
+directories.workspace = true
+rusqlite.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+# Local interface addresses for the `listen_addr` a freshly minted pairing
+# reports. `getifaddrs` behind a maintained crate rather than a hand-rolled
+# `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;
+# works on every shipped platform (the platform contract).
+if-addrs = "0.15"
+base64.workspace = true
+url.workspace = true
+tempfile.workspace = true
+# Windows path parsing on every host: an exclusion entry and a process image
+# path are Windows paths whatever the machine is, and `std::path` would call an
+# entire `C:\…` string one file name off Windows — so the tests would pass while
+# the shipped behaviour did the opposite. One package, no transitive
+# dependencies. See ADR-0024.
+typed-path = "0.12"
+
+# flock(2) around the socket-bind critical section (CopyPaste-ah1m), and the
+# `*at` syscalls the file-drop staging directory is built from. A maintained
+# syscall wrapper rather than a raw libc call, and it is already in the tree.
+# Target-gated because `rustix::fs` is a POSIX surface with no Windows half.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["event", "fs", "time"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows clipboard. Cross-platform clipboard crates do not expose a sequence
+# number, arbitrary registered formats, or size-before-read. Polling one means
+# reading the clipboard's content every tick, which I-1 forbids and the
+# do-not-record formats exist to prevent. This is the Windows layer one level down.
+clipboard-win = { version = "5.4", features = ["std"] }
+# Which process wrote the clipboard: `GetClipboardOwner` gives a window, and
+# these four calls turn it into a process image name. The crates that package
+# this (`active-win-pos-rs` and friends) also return the window title, which is
+# user content we deliberately never read. See ADR-0018. WinTrust and
+# Cryptography verify the IPC client's Authenticode signer (peer identity).
+# Power subscribes to system resume for the deadline scheduler.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
+    "Win32_System_DataExchange",
+    "Win32_System_Power",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Windows puts screenshots on the clipboard as an uncompressed bitmap and the
+# rest of CopyPaste stores PNG. The remaining codecs match macOS paste-back
+# support for imported/synced JPEG, GIF and WebP. Target-gated so other platforms
+# do not acquire Windows interoperability dependencies.
+image = { workspace = true, features = ["bmp", "jpeg", "gif", "webp"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+block2 = "0.5.1"
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification", "NSOperation", "NSDictionary", "NSURL", "NSValue", "NSBundle", "block2"] }
+objc2-app-kit = { workspace = true, features = ["NSResponder"] }
+security-framework.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# XFixes is the X11 selection-change signal. It lets the clipboard worker wait
+# for a real owner transition instead of polling or reading clipboard data.
+# XRes binds GTK's hidden selection owner to a metadata-bearing window from the
+# same X client without consulting the foreground application.
+x11rb = { version = "0.13.2", features = ["res", "xfixes"] }
+zbus = { version = "5.19", default-features = false, features = ["blocking-api", "tokio"] }
+# A persistent data-control client is the only supported Wayland clipboard
+# transport.  `ext-data-control` is preferred; `wlr-data-control` is kept for
+# compositors that have not adopted the extension yet.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
+[dev-dependencies]
+image.workspace = true
+copypaste-runtime = { path = "../copypaste-runtime", features = ["test-support"] }
+copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
+# The module end-to-end test installs a package signed with a test key.
+copypaste-modules = { path = "../copypaste-modules", features = ["test-support"] }
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
+tokio = { workspace = true, features = ["test-util"] }
+# The paste-file staging diagnostics are the one place a filename, a content id
+# or decrypted bytes could reach a log, so the tests assert on what is emitted
+# rather than on a reading of the source. Capturing that needs a subscriber.
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+wl-clipboard-rs = "0.9"
+
+[features]
+# Demos and profiling only. Release and product builds pass no features.
+dev-ephemeral-key = ["copypaste-core/dev-ephemeral-key"]
+# Compile the watched-file clipboard source for isolated demos. It selects no
+# platform backend and is never enabled by product builds.
+dev-fake-clipboard = []
+
+# Named-pipe listener instance creation; the pipe's access list is
+# `copypaste-fs`'s.
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true

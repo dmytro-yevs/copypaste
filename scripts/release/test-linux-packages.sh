@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Build and inspect the Linux packages from a minimal native ELF bundle.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+IMAGE="${COPYPASTE_LINUX_VALIDATION_IMAGE:-ubuntu:24.04}"
+VERSION="${COPYPASTE_LINUX_PACKAGE_TEST_VERSION:-1.2.3}"
+OUTPUT="${COPYPASTE_LINUX_PACKAGE_TEST_OUTPUT:-}"
+output_mount=()
+if [[ -n "$OUTPUT" ]]; then
+  mkdir -p "$OUTPUT"
+  output_mount=(--volume "$(cd "$OUTPUT" && pwd):/output")
+fi
+
+run_architecture() {
+  local architecture="$1"
+  local platform appimage_url appimage_sha
+  case "$architecture" in
+    x86_64)
+      platform=linux/amd64
+      appimage_url=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      appimage_sha=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      ;;
+    aarch64)
+      platform=linux/arm64
+      appimage_url=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-aarch64.AppImage
+      appimage_sha=f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+      ;;
+    *) echo "ERROR: unsupported test architecture: $architecture" >&2; exit 1 ;;
+  esac
+
+  docker run --rm --platform "$platform" -e DEBIAN_FRONTEND=noninteractive \
+    -e VERSION="$VERSION" -e ARCHITECTURE="$architecture" \
+    -e APPIMAGETOOL_URL="$appimage_url" -e APPIMAGETOOL_SHA256="$appimage_sha" \
+    -v "$ROOT:/source:ro" "${output_mount[@]}" "$IMAGE" bash -ceu '
+      apt-get update
+      apt-get install --yes --no-install-recommends \
+        binutils build-essential ca-certificates cmake cpio curl dpkg-dev file rpm xz-utils \
+        gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        libgstreamer1.0-dev libkeybinder-3.0-0 patchelf pkg-config
+      mkdir -p /work/apps/copypaste_flutter/assets/brand /work/apps/copypaste_flutter/linux
+      cp -a /source/packaging /source/scripts /work/
+      cp /source/apps/copypaste_flutter/assets/brand/copypaste.png /work/apps/copypaste_flutter/assets/brand/
+      cp /source/apps/copypaste_flutter/linux/runtime_paths.cmake /work/apps/copypaste_flutter/linux/
+      cd /work
+      mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
+      bundle="$PWD/dist/linux-$ARCHITECTURE/bundle"
+      cmake -S scripts/release/fixtures/linux-runtime -B /tmp/copypaste-runtime-build \
+        -DCOPYPASTE_RUNTIME_PATHS="$PWD/apps/copypaste_flutter/linux/runtime_paths.cmake" \
+        -DFIXTURE_VERSION="$VERSION" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$bundle"
+      cmake --build /tmp/copypaste-runtime-build --target install --parallel 2
+      rm -rf /tmp/copypaste-runtime-build
+      ldd "$bundle/lib/libdesktop_drop_plugin.so" | grep -F "$bundle/lib/libflutter_linux_gtk.so"
+      [[ "$("$bundle/copypaste" --version)" == "$VERSION" ]]
+      install -m 755 "$bundle/copypaste" "$bundle/copypaste-daemon"
+      install -m 755 "$bundle/copypaste" "$bundle/copypaste-cli"
+      printf "#include <gst/gst.h>\nvoid camera_fixture(void) { gst_init(0, 0); }\n" > /tmp/copypaste-camera-fixture.c
+      mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
+      cc -shared -fPIC -o dist/linux-"$ARCHITECTURE"/bundle/lib/libcamera_desktop_plugin.so /tmp/copypaste-camera-fixture.c $(pkg-config --cflags --libs gstreamer-1.0)
+      mkdir -p packaging/linux/desktop-integrations/gnome-shell-extension
+      mkdir -p packaging/linux/desktop-integrations/gnome-shell-extension/native
+      mkdir -p packaging/linux/desktop-integrations/kde-kwin-script/contents/code
+      printf "{\"uuid\":\"copypaste-quick-paste@copypaste.app\"}\n" > packaging/linux/desktop-integrations/gnome-shell-extension/metadata.json
+      printf "int shim(void) { return 0; }\n" > packaging/linux/desktop-integrations/gnome-shell-extension/native/shim.c
+      printf "all:\n\tmkdir -p build\n\t\$(CC) -shared -fPIC -o build/libcopypaste_clipboard_source.so shim.c\n\tprintf fixture > build/CopyPasteClipboard-1.0.typelib\n" > packaging/linux/desktop-integrations/gnome-shell-extension/native/Makefile
+      printf "[Desktop Entry]\nX-KDE-PluginInfo-Name=copypaste-quick-paste\n" > packaging/linux/desktop-integrations/kde-kwin-script/metadata.desktop
+      printf "// fake test companion\n" > packaging/linux/desktop-integrations/kde-kwin-script/contents/code/main.js
+      printf "{}\n" > packaging/linux/desktop-integrations/manifest.json
+      curl --fail --location --output /tmp/appimagetool "$APPIMAGETOOL_URL"
+      printf "%s  %s\n" "$APPIMAGETOOL_SHA256" /tmp/appimagetool | sha256sum --check --status
+      chmod 755 /tmp/appimagetool
+      scope=()
+      if [[ "$ARCHITECTURE" == x86_64 ]]; then
+        scope=(--release-scope)
+      fi
+      APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGETOOL=/tmp/appimagetool scripts/release/build-linux-packages.sh "$VERSION" "$ARCHITECTURE" "${scope[@]}"
+      for extension in AppImage deb rpm; do test -s "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.$extension"; done
+      dpkg-deb --field "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" Version | grep -Fx "$VERSION"
+      dpkg-deb --field "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" Architecture | grep -Fx "$(test "$ARCHITECTURE" = x86_64 && echo amd64 || echo arm64)"
+      dpkg-deb -x "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" /tmp/deb
+      rpm -qpi "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.rpm" | grep -E "^Version[[:space:]]*:[[:space:]]*$VERSION$"
+      mkdir /tmp/rpm
+      (cd /tmp/rpm && rpm2cpio "/work/dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.rpm" | cpio -idm --quiet)
+      mkdir /tmp/appimage
+      (cd /tmp/appimage && APPIMAGE_EXTRACT_AND_RUN=1 "/work/dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.AppImage" --appimage-extract >/dev/null)
+      for root in /tmp/deb /tmp/rpm /tmp/appimage/squashfs-root; do
+        test -x "$root/usr/lib/copypaste/copypaste"
+        test -x "$root/usr/lib/copypaste/copypaste-daemon"
+        test -x "$root/usr/lib/copypaste/copypaste-cli"
+        test -L "$root/usr/bin/copypaste"
+        test -L "$root/usr/bin/copypaste-cli"
+        test -f "$root/usr/share/copypaste/autostart/com.copypaste.CopyPaste.desktop"
+        test ! -e "$root/etc/xdg/autostart/com.copypaste.CopyPaste.desktop"
+        test -f "$root/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/metadata.json"
+        test -f "$root/usr/share/kwin/scripts/copypaste-quick-paste/metadata.desktop"
+        test -x "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/apply-to-kwin-source.sh"
+        test -f "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/patches/kwin-6.0.patch"
+        test -f "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/patches/kwin-6.3.patch"
+      done
+      grep -F "\"kind\": \"deb\"" /tmp/deb/usr/lib/copypaste/package-metadata.json
+      grep -F "\"kind\": \"rpm\"" /tmp/rpm/usr/lib/copypaste/package-metadata.json
+      grep -F "\"kind\": \"appimage\"" /tmp/appimage/squashfs-root/usr/lib/copypaste/package-metadata.json
+      test -s /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/lib/libcopypaste_clipboard_source.so
+      test -s /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/typelib/CopyPasteClipboard-1.0.typelib
+      file --brief /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/lib/libcopypaste_clipboard_source.so | grep -q "^ELF "
+      test -x /tmp/appimage/squashfs-root/usr/libexec/gstreamer-1.0/gst-plugin-scanner
+      test -f /tmp/appimage/squashfs-root/usr/share/copypaste/gstreamer-camera-runtime.json
+      for element in videoconvert videoscale videorate appsink v4l2src jpegdec; do
+        grep -F "\"element\": \"$element\"" /tmp/appimage/squashfs-root/usr/share/copypaste/gstreamer-camera-runtime.json
+      done
+      grep -F "GST_PLUGIN_SYSTEM_PATH" /tmp/appimage/squashfs-root/AppRun
+      grep -F "LD_LIBRARY_PATH=\"\$HERE/usr/lib/gstreamer-runtime:\$HERE/usr/lib/copypaste/lib\"" /tmp/appimage/squashfs-root/AppRun
+      app_root=/tmp/appimage/squashfs-root
+      python3 - "$app_root" "$ARCHITECTURE" <<"PY"
+import hashlib
+import json
+import stat
+import sys
+from pathlib import Path
+
+appdir = Path(sys.argv[1]).resolve(strict=True)
+architecture = sys.argv[2]
+manifest_path = appdir / "usr/share/copypaste/keybinder-runtime.json"
+try:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raise SystemExit(f"ERROR: Keybinder AppImage manifest is unavailable: {error}") from error
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(f"ERROR: {message}")
+
+def bundled_file(relative, label):
+    require(isinstance(relative, str), f"Keybinder {label} path is invalid")
+    candidate = appdir / relative
+    try:
+        mode = candidate.lstat().st_mode
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(appdir)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"ERROR: Keybinder {label} escapes the AppImage") from error
+    require(stat.S_ISREG(mode), f"Keybinder {label} is not a regular file")
+    return candidate
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
+
+require(isinstance(manifest, dict) and manifest.get("schema") == 1, "Keybinder manifest schema is invalid")
+require(manifest.get("architecture") == architecture, "Keybinder manifest architecture does not match the package")
+library = manifest.get("library")
+license_record = manifest.get("license")
+require(isinstance(library, dict), "Keybinder manifest library record is invalid")
+require(isinstance(license_record, dict), "Keybinder manifest license record is invalid")
+require(library.get("soname") == "libkeybinder-3.0.so.0", "Keybinder manifest SONAME is invalid")
+require(library.get("source_package") == "libkeybinder-3.0-0", "Keybinder manifest source package is invalid")
+library_path = bundled_file(library.get("path"), "library")
+require(library.get("sha256") == digest(library_path), "Keybinder manifest does not bind bundled library bytes")
+soname = appdir / "usr/lib/copypaste/lib/libkeybinder-3.0.so.0"
+require(soname.is_symlink(), "Keybinder SONAME entry is missing")
+require(soname.resolve(strict=True) == library_path.resolve(strict=True), "Keybinder SONAME does not resolve to the manifest library")
+license_path = bundled_file(license_record.get("path"), "license")
+require(license_path == appdir / "usr/share/licenses/copypaste-keybinder/libkeybinder-3.0-0.copyright", "Keybinder license path is invalid")
+require(license_record.get("sha256") == digest(license_path), "Keybinder manifest does not bind bundled license bytes")
+common_licenses = license_record.get("common_licenses")
+require(isinstance(common_licenses, list), "Keybinder common license records are invalid")
+for common in common_licenses:
+    require(isinstance(common, dict), "Keybinder common license record is invalid")
+    common_path = common.get("path")
+    require(isinstance(common_path, str) and common_path not in (".", "..") and Path(common_path).name == common_path, "Keybinder common license path is invalid")
+    bundled_common = bundled_file(f"usr/share/licenses/copypaste-keybinder/common/{common_path}", "common license")
+    require(common.get("sha256") == digest(bundled_common), "Keybinder manifest does not bind bundled common license bytes")
+PY
+      camera_plugin="$app_root/usr/lib/copypaste/lib/libcamera_desktop_plugin.so"
+      env -i PATH="$PATH" LD_LIBRARY_PATH="$app_root/usr/lib/gstreamer-runtime:$app_root/usr/lib/copypaste/lib" \
+        LD_PRELOAD= LD_AUDIT= ldd "$camera_plugin" | grep -F "$app_root/usr/lib/gstreamer-runtime/libgstreamer-1.0.so"
+      for element in videoconvert videoscale videorate appsink v4l2src jpegdec; do
+        env -i HOME=/tmp PATH="$PATH" XDG_CACHE_HOME=/tmp \
+          LD_LIBRARY_PATH="$app_root/usr/lib/gstreamer-runtime:$app_root/usr/lib/copypaste/lib" \
+          GST_REGISTRY_1_0=/tmp/copypaste-gst-registry.bin \
+          GST_PLUGIN_PATH="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_PATH_1_0="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SYSTEM_PATH="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SYSTEM_PATH_1_0="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SCANNER="$app_root/usr/libexec/gstreamer-1.0/gst-plugin-scanner" \
+          gst-inspect-1.0 "$element" | grep -F "Filename                 $app_root/usr/lib/gstreamer-1.0/"
+      done
+      dpkg-deb --ctrl-tarfile "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" | tar -tv | grep -E " root/root .*control$"
+      if [[ -d /output ]]; then
+        cp "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.rpm" /output/
+      fi
+    '
+}
+
+for architecture in ${COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES:-x86_64 aarch64}; do
+  run_architecture "$architecture"
+done

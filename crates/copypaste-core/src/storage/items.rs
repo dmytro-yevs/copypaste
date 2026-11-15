@@ -1,0 +1,1003 @@
+//! Item CRUD: everything that writes or reads a `clipboard_items` row without
+//! going through FTS or a retention sweep. A delete is a *tombstone*, not a
+//! row removal.
+
+use std::ops::ControlFlow;
+
+use rusqlite::{params, OptionalExtension};
+
+use super::connection::write_tx;
+use super::content_bytes::content_bytes_sql;
+use super::model::{
+    is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
+    StoredItem,
+};
+use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_representation};
+use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
+use super::store::Store;
+
+/// Runs on a row a capture just stored or promoted, inside its transaction.
+pub(crate) type AfterWrite<'a> = &'a dyn Fn(&rusqlite::Connection, &str) -> Result<(), StoreError>;
+
+fn run_after<E: From<StoreError>>(
+    after: Option<AfterWrite<'_>>,
+    tx: &rusqlite::Connection,
+    id: &str,
+) -> Result<(), E> {
+    after.map_or(Ok(()), |after| after(tx, id)).map_err(E::from)
+}
+
+/// The tombstone write of [`Store::delete`] in a caller's transaction,
+/// stamped no earlier than `now_ms`.
+pub(super) fn tombstone_in_tx(
+    tx: &rusqlite::Connection,
+    id: &str,
+    now_ms: i64,
+) -> Result<bool, StoreError> {
+    // Unconditional, and before the update that clears `fts_rowid`.
+    delete_fts_row_in_tx(tx, id)?;
+    let changed = tx.execute(
+        "UPDATE clipboard_items \
+            SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
+                content_hash = content_hash, \
+                created_at = CASE \
+                    WHEN created_at = 9223372036854775807 THEN created_at \
+                    ELSE MAX(created_at + 1, ?2) \
+                END, \
+                pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
+                fts_rowid = NULL \
+          WHERE id = ?1 AND deleted = 0",
+        params![id, now_ms],
+    )?;
+    Ok(changed > 0)
+}
+
+fn refresh_privacy(
+    conn: &rusqlite::Connection,
+    item: &mut StoredItem,
+    privacy: copypaste_ipc::ClipboardPrivacy,
+    credentials: bool,
+    search_text: Option<&str>,
+) -> rusqlite::Result<()> {
+    let previous = item.clipboard_privacy();
+    let mut combined = previous.union(privacy);
+    if let Some(choice) = item
+        .payload_metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+        .and_then(|metadata| metadata.secret_override)
+    {
+        combined.secret = choice.secret;
+    }
+    let parsed = item
+        .payload_metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type));
+    let repair_text = item.payload_metadata.is_some() && parsed.is_none() && search_text.is_some();
+    if combined.is_empty() && !repair_text && !credentials {
+        return Ok(());
+    }
+    let mut metadata = parsed.unwrap_or_default();
+    let previous_credentials = metadata.credentials;
+    metadata.credentials |= credentials;
+    metadata.privacy = combined;
+    item.payload_metadata = metadata.to_json(&item.content_type);
+    // Classification is versioned too: even a same-tick recopy must reach peers.
+    if combined != previous || repair_text || metadata.credentials != previous_credentials {
+        item.created_at = item.created_at.saturating_add(1);
+    }
+    conn.execute(
+        concat!(
+            "UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, content_bytes = ",
+            content_bytes_sql!("?2"),
+            " WHERE id = ?1"
+        ),
+        rusqlite::params![item.id, item.payload_metadata, item.created_at],
+    )?;
+    if combined.secret {
+        delete_fts_row_in_tx(conn, &item.id)?;
+        conn.execute(
+            "UPDATE clipboard_items SET fts_rowid = NULL WHERE id = ?1",
+            [&item.id],
+        )?;
+        conn.execute(
+            "DELETE FROM module_search_documents WHERE item_id = ?1",
+            [&item.id],
+        )?;
+        conn.execute(
+            "DELETE FROM module_search_vectors WHERE item_id = ?1",
+            [&item.id],
+        )?;
+    } else if repair_text {
+        // Earlier versions hid unrecognized metadata and could remove its
+        // index. Reuse this capture's plaintext without resealing the winner.
+        delete_fts_row_in_tx(conn, &item.id)?;
+        let rowid = insert_fts_in_tx(conn, &item.id, search_text.unwrap(), &item.content_type)?;
+        conn.execute(
+            "UPDATE clipboard_items SET fts_rowid = ?2 WHERE id = ?1",
+            params![item.id, rowid],
+        )?;
+    }
+    Ok(())
+}
+
+const LIVE_ITEMS_SQL: &str = concat!(
+    "SELECT ",
+    item_columns!(),
+    " FROM clipboard_items WHERE deleted = 0 \
+      ORDER BY pinned DESC, pin_order ASC, created_at DESC, id DESC"
+);
+
+impl Store {
+    /// Promotes a successfully copied row without reading or rewriting its payload.
+    /// Pin order and source identity survive; same-tick copies still move forward.
+    pub(crate) fn promote_copied(
+        &self,
+        id: &str,
+        copied_at: i64,
+    ) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "UPDATE clipboard_items SET created_at = MAX( \
+                    ?2, \
+                    CASE WHEN created_at = 9223372036854775807 THEN created_at \
+                         ELSE created_at + 1 END, \
+                    COALESCE((SELECT CASE WHEN created_at = 9223372036854775807 \
+                                          THEN created_at ELSE created_at + 1 END \
+                              FROM clipboard_items INDEXED BY idx_items_evictable \
+                              WHERE deleted = 0 AND pinned = 0 \
+                              ORDER BY created_at DESC, id DESC LIMIT 1), ?2)) \
+                 WHERE id = ?1 AND deleted = 0 RETURNING created_at",
+                params![id, copied_at],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The newest live content's ID and stamp, independently of pin order.
+    /// Reads only ordering metadata, never the potentially large ciphertext.
+    pub fn newest_live_key(&self) -> Result<Option<(String, i64)>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, created_at FROM clipboard_items WHERE deleted = 0 \
+             ORDER BY created_at DESC, id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// Stores a capture, or promotes the row that already holds this clipboard
+    /// representation.
+    ///
+    /// Dedup is **unbounded**: a same-hash, same-type match is looked for across
+    /// all live history, not inside a recency window, and the survivor's
+    /// `created_at` is moved to the new capture time (manifest 01 I-23 / T-36 /
+    /// T-39, manifest 03 D9).
+    /// Re-copying something from last week promotes it instead of growing a
+    /// second row, which is the behaviour a clipboard manager is judged on.
+    ///
+    /// # The bump is a version stamp, not a display hint
+    ///
+    /// `created_at` is merge key 1 on both sync transports
+    /// (`copypaste_p2p::sync::merge_decision`), so restamping it publishes a new
+    /// version: the peer takes it, and the item rises on that device too. That
+    /// is the intended reading of a re-copy — the user touched this item now, on
+    /// this device — and it converges, because the two sides then tie on all
+    /// four keys and `KeepLocal` ends it. The rejected alternative was a
+    /// local-only `bumped_at` used for ordering: it needs a second sort key that
+    /// the merge does not see, which is how the local list order and the synced
+    /// order come apart.
+    ///
+    /// A bump only ever moves the stamp *forward* (T-37), and it leaves
+    /// `pinned` / `pin_order` alone: a re-copied pin keeps its slot in the
+    /// pinned section rather than jumping to the top (manifest 06 INV-31).
+    pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
+        self.insert_or_bump_with(item, None)
+    }
+
+    /// [`Store::insert_or_bump`], running `after` on the stored row before
+    /// the transaction commits.
+    pub(crate) fn insert_or_bump_with(
+        &self,
+        mut item: NewItem,
+        after: Option<AfterWrite<'_>>,
+    ) -> Result<Ingest, StoreError> {
+        let sealed = (
+            std::mem::take(&mut item.nonce),
+            std::mem::take(&mut item.content_ciphertext),
+        );
+        let search_text = item.search_text.take();
+        self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed), after)
+            .map(|(ingested, _)| ingested)
+    }
+
+    /// Returns the row and whether its durable version changed, in one transaction.
+    pub(crate) fn insert_or_bump_late_sealed<E, F>(
+        &self,
+        mut item: NewItem,
+        search_text: Option<&str>,
+        seal: F,
+        after: Option<AfterWrite<'_>>,
+    ) -> Result<(Ingest, bool), E>
+    where
+        E: From<StoreError>,
+        F: FnOnce() -> Result<(Vec<u8>, Vec<u8>), E>,
+    {
+        let privacy = item
+            .payload_metadata
+            .as_deref()
+            .map(crate::PayloadMetadata::privacy_from_json)
+            .unwrap_or_default();
+        let credentials = item
+            .payload_metadata
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+            .is_some_and(|metadata| metadata.credentials);
+        let indexable = copypaste_ipc::content_type::is_text(&item.content_type) && !privacy.secret;
+        let search_text = search_text.filter(|text| indexable && !text.trim().is_empty());
+
+        // The caller's id, not a fresh one: the ciphertext is already sealed
+        // against it (see `NewItem::id`).
+        let id = item.id.clone();
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn).map_err(StoreError::from)?;
+        let (metadata, source_icon_id) = super::source_icons::normalise(
+            &tx,
+            item.app_bundle_id.as_deref(),
+            &item.content_type,
+            item.created_at,
+            item.payload_metadata.as_deref(),
+        )
+        .map_err(E::from)?;
+        item.payload_metadata = metadata;
+
+        // The probe and the bump share the insert's transaction, so no third
+        // capture can land between finding the row and restamping it.
+        if let Some(existing) =
+            newest_live_with_representation(&tx, &item.content_hash, &item.content_type, i64::MIN)
+                .map_err(StoreError::from)?
+        {
+            let mut bumped = bump_in_tx(
+                &tx,
+                &existing,
+                item.created_at,
+                &item.app_bundle_id,
+                &item.app_name,
+                &source_icon_id,
+            )
+            .map_err(StoreError::from)?;
+            refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
+                .map_err(StoreError::from)?;
+            super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                .map_err(StoreError::from)?;
+            run_after(after, &tx, &bumped.id)?;
+            tx.commit().map_err(StoreError::from)?;
+            let changed = bumped.created_at != existing.created_at
+                || bumped.payload_metadata != existing.payload_metadata;
+            return Ok((Ingest::Bumped(bumped), changed));
+        }
+
+        let (nonce, content_ciphertext) = seal()?;
+        let fts_rowid = match search_text {
+            Some(text) => {
+                insert_fts_in_tx(&tx, &id, text, &item.content_type).map_err(StoreError::from)?
+            }
+            None => None,
+        };
+
+        let insert = tx.execute(
+            // `content_bytes` includes ciphertext and bounded metadata, and is
+            // computed here rather than by a trigger that would rewrite the
+            // whole payload to the WAL a second time.
+            "INSERT INTO clipboard_items \
+                 (id, content_ciphertext, nonce, content_type, content_hash, \
+                  pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
+                  fts_rowid, source_icon_id, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, 0, ?7, ?8, ?9, ?10, ?11, \
+                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?9, '')))",
+            params![
+                &id,
+                &content_ciphertext,
+                &nonce,
+                &item.content_type,
+                &item.content_hash,
+                item.created_at,
+                &item.app_bundle_id,
+                &item.app_name,
+                &item.payload_metadata,
+                fts_rowid,
+                &source_icon_id,
+            ],
+        );
+
+        match insert {
+            Ok(_) => {}
+            Err(e) if is_constraint_violation(&e) => {
+                if let Some(rowid) = fts_rowid {
+                    tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
+                        .map_err(StoreError::from)?;
+                }
+                // The dedup backstop fired: a concurrent capture of the same
+                // content committed between the probe above and this INSERT.
+                // Resolve the winner *inside* the same transaction so there is
+                // no TOCTOU gap between the failed INSERT and this lookup.
+                let existing =
+                    find_in_bucket(&tx, &item.content_hash, &item.content_type, item.created_at)
+                        .map_err(StoreError::from)?;
+                return match existing {
+                    Some(existing) => {
+                        let mut bumped = bump_in_tx(
+                            &tx,
+                            &existing,
+                            item.created_at,
+                            &item.app_bundle_id,
+                            &item.app_name,
+                            &source_icon_id,
+                        )
+                        .map_err(StoreError::from)?;
+                        super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                            .map_err(StoreError::from)?;
+                        refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
+                            .map_err(StoreError::from)?;
+                        run_after(after, &tx, &bumped.id)?;
+                        tx.commit().map_err(StoreError::from)?;
+                        let changed = bumped.created_at != existing.created_at
+                            || bumped.payload_metadata != existing.payload_metadata;
+                        Ok((Ingest::Bumped(bumped), changed))
+                    }
+                    None => Err(StoreError::from(e).into()),
+                };
+            }
+            Err(e) => return Err(StoreError::from(e).into()),
+        }
+
+        run_after(after, &tx, &id)?;
+        tx.commit().map_err(StoreError::from)?;
+
+        Ok((
+            Ingest::Inserted(StoredItem {
+                source_icon_id,
+                id,
+                content_ciphertext,
+                nonce,
+                content_type: item.content_type,
+                content_hash: item.content_hash,
+                created_at: item.created_at,
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+                deleted: false,
+                // A capture on this device. The empty sentinel rather than a device
+                // id the store has no business knowing — see `versions::origin_or`.
+                origin_device_id: String::new(),
+                app_bundle_id: item.app_bundle_id,
+                app_name: item.app_name,
+                payload_metadata: item.payload_metadata,
+            }),
+            true,
+        ))
+    }
+
+    /// [`Store::insert_or_bump`] for callers that do not need to know which of
+    /// the two happened.
+    pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
+        self.insert_or_bump(item).map(Ingest::into_item)
+    }
+
+    /// Pinned first, then newest first, by offset.
+    ///
+    /// The order is *total* (`pinned DESC, pin_order, created_at DESC, id DESC`)
+    /// — the trailing `id` tiebreak keeps pages stable when rows tie on
+    /// `created_at`, and it is what [`Store::list_from`] seeks on.
+    ///
+    /// Prefer `list_from` for anything a user scrolls: an offset window shifts
+    /// under a list that grows at the top, which is `CopyPaste-8ebg.57`.
+    pub fn list(&self, limit: u32, offset: u32) -> Result<Vec<StoredItem>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(&format!("{LIVE_ITEMS_SQL} LIMIT ?1 OFFSET ?2"))?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map(params![i64::from(limit), i64::from(offset)], |row| {
+            row_to_item(row, &columns)
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Visits live history in the legacy export order using one pooled read.
+    ///
+    /// The callback must not call back into this store or persist while the
+    /// cursor is open. `Break` stops the SQL read immediately, so callers can
+    /// refuse an aggregate result or honour an output limit without buffering.
+    pub(crate) fn visit_live_items<E>(
+        &self,
+        visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
+        let conn = self.conn().map_err(E::from)?;
+        Self::visit_live_rows(&conn, visit)
+    }
+
+    /// [`Self::visit_live_items`], first reporting how many rows it will visit.
+    ///
+    /// The count and the rows come from one read transaction, so they describe
+    /// the same history while captures continue.
+    pub(crate) fn visit_live_snapshot<E>(
+        &self,
+        total: impl FnOnce(u64),
+        visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
+        let conn = self.conn().map_err(E::from)?;
+        let snapshot = conn
+            .unchecked_transaction()
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        total(
+            live_count(&snapshot)
+                .map_err(StoreError::from)
+                .map_err(E::from)?,
+        );
+        Self::visit_live_rows(&snapshot, visit)
+    }
+
+    fn visit_live_rows<E>(
+        conn: &rusqlite::Connection,
+        mut visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
+        let mut stmt = conn
+            .prepare_cached(LIVE_ITEMS_SQL)
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        let columns = ItemColumns::resolve(&stmt)
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        let mut rows = stmt.query([]).map_err(StoreError::from).map_err(E::from)?;
+        while let Some(row) = rows.next().map_err(StoreError::from).map_err(E::from)? {
+            let item = row_to_item(row, &columns)
+                .map_err(StoreError::from)
+                .map_err(E::from)?;
+            if matches!(visit(item)?, ControlFlow::Break(())) {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetches one live item. Tombstones are not live and return `None`.
+    pub fn get(&self, id: &str) -> Result<Option<StoredItem>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            item_columns!(),
+            " FROM clipboard_items WHERE id = ?1 AND deleted = 0"
+        ))?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        Ok(stmt
+            .query_row([id], |row| row_to_item(row, &columns))
+            .optional()?)
+    }
+
+    /// Soft-deletes an item, returning whether a live row was affected.
+    ///
+    /// The ciphertext and nonce are wiped and the FTS row is removed in the same
+    /// transaction; the row survives as a tombstone so a later sync layer can
+    /// propagate the delete instead of resurrecting the item.
+    pub fn delete(&self, id: &str) -> Result<bool, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let changed = tombstone_in_tx(&tx, id, crate::now_ms())?;
+        tx.commit()?;
+        drop(conn);
+        if changed {
+            self.request_space_reclaim();
+        }
+        Ok(changed)
+    }
+
+    /// Soft-deletes every live item, returning how many were affected.
+    pub fn delete_all(&self) -> Result<u64, StoreError> {
+        self.delete_all_through(i64::MAX)
+    }
+
+    /// Highest `rowid` in the table, or 0 when it is empty.
+    pub fn max_rowid(&self) -> Result<i64, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Soft-deletes every live item stored at or before `through`, returning how
+    /// many were affected.
+    ///
+    /// `through` is a `rowid` and deliberately not a `created_at`. The UI defers
+    /// this call behind an undo window, so the bound has to mean "what existed
+    /// when the user pressed clear". A clip captured during that window and a
+    /// row whose clock is skewed ahead (DMY-180) both carry a `created_at`
+    /// above any press-time instant, so a timestamp cannot separate them and a
+    /// skewed row would survive a clear the user believes emptied everything.
+    /// `rowid` is insert order, so it separates them without consulting a clock.
+    ///
+    /// SQLite only reuses a `rowid` when the row holding the largest one is hard
+    /// deleted. Of the three eviction paths, `evict_over_cap` and
+    /// `evict_over_byte_cap` take the oldest, but `evict_older_than` selects on
+    /// `created_at`, so a clock jump **backward** can backdate the newest row —
+    /// the one holding the largest `rowid` — into the age sweep. Reuse then
+    /// needs a fresh insert inside the same undo window to land at or below a
+    /// ceiling already taken, which would clear a clip captured after the user
+    /// pressed. Narrow, and not closed by this bound.
+    ///
+    /// Repeated calls need no guard. `deleted = 0` excludes anything an earlier
+    /// call tombstoned, and a later ceiling is strictly larger, so it can only
+    /// add rows that are still live.
+    pub fn delete_all_through(&self, through: i64) -> Result<u64, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        // Pinned rows survive. Manifest 04 is explicit that delete_all
+        // tombstones non-pinned rows only, and pinning is the one gesture by
+        // which a user says "keep this" — clearing history must not be the
+        // thing that discards it.
+        //
+        // 9223372036854775807 is i64::MAX used as a saturation ceiling
+        // (manifest 03 §3.11), so the CASE is overflow safety for a row already
+        // at the ceiling — not a sentinel marking a row to treat differently.
+        let changed = tx.execute(
+            "UPDATE clipboard_items \
+                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
+                    created_at = CASE \
+                        WHEN created_at = 9223372036854775807 THEN created_at \
+                        ELSE MAX(created_at + 1, ?1) \
+                    END, \
+                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
+                    fts_rowid = NULL \
+              WHERE deleted = 0 AND pinned = 0 AND rowid <= ?2",
+            params![crate::now_ms(), through],
+        )?;
+        // Drop index rows for everything that is no longer live, which also
+        // sweeps orphans. Pinned rows stay live and keep their entries.
+        tx.execute(
+            "DELETE FROM clipboard_fts \
+              WHERE id NOT IN (SELECT id FROM clipboard_items WHERE deleted = 0)",
+            [],
+        )?;
+        tx.commit()?;
+        drop(conn);
+        if changed > 0 {
+            self.request_space_reclaim();
+        }
+        Ok(changed as u64)
+    }
+
+    /// Number of live items. Tombstones do not count.
+    pub fn count(&self) -> Result<u64, StoreError> {
+        let conn = self.conn()?;
+        Ok(live_count(&conn)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::ControlFlow;
+
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+
+    use super::super::model::NewItem;
+    use super::super::test_support::{
+        fts_dump, fts_row_count, item, plant_fts_row, store, KEY, T0,
+    };
+    use super::super::{Store, StoreError};
+
+    #[test]
+    fn copied_rows_rise_without_replacing_payload_source_or_pin_order() {
+        let s = store();
+        let first = s
+            .insert(NewItem {
+                app_bundle_id: Some("com.example.source".into()),
+                app_name: Some("Source".into()),
+                ..item("first", T0)
+            })
+            .unwrap();
+        let second = s.insert(item("second", T0 + 1)).unwrap();
+        assert_eq!(s.promote_copied(&first.id, T0).unwrap(), Some(T0 + 2));
+        assert_eq!(s.list(10, 0).unwrap()[0].id, first.id);
+        let promoted = s.get(&first.id).unwrap().unwrap();
+        assert_eq!(promoted.content_ciphertext, first.content_ciphertext);
+        assert_eq!(promoted.nonce, first.nonce);
+        assert_eq!(promoted.app_bundle_id, first.app_bundle_id);
+        assert_eq!(promoted.app_name, first.app_name);
+        assert_eq!(s.count().unwrap(), 2);
+
+        s.set_pinned(&first.id, true).unwrap();
+        s.set_pinned(&second.id, true).unwrap();
+        let before = s.list(10, 0).unwrap();
+        s.promote_copied(&second.id, T0 + 10).unwrap();
+        let after = s.list(10, 0).unwrap();
+        assert_eq!(after[0].id, before[0].id);
+        assert_eq!(after[1].id, before[1].id);
+        assert_eq!(after[1].pin_order, before[1].pin_order);
+
+        s.delete(&second.id).unwrap();
+        assert_eq!(s.promote_copied(&second.id, T0 + 20).unwrap(), None);
+    }
+    fn source_icon() -> crate::SourceAppIconMetadata {
+        let image = ImageBuffer::from_pixel(64, 64, Rgba([0x24u8, 0x65, 0xa8, 0xff]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        crate::SourceAppIconMetadata::new(&png.into_inner(), 64, 64).unwrap()
+    }
+
+    #[test]
+    fn invalid_artwork_does_not_allow_indexing_an_explicit_secret() {
+        let s = store();
+        let mut candidate = item("synthetic secret marker", T0);
+        candidate.payload_metadata = Some(
+            r#"{"privacy":{"secret":true},"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#
+                .into(),
+        );
+        let stored = s.insert(candidate).unwrap();
+        assert!(stored.clipboard_privacy().secret);
+        assert_eq!(fts_row_count(&s, &stored.id), 0);
+        assert!(s.search("marker", 10).unwrap().is_empty());
+        assert!(s.semantic_work("model:test").unwrap().is_none());
+    }
+
+    #[test]
+    fn source_icon_lookup_never_reads_the_item_body() {
+        let s = store();
+        let mut candidate = item("not read", T0);
+        let icon = source_icon();
+        let metadata = crate::PayloadMetadata {
+            credentials: false,
+            secret_override: None,
+            privacy: Default::default(),
+            file: None,
+            source_app_icon: Some(icon.clone()),
+        }
+        .to_json("text")
+        .unwrap();
+
+        candidate.payload_metadata = Some(metadata);
+        let item = s.insert(candidate).unwrap();
+        let conn = s.conn().unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = NULL, nonce = NULL WHERE id = ?1",
+            [&item.id],
+        )
+        .unwrap();
+
+        assert_eq!(
+            s.source_app_icon_by_id(item.source_icon_id.as_ref().unwrap())
+                .unwrap(),
+            Some(icon)
+        );
+    }
+
+    #[test]
+    fn a_capture_writes_its_payload_to_the_wal_once() {
+        const PAYLOAD: usize = 1 << 20;
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
+        let s = Store::open(&path, &KEY).unwrap();
+
+        let big = |n: i64| NewItem {
+            content_ciphertext: vec![b'x'; PAYLOAD],
+            search_text: Some(format!("marker {n}")),
+            ..item(&format!("payload {n}"), T0 + n * 60_000)
+        };
+
+        s.insert(big(0)).unwrap();
+        {
+            let conn = s.conn().unwrap();
+            super::super::connection::run_pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        }
+        assert!(std::fs::metadata(&wal).unwrap().len() < PAYLOAD as u64 / 8);
+
+        s.insert(big(1)).unwrap();
+        let written = std::fs::metadata(&wal).unwrap().len();
+        assert!(
+            written < PAYLOAD as u64 * 3 / 2,
+            "one {PAYLOAD}-byte capture put {written} bytes in the WAL; \
+             the payload is being written twice"
+        );
+    }
+
+    #[test]
+    fn a_capture_the_insert_rejects_leaves_no_plaintext_in_the_index() {
+        let s = store();
+        let first = s.insert(item("alpha payload", T0)).unwrap();
+
+        let clash = NewItem {
+            id: first.id.clone(),
+            ..item("beta payload leaking", T0 + 60_000)
+        };
+        assert!(s.insert(clash).is_err());
+
+        assert_eq!(fts_row_count(&s, &first.id), 1);
+        assert!(!fts_dump(&s).contains("leaking"));
+        assert!(s.search("leaking", 10).unwrap().is_empty());
+        assert_eq!(s.search("alpha", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn insert_and_get_round_trip() {
+        let s = store();
+        let stored = s.insert(item("hello world", T0)).unwrap();
+
+        let fetched = s.get(&stored.id).unwrap().expect("item is present");
+        assert_eq!(fetched, stored);
+        assert_eq!(fetched.content_ciphertext, b"ct:hello world");
+        assert_eq!(fetched.nonce, vec![1u8; 24]);
+        assert_eq!(fetched.content_type, "text");
+        assert_eq!(fetched.created_at, T0);
+        assert!(!fetched.pinned);
+
+        assert!(s.get("no-such-id").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_is_pinned_first_then_newest_first() {
+        let s = store();
+        let oldest = s.insert(item("oldest", T0)).unwrap();
+        let middle = s.insert(item("middle", T0 + 60_000)).unwrap();
+        let newest = s.insert(item("newest", T0 + 120_000)).unwrap();
+
+        let ids: Vec<_> = s.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids,
+            vec![newest.id.clone(), middle.id.clone(), oldest.id.clone()]
+        );
+
+        assert!(s.set_pinned(&oldest.id, true).unwrap());
+        let page = s.list(10, 0).unwrap();
+        assert_eq!(page[0].id, oldest.id);
+        assert!(page[0].pinned);
+        assert_eq!(page[1].id, newest.id);
+        assert_eq!(page[2].id, middle.id);
+
+        assert!(s.set_pinned(&middle.id, true).unwrap());
+        let ids: Vec<_> = s.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![oldest.id, middle.id, newest.id]);
+
+        let s2 = store();
+        for n in 0..5 {
+            s2.insert(item(&format!("item-{n}"), T0 + n * 60_000))
+                .unwrap();
+        }
+        let all: Vec<_> = s2.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
+        let page2: Vec<_> = s2.list(2, 2).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(page2, all[2..4].to_vec());
+    }
+
+    #[test]
+    fn live_visitor_stops_before_mapping_a_malformed_later_row() {
+        let s = store();
+        let pinned = s.insert(item("pinned", T0)).unwrap();
+        s.set_pinned(&pinned.id, true).unwrap();
+        let malformed = s.insert(item("later", T0 + 60_000)).unwrap();
+        s.conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET created_at = 'not a timestamp' WHERE id = ?1",
+                [&malformed.id],
+            )
+            .unwrap();
+        let mut seen = Vec::new();
+
+        s.visit_live_items(|row| {
+            seen.push(row.id);
+            Ok::<_, StoreError>(ControlFlow::Break(()))
+        })
+        .unwrap();
+
+        assert_eq!(seen, [pinned.id]);
+        assert!(s
+            .visit_live_items(|_| Ok::<_, StoreError>(ControlFlow::Continue(())))
+            .is_err());
+    }
+
+    #[test]
+    fn delete_tombstones_the_row_and_clears_the_index() {
+        let s = store();
+        let a = s.insert(item("first payload", T0)).unwrap();
+        let b = s.insert(item("second payload", T0 + 60_000)).unwrap();
+
+        assert!(s.delete(&a.id).unwrap());
+        assert!(s.get(&a.id).unwrap().is_none());
+        assert_eq!(s.count().unwrap(), 1);
+        assert_eq!(fts_row_count(&s, &a.id), 0);
+        assert!(s.search("first", 10).unwrap().is_empty());
+        assert_eq!(s.list(10, 0).unwrap().len(), 1);
+
+        // The tombstone survives with its payload wiped.
+        {
+            let conn = s.conn().unwrap();
+            let (deleted, ct): (bool, Option<Vec<u8>>) = conn
+                .query_row(
+                    "SELECT deleted, content_ciphertext FROM clipboard_items WHERE id = ?1",
+                    [&a.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert!(deleted);
+            assert!(ct.is_none());
+        }
+
+        assert!(!s.delete(&a.id).unwrap());
+        assert!(!s.delete("no-such-id").unwrap());
+        assert!(s.get(&b.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn delete_restamps_created_at_above_the_live_version() {
+        let s = store();
+        let a = s.insert(item("payload", T0)).unwrap();
+        assert!(s.delete(&a.id).unwrap());
+        let tomb = s.version(&a.id).unwrap().unwrap();
+        assert!(tomb.deleted);
+        assert!(tomb.created_at > T0);
+        assert!(tomb.created_at >= T0.saturating_add(1));
+    }
+
+    #[test]
+    fn delete_all_clears_every_live_item() {
+        let s = store();
+        for n in 0..4 {
+            s.insert(item(&format!("payload {n}"), T0 + n * 60_000))
+                .unwrap();
+        }
+        assert_eq!(s.count().unwrap(), 4);
+
+        assert_eq!(s.delete_all().unwrap(), 4);
+        assert_eq!(s.count().unwrap(), 0);
+        assert!(s.list(10, 0).unwrap().is_empty());
+        assert!(s.search("payload", 10).unwrap().is_empty());
+        assert_eq!(fts_dump(&s), "");
+
+        assert_eq!(s.delete_all().unwrap(), 0);
+    }
+
+    /// The UI defers `delete_all` behind an undo window, so a clip captured
+    /// during that window must survive an action the user took before it
+    /// existed.
+    #[test]
+    fn delete_all_through_spares_what_arrived_after_the_bound() {
+        let s = store();
+        for n in 0..3 {
+            s.insert(item(&format!("before {n}"), T0 + n * 60_000))
+                .unwrap();
+        }
+        let bound = s.max_rowid().unwrap();
+        let after = s.insert(item("captured mid-window", T0 + 600_000)).unwrap();
+
+        assert_eq!(s.delete_all_through(bound).unwrap(), 3);
+        let live = s.list(10, 0).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].id, after.id);
+    }
+
+    /// A deferred clear must remove exactly what an immediate one would. Both a
+    /// clock skewed ahead (DMY-180) and the `i64::MAX` saturation ceiling put
+    /// `created_at` above any press-time instant, which is why the bound is a
+    /// `rowid` — a timestamp bound would leave these behind.
+    #[test]
+    fn delete_all_through_clears_rows_dated_ahead_of_the_clock() {
+        let s = store();
+        s.insert(item("skewed", crate::now_ms() + 86_400_000))
+            .unwrap();
+        s.insert(item("at the ceiling", i64::MAX)).unwrap();
+        let bound = s.max_rowid().unwrap();
+
+        assert_eq!(s.delete_all_through(bound).unwrap(), 2);
+        assert_eq!(s.count().unwrap(), 0);
+        assert_eq!(fts_dump(&s), "");
+    }
+
+    #[test]
+    fn a_text_item_after_the_clear_bound_remains_indexed() {
+        let s = store();
+        let doomed = s.insert(item("ordinary", T0)).unwrap();
+        let bound = s.max_rowid().unwrap();
+        let keep = s.insert(item("swordfish", T0 + 1_000)).unwrap();
+        assert_eq!(s.delete_all_through(bound).unwrap(), 1);
+        assert_eq!(fts_row_count(&s, &keep.id), 1);
+        assert_eq!(fts_row_count(&s, &doomed.id), 0);
+        assert_eq!(s.search("swordfish", 10).unwrap().len(), 1);
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
+    /// A database written before the write-time guard existed carries the index
+    /// row anyway; clearing must sweep it rather than leave it searchable.
+    #[test]
+    fn a_planted_index_row_does_not_survive_the_clear() {
+        let s = store();
+        let secret = s
+            .insert(NewItem {
+                search_text: None,
+                ..item("swordfish", T0)
+            })
+            .unwrap();
+        plant_fts_row(&s, &secret.id, "swordfish");
+        assert_eq!(fts_row_count(&s, &secret.id), 1);
+
+        assert_eq!(s.delete_all_through(s.max_rowid().unwrap()).unwrap(), 1);
+        assert_eq!(fts_row_count(&s, &secret.id), 0);
+    }
+
+    /// Manifest 04: `delete_all` tombstones non-pinned rows only. The
+    /// regression was silent — every other test passed with pinned rows being
+    /// wiped, because none of them pinned anything first.
+    #[test]
+    fn delete_all_leaves_pinned_items_intact() {
+        let s = store();
+        let keep = s.insert(item("pinned payload", T0)).unwrap();
+        for n in 1..4 {
+            s.insert(item(&format!("payload {n}"), T0 + n * 60_000))
+                .unwrap();
+        }
+        assert!(s.set_pinned(&keep.id, true).unwrap());
+
+        assert_eq!(s.delete_all().unwrap(), 3);
+        assert_eq!(s.count().unwrap(), 1);
+
+        let left = s.list(10, 0).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, keep.id);
+        assert!(left[0].pinned, "the survivor must still be pinned");
+        assert!(
+            s.get(&keep.id).unwrap().is_some(),
+            "a pinned item must survive delete_all"
+        );
+
+        // It keeps its search entry; the cleared rows lose theirs.
+        assert_eq!(s.search("pinned", 10).unwrap().len(), 1);
+        assert!(s.search("payload 2", 10).unwrap().is_empty());
+
+        // A second call is a no-op rather than finally taking the pinned row.
+        assert_eq!(s.delete_all().unwrap(), 0);
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn set_pinned_toggles_and_reports_existence() {
+        let s = store();
+        let a = s.insert(item("pin me", T0)).unwrap();
+
+        assert!(s.set_pinned(&a.id, true).unwrap());
+        assert!(s.get(&a.id).unwrap().unwrap().pinned);
+        assert!(s.set_pinned(&a.id, true).unwrap());
+        assert!(s.get(&a.id).unwrap().unwrap().pinned);
+
+        assert!(s.set_pinned(&a.id, false).unwrap());
+        assert!(!s.get(&a.id).unwrap().unwrap().pinned);
+
+        assert!(!s.set_pinned("no-such-id", true).unwrap());
+
+        s.delete(&a.id).unwrap();
+        assert!(!s.set_pinned(&a.id, true).unwrap());
+    }
+
+    #[test]
+    fn count_tracks_live_items_only() {
+        let s = store();
+        assert_eq!(s.count().unwrap(), 0);
+        let a = s.insert(item("one", T0)).unwrap();
+        s.insert(item("two", T0 + 60_000)).unwrap();
+        assert_eq!(s.count().unwrap(), 2);
+        s.delete(&a.id).unwrap();
+        assert_eq!(s.count().unwrap(), 1);
+    }
+}

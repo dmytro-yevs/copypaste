@@ -1,0 +1,741 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "Formater le JSON",
+      "description": "Indente le JSON en conservant nombres, échappements et ordre des clés tels qu’écrits.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        },
+        "sort_keys": {
+          "label": "Trier les clés"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minifier le JSON",
+      "description": "Supprime tous les espaces non significatifs du JSON."
+    },
+    "structure.json_validate": {
+      "name": "Valider le JSON",
+      "description": "Vérifie que le texte est un JSON valide et indique où il ne l’est pas, sans le modifier.",
+      "params": {
+        "lenient": {
+          "label": "Autoriser les commentaires et les virgules finales"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Trier les clés JSON",
+      "description": "Trie les clés des objets par point de code ; les tableaux gardent leur ordre.",
+      "params": {
+        "recursive": {
+          "label": "Inclure les objets imbriqués"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Citer en chaîne JSON",
+      "description": "Place le texte dans un littéral de chaîne JSON en échappant guillemets et sauts de ligne."
+    },
+    "structure.json_unquote": {
+      "name": "Décoder une chaîne JSON",
+      "description": "Décode un littéral de chaîne JSON en texte brut, y compris le JSON doublement encodé."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML vers JSON",
+      "description": "Convertit un document YAML unique en JSON.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON vers YAML",
+      "description": "Convertit le JSON en YAML de style bloc."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV vers JSON",
+      "description": "Convertit des lignes CSV ou TSV en JSON ; les valeurs restent du texte.",
+      "params": {
+        "header": {
+          "label": "La première ligne est un en-tête"
+        },
+        "delimiter": {
+          "label": "Séparateur",
+          "options": {
+            "auto": "Détecter",
+            "comma": "Virgule",
+            "semicolon": "Point-virgule",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Formater le XML",
+      "description": "Indente les éléments XML sans modifier le texte ; les entités externes ne sont jamais chargées.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minifier le XML",
+      "description": "Supprime les espaces entre les éléments XML."
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Encoder en Base64",
+      "description": "Encode les octets UTF-8 du texte en Base64.",
+      "params": {
+        "variant": {
+          "label": "Alphabet",
+          "options": {
+            "standard": "Standard",
+            "url_safe": "Compatible URL"
+          }
+        },
+        "padding": {
+          "label": "Ajouter le remplissage (=)"
+        },
+        "wrap": {
+          "label": "Couper les lignes à 76 caractères"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Décoder le Base64",
+      "description": "Décode le Base64 standard ou compatible URL en ignorant les retours à la ligne, le remplissage manquant et un préfixe data: URI.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "text": "Texte",
+            "hex": "Octets en hex"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "Encoder un composant d’URL",
+      "description": "Encode en pourcentage tout sauf les lettres, chiffres et - . _ ~, pour une valeur de requête ou un segment de chemin.",
+      "params": {
+        "space": {
+          "label": "Encoder les espaces en",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (style formulaire)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Encoder une URL complète",
+      "description": "Encode seulement les caractères interdits dans une URL et conserve sa structure et les séquences %XX existantes."
+    },
+    "encode.url_decode": {
+      "name": "Décoder une URL",
+      "description": "Décode les séquences %XX et signale une séquence mal formée à sa position.",
+      "params": {
+        "plus_as_space": {
+          "label": "Traiter + comme une espace"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Encoder en hex",
+      "description": "Écrit les octets UTF-8 du texte en chiffres hexadécimaux.",
+      "params": {
+        "separator": {
+          "label": "Séparateur",
+          "options": {
+            "none": "Aucun",
+            "space": "Espace"
+          }
+        },
+        "case": {
+          "label": "Casse",
+          "options": {
+            "lower": "Minuscules",
+            "upper": "Majuscules"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Décoder l’hex",
+      "description": "Reconvertit des chiffres hexadécimaux en texte en ignorant les espaces et les préfixes 0x."
+    },
+    "encode.html_encode": {
+      "name": "Encoder les entités HTML",
+      "description": "Remplace & < > \" et ' par des entités HTML et, en option, chaque caractère non ASCII par une référence numérique.",
+      "params": {
+        "scope": {
+          "label": "Caractères à encoder",
+          "options": {
+            "minimal": "Seulement & < > \" '",
+            "non_ascii": "Aussi tous les non-ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "Décoder les entités HTML",
+      "description": "Décode toutes les entités nommées HTML5 et les références numériques ; les entités inconnues restent telles quelles."
+    },
+    "encode.backslash_escape": {
+      "name": "Échapper avec des barres obliques inverses",
+      "description": "Échappe les barres obliques inverses, guillemets doubles, retours à la ligne, tabulations et caractères de contrôle, style C et JSON."
+    },
+    "encode.backslash_unescape": {
+      "name": "Retirer les échappements",
+      "description": "Reconvertit \\n, \\t, \\\", \\uXXXX, \\xXX et échappements similaires en caractères ; les inconnus restent tels quels avec un avertissement."
+    },
+    "encode.unicode_escape": {
+      "name": "Échapper l’Unicode",
+      "description": "Écrit chaque caractère non ASCII sous forme d’échappement \\uXXXX.",
+      "params": {
+        "astral": {
+          "label": "Caractères au-delà de U+FFFF",
+          "options": {
+            "surrogate_pair": "Paire de substitution (\\uD83D\\uDE00)",
+            "braces": "Accolades (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Retirer les échappements Unicode",
+      "description": "Reconvertit les échappements \\uXXXX et \\u{...} en caractères et laisse le reste du texte inchangé."
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "MAJUSCULES",
+      "description": "Met toutes les lettres en majuscules selon les règles Unicode complètes.",
+      "params": {
+        "locale": {
+          "label": "Règles de langue",
+          "options": {
+            "invariant": "Neutre",
+            "system": "Langue de l’appareil"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "minuscules",
+      "description": "Met toutes les lettres en minuscules selon les règles Unicode complètes.",
+      "params": {
+        "locale": {
+          "label": "Règles de langue",
+          "options": {
+            "invariant": "Neutre",
+            "system": "Langue de l’appareil"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Casse de titre",
+      "description": "Met une majuscule aux mots ; le style titre laisse les petits mots en minuscules.",
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "headline": "Titre",
+            "all_words": "Chaque mot"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Casse de phrase",
+      "description": "Met une majuscule au premier mot de chaque phrase et le reste en minuscules.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Assemble les mots en un identifiant commençant par une minuscule.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Assemble les mots en un identifiant où chaque mot prend une majuscule.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Relie les mots en minuscules par des tirets bas.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Relie les mots en minuscules par des traits d’union.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Relie les mots en majuscules par des tirets bas.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Inverser la casse",
+      "description": "Passe les majuscules en minuscules et les minuscules en majuscules."
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "Hachage MD5",
+      "description": "Empreinte MD5, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "Hachage SHA-1",
+      "description": "Empreinte SHA-1, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "Hachage SHA-256",
+      "description": "Empreinte SHA-256. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "Hachage SHA-512",
+      "description": "Empreinte SHA-512. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "Somme de contrôle CRC-32",
+      "description": "CRC-32 avec le polynôme IEEE utilisé par ZIP et PNG. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex": "Hex (8 chiffres)",
+            "decimal": "Décimal"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "Rogner",
+      "description": "Supprime les espaces et sauts de ligne au début et à la fin du texte."
+    },
+    "lines.trim_each": {
+      "name": "Rogner chaque ligne",
+      "description": "Supprime les espaces au début, à la fin ou des deux côtés de chaque ligne.",
+      "params": {
+        "sides": {
+          "label": "Côtés",
+          "options": {
+            "both": "Les deux",
+            "start": "Début",
+            "end": "Fin"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Réduire les espaces",
+      "description": "Remplace les suites d’espaces et de tabulations par un seul espace.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Conserver les sauts de ligne"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Supprimer les lignes vides",
+      "description": "Supprime les lignes vides ou ne contenant que des espaces.",
+      "params": {
+        "whitespace_only": {
+          "label": "Les lignes d’espaces comptent comme vides"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Trier les lignes",
+      "description": "Trie les lignes par ordre alphabétique, naturel, numérique ou par longueur.",
+      "params": {
+        "order": {
+          "label": "Ordre",
+          "options": {
+            "asc": "A à Z",
+            "desc": "Z à A"
+          }
+        },
+        "mode": {
+          "label": "Comparaison",
+          "options": {
+            "natural": "Naturel",
+            "code_point": "Point de code",
+            "case_insensitive": "Ignorer la casse",
+            "numeric": "Numérique",
+            "length": "Longueur"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Supprimer les lignes en double",
+      "description": "Garde la première occurrence de chaque ligne dans l’ordre d’origine.",
+      "params": {
+        "case_sensitive": {
+          "label": "Respecter la casse"
+        },
+        "compare_trimmed": {
+          "label": "Ignorer les espaces autour"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Inverser les lignes",
+      "description": "Inverse l’ordre des lignes."
+    },
+    "lines.join": {
+      "name": "Joindre les lignes",
+      "description": "Réunit toutes les lignes en une seule avec un séparateur.",
+      "params": {
+        "separator": {
+          "label": "Séparateur",
+          "options": {
+            "space": "Espace",
+            "comma": "Virgule",
+            "none": "Aucun",
+            "custom": "Personnalisé"
+          }
+        },
+        "custom_separator": {
+          "label": "Séparateur personnalisé"
+        },
+        "drop_empty": {
+          "label": "Ignorer les lignes vides"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Déplier les paragraphes",
+      "description": "Rejoint les lignes coupées à l’intérieur des paragraphes, comme dans un texte copié d’un PDF.",
+      "params": {
+        "dehyphenate": {
+          "label": "Recoller les mots coupés"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Préfixer les lignes",
+      "description": "Ajoute une puce, un numéro, un signe de citation ou un texte personnalisé à chaque ligne.",
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "dash": "Tiret",
+            "asterisk": "Astérisque",
+            "number": "Numéros",
+            "quote": "Citation",
+            "custom": "Personnalisé"
+          }
+        },
+        "custom_prefix": {
+          "label": "Préfixe personnalisé"
+        },
+        "skip_empty": {
+          "label": "Ignorer les lignes vides"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Supprimer les caractères invisibles",
+      "description": "Supprime les caractères de largeur nulle, bidi et traits d’union conditionnels, et remplace les espaces insécables."
+    },
+    "clean.quotes": {
+      "name": "Redresser les guillemets",
+      "description": "Remplace les guillemets typographiques par des droits et, en option, les tirets par des traits d’union.",
+      "params": {
+        "dashes": {
+          "label": "Redresser aussi les tirets"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "Supprimer les paramètres de suivi",
+      "description": "Retire les paramètres utm_ et d'identifiant de clic de chaque lien et laisse intacts les liens signés.",
+      "keywords": [
+        "suivi",
+        "nettoyer le lien",
+        "confidentialité"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Déballer les liens de redirection",
+      "description": "Remplace hors ligne les redirections des moteurs de recherche, réseaux sociaux et Safe Links par leur vraie cible.",
+      "keywords": [
+        "redirection"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Texte enrichi en texte brut",
+      "description": "Garde le texte du contenu mis en forme avec ses paragraphes et retours à la ligne.",
+      "keywords": [
+        "texte brut",
+        "sans mise en forme"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML en Markdown",
+      "description": "Convertit titres, liens, listes, tableaux et blocs de code en Markdown en gardant les espaces du code.",
+      "keywords": [
+        "convertir"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown en texte brut",
+      "description": "Retire la syntaxe Markdown et garde le texte ; les tableaux sont séparés par des tabulations.",
+      "keywords": [
+        "texte brut"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Liens",
+          "options": {
+            "text": "Texte seul",
+            "text_url": "Texte et URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Garder les puces"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT : Décoder",
+      "description": "Affiche l'en-tête et la charge utile du jeton en JSON. La signature n'est pas vérifiée.",
+      "keywords": [
+        "jeton"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Horodatage en date",
+      "description": "Convertit un horodatage Unix en date et reconnaît secondes, millisecondes, microsecondes ou nanosecondes.",
+      "keywords": [
+        "horodatage",
+        "heure"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unité",
+          "options": {
+            "auto": "Détecter",
+            "seconds": "Secondes",
+            "milliseconds": "Millisecondes",
+            "microseconds": "Microsecondes",
+            "nanoseconds": "Nanosecondes"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (heure locale)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Date en horodatage",
+      "description": "Convertit une date ISO 8601, RFC 2822 ou simple en horodatage Unix ; sans décalage, l'heure locale s'applique.",
+      "keywords": [
+        "horodatage",
+        "heure"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unité",
+          "options": {
+            "seconds": "Secondes",
+            "milliseconds": "Millisecondes"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Rechercher et remplacer",
+      "description": "Remplace du texte ou les correspondances d'une expression régulière ; $1 dans le remplacement insère un groupe.",
+      "keywords": [
+        "remplacer",
+        "rechercher"
+      ],
+      "params": {
+        "find": {
+          "label": "Rechercher"
+        },
+        "replace": {
+          "label": "Remplacer par"
+        },
+        "regex": {
+          "label": "Expression régulière"
+        },
+        "case_sensitive": {
+          "label": "Respecter la casse"
+        },
+        "whole_word": {
+          "label": "Mots entiers uniquement"
+        },
+        "multiline": {
+          "label": "^ et $ s'appliquent à chaque ligne"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Extraire les correspondances",
+      "description": "Liste chaque URL, e-mail, nombre, adresse, couleur, UUID ou correspondance de motif, un par ligne.",
+      "keywords": [
+        "extraire"
+      ],
+      "params": {
+        "preset": {
+          "label": "Rechercher",
+          "options": {
+            "urls": "Liens",
+            "emails": "Adresses e-mail",
+            "numbers": "Nombres",
+            "ipv4": "Adresses IPv4",
+            "ipv6": "Adresses IPv6",
+            "hex_colors": "Couleurs hexadécimales",
+            "uuids": "UUID",
+            "custom": "Motif personnalisé"
+          }
+        },
+        "pattern": {
+          "label": "Motif"
+        },
+        "dedupe": {
+          "label": "Supprimer les doublons"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Supprimer des caractères",
+      "description": "Efface chiffres, ponctuation, caractères non ASCII, emoji ou les caractères que vous indiquez.",
+      "keywords": [
+        "effacer",
+        "chiffres"
+      ],
+      "params": {
+        "class": {
+          "label": "Supprimer",
+          "options": {
+            "digits": "Chiffres",
+            "punctuation": "Ponctuation",
+            "non_ascii": "Caractères non ASCII",
+            "emoji": "Émojis",
+            "custom": "Caractères indiqués"
+          }
+        },
+        "chars": {
+          "label": "Caractères"
+        }
+      }
+    }
+  }
+}

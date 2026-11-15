@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">Erfassung pausiert</string>
+    <string name="background_status_capturing">Erfasst Kopien</string>
+    <string name="background_status_syncing">Synchronisiert im Hintergrund</string>
+    <string name="background_status_last_sync">Zuletzt synchronisiert %1$s</string>
+    <string name="background_status_last_saved">Zuletzt gespeichert %1$s</string>
+    <string name="background_action_pause">Pausieren</string>
+    <string name="background_action_resume">Fortsetzen</string>
+    <string name="background_action_send">Zwischenablage senden</string>
+    <string name="background_action_open">Öffnen</string>
+    <string name="shortcut_send_clipboard">Zwischenablage senden</string>
+    <string name="shortcut_transform_clipboard">Zwischenablage umwandeln</string>
+</resources>

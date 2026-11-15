@@ -1,0 +1,7 @@
+{
+  "uuid": "copypaste-qualification-window-geometry@copypaste.app",
+  "name": "CopyPaste qualification window geometry",
+  "description": "Private compositor geometry bridge for the disposable Linux qualification session.",
+  "shell-version": ["46", "47", "48"],
+  "version": 1
+}

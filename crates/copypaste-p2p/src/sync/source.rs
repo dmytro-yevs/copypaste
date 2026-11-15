@@ -1,0 +1,243 @@
+//! What a session needs from the world around it: the local store, the channel
+//! underneath, and what it reports afterwards.
+//!
+//! Two traits, both small on purpose, so the daemon can implement them without
+//! reading the session logic and the tests can drive the real session functions
+//! over an in-memory store and an in-memory duplex.
+
+use std::future::Future;
+use std::net::SocketAddr;
+
+use super::SyncError;
+use crate::protocol::{ItemSummary, SyncItem, SyncMessage};
+use crate::DeviceProfile;
+
+/// What one session moved. `skipped` counts remote versions declined: an LWW
+/// loser, a timestamp beyond the skew ceiling, a want that did not fit this
+/// session, an item the peer sent unasked, or an apply the source refused.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SyncStats {
+    pub sent: usize,
+    pub received: usize,
+    pub skipped: usize,
+    pub skipped_too_large: usize,
+    /// Requested versions withheld by the source or still missing at `Done`.
+    /// They remain behind the cursor so a later session can transfer them.
+    pub skipped_unavailable: usize,
+    pub skipped_invalid: usize,
+    pub skipped_future: usize,
+    pub deferred: usize,
+}
+
+/// The result of one completed session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncOutcome {
+    pub stats: SyncStats,
+    pub peer_device_id: String,
+    pub peer_device_name: String,
+    pub peer_profile: Option<DeviceProfile>,
+    pub peer_listen_addr: Option<SocketAddr>,
+    pub cursor: SyncCursor,
+    pub applied_floor: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncCursor {
+    pub since_ms: i64,
+    pub relay_floor_ms: Option<i64>,
+}
+
+impl SyncCursor {
+    #[must_use]
+    pub fn advertise_from(&self, peer_since_ms: i64) -> i64 {
+        self.relay_floor_ms
+            .map_or(peer_since_ms, |floor| floor.min(peer_since_ms))
+            .max(0)
+    }
+}
+
+/// What the session needs from the local store. The daemon implements it over
+/// its `Store`.
+///
+/// # Apply must guard itself
+///
+/// [`apply`](SyncSource::apply) is handed a version the session believes wins,
+/// but it MUST re-check with [`merge_decision`](super::merge_decision) against
+/// whatever it holds now, using the stored and incoming `origin_device_id`. It
+/// is the only place the true origins are known and the only layer that sees
+/// concurrent local writes, and re-checking is what makes replay a no-op rather
+/// than a resurrection. Return `false` when the local copy wins.
+pub trait DeferredFileSource: Send {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError>;
+    fn verify(&mut self) -> Result<(), SyncError>;
+}
+pub trait FileTransferObserver: Send {
+    fn progress(&mut self, written: u64);
+    fn finish(&mut self, error: Option<String>);
+}
+
+pub trait SyncSource {
+    fn deferred_file(&self, _id: &str) -> Result<Option<Box<dyn DeferredFileSource>>, SyncError> {
+        Ok(None)
+    }
+    fn observe_file_transfer(
+        &self,
+        _id: &str,
+        _peer: &str,
+    ) -> Option<Box<dyn FileTransferObserver>> {
+        None
+    }
+    /// Create one isolated summary snapshot for this sync session.
+    fn summary_workspace(&self) -> Result<Box<dyn super::SummaryWorkspace>, SyncError> {
+        Ok(Box::new(super::MemorySummaryWorkspace::default()))
+    }
+    /// Resolves an authenticated offer to one local chunk. Never a path lookup
+    /// supplied by the peer, and never called by ordinary history sync.
+    fn file_chunk(&self, _id: &str, _sha256: &str, _index: u64) -> Result<Vec<u8>, SyncError> {
+        Err(SyncError::Source("The file is unavailable.".into()))
+    }
+    /// Resolves the authenticated transfer's byte count before the sender
+    /// streams it. This must use local metadata, not the peer's request.
+    fn file_size(&self, _id: &str, _sha256: &str) -> Result<u64, SyncError> {
+        Err(SyncError::Source("The file is unavailable.".into()))
+    }
+    /// [`observe_file_transfer`](Self::observe_file_transfer) for one member.
+    fn observe_member_transfer(
+        &self,
+        id: &str,
+        _file: u32,
+        peer: &str,
+    ) -> Option<Box<dyn FileTransferObserver>> {
+        self.observe_file_transfer(id, peer)
+    }
+    /// [`deferred_file`](Self::deferred_file) for one member of a multi-file clip.
+    fn deferred_member(
+        &self,
+        id: &str,
+        file: u32,
+    ) -> Result<Option<Box<dyn DeferredFileSource>>, SyncError> {
+        if file == 0 {
+            self.deferred_file(id)
+        } else {
+            Err(SyncError::Source("The file is unavailable.".into()))
+        }
+    }
+    /// [`file_chunk`](Self::file_chunk) for one member of a multi-file clip.
+    fn member_chunk(
+        &self,
+        id: &str,
+        file: u32,
+        sha256: &str,
+        index: u64,
+    ) -> Result<Vec<u8>, SyncError> {
+        if file == 0 {
+            self.file_chunk(id, sha256, index)
+        } else {
+            Err(SyncError::Source("The file is unavailable.".into()))
+        }
+    }
+    /// [`file_size`](Self::file_size) for one member of a multi-file clip.
+    fn member_size(&self, id: &str, file: u32, sha256: &str) -> Result<u64, SyncError> {
+        if file == 0 {
+            self.file_size(id, sha256)
+        } else {
+            Err(SyncError::Source("The file is unavailable.".into()))
+        }
+    }
+    fn device_id(&self) -> String;
+    fn device_name(&self) -> String;
+
+    /// Ids among `ids` this device does not exchange with `peer_device_id`.
+    /// They are neither advertised nor served to it.
+    fn withheld_from(
+        &self,
+        _peer_device_id: &str,
+        _ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, SyncError> {
+        Ok(std::collections::HashSet::new())
+    }
+
+    /// Whether automatic sessions with this peer are paused. A paused device
+    /// declines them; a manual send still runs.
+    fn auto_sync_paused(&self, _peer_device_id: Option<&str>) -> bool {
+        false
+    }
+
+    /// Whether this device accepts `item` from `peer_device_id`. A refused
+    /// version is skipped like an LWW loser.
+    fn accepts_from(&self, _peer_device_id: &str, _item: &SyncItem) -> bool {
+        true
+    }
+
+    fn device_profile(&self) -> DeviceProfile {
+        DeviceProfile::current()
+    }
+
+    /// Summaries of everything eligible to sync.
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError>;
+
+    /// Metadata for local rows named by one received summary page.
+    ///
+    /// This is deliberately separate from [`summaries`](Self::summaries): the
+    /// latter is the immutable set this device advertised to its peer, whereas
+    /// this lookup is the current local comparison set for remote offers. A
+    /// production implementation must read only the requested metadata and
+    /// must not retain a store transaction across network I/O.
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError>;
+
+    /// Full items for the given ids, plaintext. Unknown ids are omitted rather
+    /// than erroring.
+    fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError>;
+
+    /// Applies a remote item. Returns whether it was stored.
+    fn apply(&self, item: SyncItem) -> Result<bool, SyncError>;
+
+    /// Applies a wire batch. Default loops [`apply`](Self::apply); store
+    /// backends override to one write transaction.
+    fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+        items.into_iter().map(|item| self.apply(item)).collect()
+    }
+
+    /// One summary page for wire exchange, keyset-paged after `(stamp, id)`.
+    ///
+    /// `organization_kinds` is what the peer accepts
+    /// ([`DeviceProfile::accepted_organization_kinds`]); a source that stores
+    /// organization records omits every class above it.
+    ///
+    /// Default slices [`summaries`](Self::summaries). Store backends override
+    /// to a bounded SQLite read so a catch-up round never materialises the
+    /// whole history before the first page goes on the wire.
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+        _organization_kinds: u32,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        let all = self.summaries(since_ms)?;
+        let start = match after_id {
+            None => 0,
+            Some(id) => all
+                .iter()
+                .position(|summary| summary.item_id.as_str() == id)
+                .map(|index| index + 1)
+                .unwrap_or(all.len()),
+        };
+        Ok(all.into_iter().skip(start).take(limit).collect())
+    }
+}
+
+/// The channel one session runs over. Deliberately not `transport::Session`:
+/// the session logic has no business knowing about Noise. The daemon implements
+/// it over the real Noise session, encoding with [`SyncMessage::encode`] and
+/// decoding with [`SyncMessage::decode`] so the bounds apply on the way in.
+///
+/// `recv` must return an error rather than block forever when the peer goes
+/// away; timeouts belong to the implementation, not here. Either half can abort
+/// mid-session without a goodbye, leaving the other end waiting on a message
+/// that never arrives, and a channel with no read deadline turns that into a
+/// stuck task.
+pub trait SyncChannel {
+    fn send(&mut self, msg: SyncMessage) -> impl Future<Output = Result<(), SyncError>> + Send;
+    fn recv(&mut self) -> impl Future<Output = Result<SyncMessage, SyncError>> + Send;
+}

@@ -1,0 +1,30 @@
+import '../../../shared/error_text.dart';
+
+/// One user-selected file; platform adapters own access and temporary staging.
+class HistoryImportFile {
+  const HistoryImportFile({
+    required this.name,
+    required this.mimeType,
+    this.sourceReference,
+    this.sizeBytes,
+    required this.prepare,
+    required this.dispose,
+  });
+  final String name;
+  final String mimeType;
+  final String? sourceReference;
+  final int? sizeBytes;
+  final Future<String> Function(int maxBytes) prepare;
+  final Future<void> Function() dispose;
+}
+
+abstract interface class HistoryFilePicker {
+  Future<List<HistoryImportFile>> chooseFiles();
+}
+
+/// A path-free explanation supplied by a typed runtime or platform adapter.
+class HistoryFileOperationException implements UserFacingException {
+  const HistoryFileOperationException(this.message);
+  @override
+  final String message;
+}

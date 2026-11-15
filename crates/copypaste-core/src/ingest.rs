@@ -1,0 +1,1271 @@
+//! The single ingest path every new item goes through.
+//!
+//! One implementation, four callers: the daemon's clipboard poll loop, the
+//! daemon's `add` IPC method, its history import, and the Android backend that
+//! links this crate in-process. One ingest path owns the dedup probe, so
+//! `copypaste add`, polling, import, and Android cannot disagree about a row.
+//! been the same defect with a new platform attached.
+//!
+//! Manifest 01's data-loss rule this file is responsible for: refusals are
+//! reported, never silent. An over-cap item is [`IngestError::TooLarge`], not a
+//! discarded capture. [`Store::insert_or_bump`] owns the only dedup probe; it
+//! exposes no probe-only error that ingest could safely fail open from without
+//! maintaining a second implementation.
+
+use crate::retention::RetentionBatch;
+use crate::rules::apply::CaptureEffects;
+use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
+use crate::{now_ms, CryptoError, Keyring};
+
+/// The retention bound every write here is subject to. Re-exported because
+/// `ingest::enforce_retention` is the name the daemon and the sync source
+/// already call; [`crate::retention`] owns when it runs.
+pub use crate::retention::enforce_retention;
+
+/// What a successful ingest did.
+#[derive(Debug)]
+pub enum Ingested {
+    /// A new row.
+    Stored(StoredItem),
+    /// The same clipboard representation was already stored; this is the
+    /// existing row after the forward-only recency bump.
+    Duplicate(StoredItem),
+}
+
+impl Ingested {
+    #[must_use]
+    pub fn into_item(self) -> StoredItem {
+        match self {
+            Ingested::Stored(item) | Ingested::Duplicate(item) => item,
+        }
+    }
+}
+
+impl From<Ingest> for Ingested {
+    fn from(ingest: Ingest) -> Self {
+        match ingest {
+            Ingest::Inserted(item) => Self::Stored(item),
+            Ingest::Bumped(item) => Self::Duplicate(item),
+        }
+    }
+}
+
+/// Ingest failures.
+///
+/// The `Display` text is deliberately free of detail: these strings can end up
+/// in an IPC error, and the underlying `StoreError` may carry a database path,
+/// which discloses the local username (the privacy contract). The full error is
+/// kept as the `source` and goes to the local log, never to a client.
+#[derive(Debug, thiserror::Error)]
+pub enum IngestError {
+    #[error("clipboard content was empty")]
+    Empty,
+    #[error("the item is larger than the configured size limit")]
+    TooLarge,
+    #[error("the item could not be encrypted")]
+    Crypto(#[from] CryptoError),
+    #[error("the item's source metadata is invalid")]
+    InvalidMetadata,
+    #[error("the item could not be stored")]
+    Storage(#[from] StoreError),
+}
+
+/// Encrypt, deduplicate, store — the one path into the database.
+///
+/// Stamped now. Use [`ingest_into`] to keep an imported item's own capture
+/// time.
+pub fn ingest(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_with_current_retention(store, keyring, content, content_type, settings, || {
+        settings.clone()
+    })
+}
+
+/// Ingest a captured value while retaining the ingress snapshot for admission
+/// and reading the destructive retention policy only after the store barrier.
+pub fn ingest_with_current_retention(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_with_current_retention(
+        store,
+        keyring,
+        content,
+        content_type,
+        now_ms(),
+        None,
+        None,
+        settings,
+        current_settings,
+    )
+}
+
+/// [`ingest`] with the item's own timestamp, for an import.
+///
+/// A restored item keeps the moment it was originally captured, which is what
+/// keeps a restored history in order and its ages honest. Dedup spans all live
+/// history, so importing a file twice collapses rather than doubling.
+///
+/// Recording which device an item originated on is deliberately **not** here:
+/// the origin table belongs to whatever owns sync metadata, and a caller with
+/// no peers has none.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_context(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        None,
+        settings,
+    )
+}
+
+/// [`ingest_into`] for one item of a retention batch.
+pub(crate) fn ingest_into_batched(
+    batch: &RetentionBatch<'_>,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    privacy: copypaste_ipc::ClipboardPrivacy,
+) -> Result<(Ingested, bool), IngestError> {
+    let metadata = (!privacy.is_empty()).then_some(crate::PayloadMetadata {
+        privacy,
+        ..Default::default()
+    });
+    ingest_text(
+        batch.store(),
+        keyring,
+        content,
+        content_type,
+        created_at,
+        None,
+        None,
+        metadata.as_ref(),
+        batch.settings(),
+        Sweep::Deferred,
+        None,
+    )
+}
+
+/// Ingest a locally captured value with provenance supplied by the platform.
+///
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_context(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        None,
+        settings,
+    )
+}
+
+/// Ingest a locally captured value with a platform-resolved application id and
+/// display name. The name is cosmetic only; decisions continue to key on the
+/// stable id.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_metadata(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        None,
+        settings,
+    )
+}
+
+/// Atomically ingest a captured item with its already validated source icon.
+/// Metadata is serialized before the row is published, so capture ports never
+/// need a post-insert update that can race an upload or a second capture.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_metadata(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_metadata_with_current_retention(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        || settings.clone(),
+    )
+}
+
+/// [`ingest_into_with_capture_source_metadata`] with a live policy read for
+/// the terminal destructive retention pass.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_metadata_with_current_retention(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_text(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        Sweep::Now(&current_settings),
+        None,
+    )
+    .map(|(ingested, _)| ingested)
+}
+
+/// [`ingest_into_with_capture_source_metadata_with_current_retention`] for a
+/// capture content rules ran on: their effects are written in the
+/// transaction that stores the item.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_text_with_rules(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+    effects: &CaptureEffects,
+) -> Result<Ingested, IngestError> {
+    ingest_text(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        Sweep::Now(&current_settings),
+        Some(effects),
+    )
+    .map(|(ingested, _)| ingested)
+}
+
+/// [`ingest_into_with_capture_source`] with a live policy read for its
+/// terminal destructive retention pass.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_with_current_retention(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_metadata_with_current_retention(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        None,
+        settings,
+        current_settings,
+    )
+}
+
+/// Whether this write pays for its own retention sweep.
+enum Sweep<'a> {
+    Now(&'a dyn Fn() -> copypaste_ipc::ConfigData),
+    Deferred,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ingest_text(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    sweep: Sweep<'_>,
+    effects: Option<&CaptureEffects>,
+) -> Result<(Ingested, bool), IngestError> {
+    if content.trim().is_empty() {
+        return Err(IngestError::Empty);
+    }
+    // Refusing a capture is data loss, so the cap has to be a *user's* number
+    // rather than a compiled-in one — and the refusal is reported, not silent.
+    if content.len() as u64 > settings.capture_limit_bytes(content_type) {
+        return Err(IngestError::TooLarge);
+    }
+
+    let classified = crate::classify_credentials(content_type, content)
+        .map(|privacy| crate::credentials::metadata(privacy, payload_metadata));
+    let payload_metadata =
+        encode_payload_metadata(classified.as_ref().or(payload_metadata), content_type)?;
+    let hash = crate::storage::compute_content_hash(content.as_bytes());
+
+    // The AEAD binds the item id as associated data (manifest 02: "AAD must
+    // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
+    // back out. The id therefore has to be chosen *before* the seal — it cannot
+    // be assigned by the insert, or the AAD written and the AAD read differ and
+    // every row fails authentication on every later read. That is why `NewItem`
+    // carries `id` rather than the store minting one.
+    let item_id = uuid::Uuid::new_v4().to_string();
+    let seal_id = item_id.clone();
+    let indexable = copypaste_ipc::content_type::is_text(content_type);
+    let key = keyring.item_key();
+    let write = crate::rules::apply::capture_writer(&key, effects, created_at);
+
+    let (ingested, changed) = store.insert_or_bump_late_sealed(
+        NewItem {
+            id: item_id,
+            content_ciphertext: Vec::new(),
+            nonce: Vec::new(),
+            content_type: content_type.to_string(),
+            content_hash: hash,
+            search_text: None,
+            created_at,
+            app_bundle_id: app_bundle_id.map(str::to_owned),
+            app_name: app_name.map(str::to_owned),
+            payload_metadata,
+        },
+        indexable.then_some(content),
+        || -> Result<_, IngestError> {
+            let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, &seal_id)?;
+            Ok((nonce, ciphertext))
+        },
+        write.as_ref().map(|write| write as _),
+    )?;
+
+    if let Sweep::Now(current_settings) = sweep {
+        crate::retention::enforce_retention_with(store, current_settings);
+    }
+
+    Ok((ingested.into(), changed))
+}
+
+/// Store a raw image or file payload.  Binary values have no string
+/// representation in the ingest path: treating bytes as lossy UTF-8 is how a
+/// file path or base64 stand-in reaches FTS and sync as apparent text.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_context(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    payload_metadata: Option<&crate::FileMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_binary_into_with_capture_source(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        app_bundle_id,
+        None,
+        payload_metadata,
+        settings,
+    )
+}
+
+/// Binary counterpart of [`ingest_into_with_capture_source`].
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_source(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::FileMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    let payload_metadata = payload_metadata.map(|file| crate::PayloadMetadata {
+        credentials: false,
+        secret_override: None,
+        privacy: Default::default(),
+        file: Some(file.clone()),
+        source_app_icon: None,
+    });
+    ingest_binary_into_with_capture_source_metadata(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata.as_ref(),
+        settings,
+    )
+}
+
+/// Binary counterpart of [`ingest_into_with_capture_source_metadata`].
+///
+/// A capture port hands this one envelope to the store before the new row is
+/// visible to retention or sync. Existing file-only entry points delegate with
+/// no icon and keep their flat metadata representation.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_source_metadata(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_binary_with_rules(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        None,
+    )
+}
+
+/// [`ingest_binary_into_with_capture_source_metadata`], writing the effects
+/// of the content rules that ran on the capture in the storing transaction.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_with_rules(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    effects: Option<&CaptureEffects>,
+) -> Result<Ingested, IngestError> {
+    if bytes.is_empty() {
+        return Err(IngestError::Empty);
+    }
+    if copypaste_ipc::content_type::is_text(content_type) {
+        return Err(IngestError::Empty);
+    }
+    if bytes.len() as u64 > settings.capture_limit_bytes(content_type) {
+        return Err(IngestError::TooLarge);
+    }
+
+    // One SHA-256 pass, four spellings: the item id, the envelope header the
+    // STREAM AAD covers, and the row's `content_hash`. Hashing per spelling
+    // cost a 4 MiB screenshot three redundant passes on the capture path.
+    let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
+    let digest = crate::binary::content_digest(bytes);
+    let item_id = crate::binary::capture_item_id_from_digest(&digest, content_type);
+    let key = keyring.item_key();
+    let ciphertext = crate::binary::seal_with_digest(bytes, &digest, &key, &item_id)?;
+    let write = crate::rules::apply::capture_writer(&key, effects, created_at);
+    let item = NewItem {
+        id: item_id,
+        content_ciphertext: ciphertext,
+        // A binary envelope contains a nonce per chunk.  An empty row nonce
+        // distinguishes it from the text AEAD and is never a fallback path.
+        nonce: Vec::new(),
+        content_type: content_type.to_owned(),
+        content_hash: crate::binary::content_hash(&digest),
+        search_text: None,
+        created_at,
+        app_bundle_id: app_bundle_id.map(str::to_owned),
+        app_name: app_name.map(str::to_owned),
+        payload_metadata,
+    };
+    let ingested = store.insert_or_bump_with(item, write.as_ref().map(|write| write as _))?;
+
+    enforce_retention(store, settings);
+
+    Ok(ingested.into())
+}
+
+fn encode_payload_metadata(
+    metadata: Option<&crate::PayloadMetadata>,
+    content_type: &str,
+) -> Result<Option<String>, IngestError> {
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    if let (None, Some(file)) = (&metadata.source_app_icon, &metadata.file) {
+        return serde_json::to_string(file)
+            .ok()
+            .filter(|json| json.len() <= copypaste_ipc::MAX_SYNC_METADATA_BYTES)
+            .filter(|json| crate::PayloadMetadata::from_json(json, content_type).is_some())
+            .map(Some)
+            .ok_or(IngestError::InvalidMetadata);
+    }
+    metadata
+        .to_json(content_type)
+        .map(Some)
+        .ok_or(IngestError::InvalidMetadata)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc, Mutex};
+
+    use super::*;
+    use crate::storage::test_support::fts_row_count;
+    use copypaste_ipc::ConfigData;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+
+    const T0: i64 = 1_700_000_000_000;
+
+    struct Fixture {
+        store: Store,
+        keyring: Keyring,
+        settings: ConfigData,
+    }
+
+    fn fixture() -> Fixture {
+        let keyring = Keyring::from_secret(&[5u8; 32]);
+        Fixture {
+            store: Store::open_in_memory(&keyring.db_key()).expect("in-memory store"),
+            keyring,
+            settings: ConfigData::default(),
+        }
+    }
+
+    impl Fixture {
+        fn at(&self, content: &str, created_at: i64) -> Result<Ingested, IngestError> {
+            ingest_into(
+                &self.store,
+                &self.keyring,
+                content,
+                "text",
+                created_at,
+                &self.settings,
+            )
+        }
+
+        fn binary_at(&self, bytes: &[u8], created_at: i64) -> Result<Ingested, IngestError> {
+            self.binary_at_type(bytes, copypaste_ipc::content_type::IMAGE_PNG, created_at)
+        }
+
+        fn binary_at_type(
+            &self,
+            bytes: &[u8],
+            content_type: &str,
+            created_at: i64,
+        ) -> Result<Ingested, IngestError> {
+            ingest_binary_into_with_capture_context(
+                &self.store,
+                &self.keyring,
+                bytes,
+                content_type,
+                created_at,
+                None,
+                None,
+                &self.settings,
+            )
+        }
+
+        fn plaintext(&self, item: &StoredItem) -> String {
+            let key = self.keyring.item_key();
+            let bytes = crate::decrypt(&item.content_ciphertext, &item.nonce, &key, &item.id)
+                .expect("the local key must open it");
+            String::from_utf8(bytes.to_vec()).unwrap()
+        }
+    }
+
+    fn source_icon() -> crate::SourceAppIconMetadata {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, Vec<u8>>::new(64, 64));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, ImageFormat::Png).unwrap();
+        crate::SourceAppIconMetadata::new(&png.into_inner(), 64, 64).unwrap()
+    }
+
+    #[test]
+    fn terminal_retention_uses_the_policy_published_after_capture_admission() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let keyring = Arc::new(Keyring::from_secret(&[5u8; 32]));
+        let db_key = keyring.db_key();
+        let store = Store::open(&dir.path().join("history.db"), &db_key).unwrap();
+        let ingress = ConfigData {
+            history_limit: 1,
+            ..ConfigData::default()
+        };
+        ingest_into(&store, &keyring, "first", "text", T0, &ingress).unwrap();
+
+        let current = Arc::new(Mutex::new(ingress.clone()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        store.before_next_retention(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let worker = {
+            let store = store.clone();
+            let keyring = Arc::clone(&keyring);
+            let current = Arc::clone(&current);
+            let ingress = ingress.clone();
+            std::thread::spawn(move || {
+                let metadata = crate::PayloadMetadata {
+                    credentials: false,
+                    secret_override: None,
+                    privacy: Default::default(),
+                    file: None,
+                    source_app_icon: Some(source_icon()),
+                };
+                ingest_into_with_capture_source_metadata_with_current_retention(
+                    &store,
+                    &keyring,
+                    "second",
+                    "text",
+                    T0 + 1,
+                    None,
+                    None,
+                    Some(&metadata),
+                    &ingress,
+                    || current.lock().unwrap().clone(),
+                )
+            })
+        };
+        entered_rx.recv().unwrap();
+        current.lock().unwrap().history_limit = 2;
+        release_tx.send(()).unwrap();
+
+        worker.join().unwrap().unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        assert_eq!(store.search("first", 10).unwrap().len(), 1);
+        assert_eq!(store.search("second", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_capture_is_sealed_under_the_item_key_and_indexed() {
+        let f = fixture();
+        let stored = match f.at("hello from the clipboard", T0).unwrap() {
+            Ingested::Stored(item) => item,
+            other => panic!("{other:?}"),
+        };
+
+        assert_eq!(f.plaintext(&stored), "hello from the clipboard");
+        assert_eq!(f.store.search("clipboard", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn empty_and_blank_content_is_refused_rather_than_stored() {
+        let f = fixture();
+        assert!(matches!(f.at("", T0), Err(IngestError::Empty)));
+        assert!(matches!(f.at("   \n\t ", T0), Err(IngestError::Empty)));
+        assert_eq!(f.store.count().unwrap(), 0);
+    }
+
+    /// Over the user's cap is a *reported* refusal: a silent drop is a lost
+    /// capture the user cannot tell from a broken daemon.
+    #[test]
+    fn text_uses_the_text_cap_and_accepts_its_boundary() {
+        let mut f = fixture();
+        f.settings.max_text_size_bytes = 16;
+        f.settings.max_image_size_bytes = 32;
+        f.settings.max_file_size_bytes = 48;
+        assert!(matches!(
+            f.at(&"x".repeat(17), T0),
+            Err(IngestError::TooLarge)
+        ));
+        assert!(f.at(&"x".repeat(16), T0).is_ok());
+    }
+
+    #[test]
+    fn image_and_file_payloads_use_their_own_caps() {
+        let mut f = fixture();
+        f.settings.max_text_size_bytes = 4;
+        f.settings.max_image_size_bytes = 8;
+        f.settings.max_file_size_bytes = 12;
+
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[1; 8],
+            copypaste_ipc::content_type::IMAGE_PNG,
+            T0,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
+        assert!(matches!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[2; 9],
+                copypaste_ipc::content_type::IMAGE_TIFF,
+                T0 + 1,
+                None,
+                None,
+                &f.settings,
+            ),
+            Err(IngestError::TooLarge)
+        ));
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[3; 12],
+            copypaste_ipc::content_type::FILE,
+            T0 + 2,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
+        assert!(matches!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[4; 13],
+                copypaste_ipc::content_type::FILE,
+                T0 + 3,
+                None,
+                None,
+                &f.settings,
+            ),
+            Err(IngestError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn a_week_later_text_recopy_bumps_the_original_to_the_top() {
+        let f = fixture();
+        let first = f.at("repeated", T0).unwrap().into_item();
+        let other = f.at("other", T0 + 86_400_000).unwrap().into_item();
+
+        let recopy = f.at("repeated", T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.created_at, T0 + 7 * 86_400_000);
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
+        assert!(f.store.get(&other.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_minimum_timestamp_import_deduplicates_without_overflow() {
+        let f = fixture();
+        let first = f.at("minimum timestamp", i64::MIN).unwrap().into_item();
+
+        let recopy = f.at("minimum timestamp", i64::MIN).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.created_at, i64::MIN);
+        assert_eq!(f.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn every_text_shape_is_preserved_and_searchable() {
+        for (text, query) in [
+            ("AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+            ("mail alice@example.com token AKIAIOSFODNN7EXAMPLE", "alice"),
+            ("please charge 4111 1111 1111 1111 today", "charge"),
+        ] {
+            let f = fixture();
+            let stored = f.at(text, T0).unwrap().into_item();
+            assert_eq!(f.plaintext(&stored), text);
+            assert_eq!(fts_row_count(&f.store, &stored.id), 1);
+            assert_eq!(f.store.search(query, 10).unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn string_typed_non_text_is_never_indexed() {
+        let f = fixture();
+        let stored = ingest_into(
+            &f.store,
+            &f.keyring,
+            "encoded image stand-in",
+            "image/png",
+            T0,
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(stored.content_type, "image/png");
+        assert!(f.store.search("encoded", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn binary_ingest_is_chunked_representation_addressed_and_never_indexed() {
+        let f = fixture();
+        let bytes = vec![0x89; crate::CHUNK_BYTES + 19];
+        let stored = ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &bytes,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            T0,
+            Some("com.apple.Preview"),
+            None,
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(
+            stored.id,
+            crate::binary::capture_item_id_from_digest(
+                &crate::binary::content_digest(&bytes),
+                copypaste_ipc::content_type::IMAGE_PNG,
+            )
+        );
+        assert!(stored.nonce.is_empty());
+        assert!(f.store.search("89", 10).unwrap().is_empty());
+        assert_eq!(
+            crate::open_binary(
+                &stored.content_ciphertext,
+                &f.keyring.item_key(),
+                &stored.id
+            )
+            .unwrap()
+            .as_slice(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn capture_source_metadata_is_stored_atomically_with_a_binary_item() {
+        let f = fixture();
+        let metadata = crate::PayloadMetadata {
+            credentials: false,
+            secret_override: None,
+            privacy: Default::default(),
+            file: Some(crate::FileMetadata::new("report.pdf", "application/pdf").unwrap()),
+            source_app_icon: Some(source_icon()),
+        };
+        let stored = ingest_binary_into_with_capture_source_metadata(
+            &f.store,
+            &f.keyring,
+            b"pdf bytes",
+            copypaste_ipc::content_type::FILE,
+            T0,
+            Some("com.example.writer"),
+            Some("Writer"),
+            Some(&metadata),
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+        assert_eq!(
+            f.store
+                .payload_metadata_for_sync(&stored)
+                .unwrap()
+                .as_deref()
+                .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
+            Some(metadata)
+        );
+    }
+
+    #[test]
+    fn text_capture_preserves_source_icon_metadata() {
+        let f = fixture();
+        let metadata = crate::PayloadMetadata {
+            credentials: false,
+            secret_override: None,
+            privacy: Default::default(),
+            file: None,
+            source_app_icon: Some(source_icon()),
+        };
+        let stored = ingest_into_with_capture_source_metadata(
+            &f.store,
+            &f.keyring,
+            "AKIAIOSFODNN7EXAMPLE",
+            "text",
+            T0,
+            Some("com.example.writer"),
+            Some("Writer"),
+            Some(&metadata),
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+        assert_eq!(
+            f.store
+                .payload_metadata_for_sync(&stored)
+                .unwrap()
+                .as_deref()
+                .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
+            Some(metadata),
+        );
+        assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(f.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_week_later_binary_recopy_bumps_the_original_to_the_top() {
+        let f = fixture();
+        let bytes = vec![0x89; 128];
+        let first = f.binary_at(&bytes, T0).unwrap().into_item();
+        let other = f
+            .binary_at(&[0x42; 64], T0 + 86_400_000)
+            .unwrap()
+            .into_item();
+
+        let recopy = f.binary_at(&bytes, T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(
+            bumped.id,
+            crate::binary::capture_item_id_from_digest(
+                &crate::binary::content_digest(&bytes),
+                copypaste_ipc::content_type::IMAGE_PNG,
+            )
+        );
+        assert_eq!(bumped.created_at, T0 + 7 * 86_400_000);
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
+        assert!(f.store.get(&other.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn identical_bytes_with_distinct_text_and_file_representations_stay_distinct_in_both_orders() {
+        let bytes = b"same bytes, different clipboard representation";
+        for text_first in [true, false] {
+            let f = fixture();
+            let (text, file) = if text_first {
+                (
+                    f.at(std::str::from_utf8(bytes).unwrap(), T0)
+                        .unwrap()
+                        .into_item(),
+                    f.binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 1)
+                        .unwrap()
+                        .into_item(),
+                )
+            } else {
+                (
+                    f.at(std::str::from_utf8(bytes).unwrap(), T0 + 1)
+                        .unwrap()
+                        .into_item(),
+                    f.binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0)
+                        .unwrap()
+                        .into_item(),
+                )
+            };
+
+            assert_eq!(text.content_hash, file.content_hash);
+            assert_ne!(text.id, file.id);
+            assert_eq!(text.content_type, copypaste_ipc::content_type::TEXT);
+            assert_eq!(file.content_type, copypaste_ipc::content_type::FILE);
+            assert_eq!(f.store.count().unwrap(), 2);
+
+            let text_recopy = f.at(std::str::from_utf8(bytes).unwrap(), T0 + 2).unwrap();
+            assert!(matches!(text_recopy, Ingested::Duplicate(_)));
+            assert_eq!(text_recopy.into_item().id, text.id);
+            let file_recopy = f
+                .binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 3)
+                .unwrap();
+            assert!(matches!(file_recopy, Ingested::Duplicate(_)));
+            assert_eq!(file_recopy.into_item().id, file.id);
+        }
+    }
+
+    #[test]
+    fn identical_text_bytes_keep_their_format_representations() {
+        let f = fixture();
+        let content = "<b>same bytes</b>";
+        let mut items = Vec::new();
+        for (offset, content_type) in [
+            copypaste_ipc::content_type::TEXT,
+            copypaste_ipc::content_type::HTML,
+            copypaste_ipc::content_type::RICH_TEXT,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let item = ingest_into(
+                &f.store,
+                &f.keyring,
+                content,
+                content_type,
+                T0 + offset as i64,
+                &f.settings,
+            )
+            .unwrap()
+            .into_item();
+            assert_eq!(item.content_type, content_type);
+            items.push(item);
+        }
+        assert_eq!(f.store.count().unwrap(), items.len() as u64);
+        assert!(items.windows(2).all(|pair| pair[0].id != pair[1].id));
+
+        for (offset, item) in items.into_iter().enumerate() {
+            let recopy = ingest_into(
+                &f.store,
+                &f.keyring,
+                content,
+                &item.content_type,
+                T0 + 10 + offset as i64,
+                &f.settings,
+            )
+            .unwrap();
+            assert!(matches!(recopy, Ingested::Duplicate(_)));
+            assert_eq!(recopy.into_item().id, item.id);
+        }
+    }
+
+    #[test]
+    fn identical_binary_bytes_keep_their_image_and_file_representations() {
+        let f = fixture();
+        let bytes = b"identical binary bytes";
+        let image = f
+            .binary_at_type(bytes, copypaste_ipc::content_type::IMAGE_PNG, T0)
+            .unwrap()
+            .into_item();
+        let file = f
+            .binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 1)
+            .unwrap()
+            .into_item();
+
+        assert_eq!(image.content_hash, file.content_hash);
+        assert_ne!(image.id, file.id);
+        assert_eq!(f.store.count().unwrap(), 2);
+        for item in [&image, &file] {
+            assert_eq!(
+                crate::open_binary(&item.content_ciphertext, &f.keyring.item_key(), &item.id)
+                    .unwrap()
+                    .as_slice(),
+                bytes
+            );
+        }
+    }
+
+    #[test]
+    fn a_same_type_recopy_deduplicates_a_legacy_binary_id() {
+        let f = fixture();
+        let bytes = b"legacy binary identity";
+        let digest = crate::binary::content_digest(bytes);
+        let legacy_id = crate::binary::item_id_from_digest(&digest);
+        let ciphertext =
+            crate::binary::seal_with_digest(bytes, &digest, &f.keyring.item_key(), &legacy_id)
+                .unwrap();
+        f.store
+            .insert(NewItem {
+                id: legacy_id.clone(),
+                content_ciphertext: ciphertext,
+                nonce: Vec::new(),
+                content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),
+                content_hash: crate::binary::content_hash(&digest),
+                search_text: None,
+                created_at: T0,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+
+        let recopy = f.binary_at(bytes, T0 + 1).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        assert_eq!(recopy.into_item().id, legacy_id);
+        assert_eq!(f.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn binary_insert_enforces_the_item_cap_and_keeps_pin_and_newest() {
+        let mut f = fixture();
+        f.settings.history_limit = 2;
+        let pinned = f.binary_at(&[0x11; 32], T0).unwrap().into_item();
+        assert!(f.store.set_pinned(&pinned.id, true).unwrap());
+        let old = f.binary_at(&[0x22; 32], T0 + 1_000).unwrap().into_item();
+        let newest = f.binary_at(&[0x33; 32], T0 + 2_000).unwrap().into_item();
+
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get(&pinned.id).unwrap().unwrap().pinned);
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
+        let page = f.store.list(2, 0).unwrap();
+        assert_eq!(page[0].id, pinned.id);
+        assert_eq!(page[1].id, newest.id);
+    }
+
+    #[test]
+    fn binary_bump_enforces_byte_quota_and_keeps_pin_and_newest() {
+        let mut f = fixture();
+        let pinned = f.binary_at(&[0x11; 32], T0).unwrap().into_item();
+        assert!(f.store.set_pinned(&pinned.id, true).unwrap());
+        let old = f.binary_at(&[0x22; 32], T0 + 1_000).unwrap().into_item();
+        let target = vec![0x33; 32];
+        let newest = f.binary_at(&target, T0 + 2_000).unwrap().into_item();
+
+        f.settings.storage_quota_bytes = 0;
+        let recopy = f.binary_at(&target, T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        assert_eq!(recopy.into_item().id, newest.id);
+
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get(&pinned.id).unwrap().unwrap().pinned);
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn binary_insert_enforces_age_retention() {
+        let now = crate::now_ms();
+        let mut f = fixture();
+        let old = f.at("old text", now - 10 * 86_400_000).unwrap().into_item();
+
+        f.settings.retention_days = 7;
+        let newest = f.binary_at(&[0x44; 32], now).unwrap().into_item();
+
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn the_history_cap_is_enforced_after_the_insert() {
+        let mut f = fixture();
+        f.settings.history_limit = 3;
+        for n in 0..6 {
+            f.at(&format!("item-{n}"), T0 + n * 300_000).unwrap();
+        }
+        assert_eq!(f.store.count().unwrap(), 3);
+        // The newest survives; the cap never eats the capture that triggered it.
+        assert_eq!(f.plaintext(&f.store.list(1, 0).unwrap()[0]), "item-5");
+    }
+
+    #[test]
+    fn a_duplicate_capture_runs_byte_retention_after_a_quota_change() {
+        let mut f = fixture();
+        f.at("older", T0).unwrap();
+        f.at("newer", T0 + 120_000).unwrap();
+
+        // Config validation rejects this value for a user-facing setting; this
+        // direct fixture proves that the duplicate branch actually runs the
+        // retention hook rather than returning before it.
+        f.settings.storage_quota_bytes = 0;
+        assert!(matches!(
+            f.at("newer", T0 + 150_000).unwrap(),
+            Ingested::Duplicate(_)
+        ));
+
+        assert!(f.store.search("older", 10).unwrap().is_empty());
+        assert_eq!(f.plaintext(&f.store.list(1, 0).unwrap()[0]), "newer");
+    }
+
+    #[test]
+    fn age_based_retention_is_off_by_default_and_applied_when_set() {
+        // Stamps are relative to the wall clock because the cutoff is.
+        let now = crate::now_ms();
+        let mut f = fixture();
+        f.at("old", now - 10 * 86_400_000).unwrap();
+        f.at("new", now).unwrap();
+        assert_eq!(f.store.count().unwrap(), 2, "0 days must disable retention");
+
+        f.settings.retention_days = 7;
+        f.at("newer", now + 1_000).unwrap();
+        assert_eq!(f.store.count().unwrap(), 2, "the old item must be evicted");
+    }
+
+    /// An imported row carries a caller-supplied `created_at`. Deriving the
+    /// retention cutoff from it let one row stamped in the future delete every
+    /// live item in the history.
+    #[test]
+    fn a_future_stamped_item_evicts_nothing() {
+        let now = crate::now_ms();
+        let mut f = fixture();
+        f.settings.retention_days = 30;
+        for n in 0..5 {
+            f.at(&format!("item-{n}"), now - i64::from(n) * 60_000)
+                .unwrap();
+        }
+        assert_eq!(f.store.count().unwrap(), 5);
+
+        f.at("imported", now + 60 * 86_400_000).unwrap();
+        assert_eq!(
+            f.store.count().unwrap(),
+            6,
+            "a future stamp must not move the cutoff"
+        );
+    }
+
+    #[test]
+    fn ingest_errors_disclose_no_path() {
+        for message in [
+            IngestError::Empty.to_string(),
+            IngestError::TooLarge.to_string(),
+            IngestError::Storage(StoreError::InvalidKey).to_string(),
+        ] {
+            assert!(!message.contains('/'), "{message}");
+        }
+    }
+}

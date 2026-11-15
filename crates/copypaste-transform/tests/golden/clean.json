@@ -1,0 +1,60 @@
+[
+  {
+    "transform": "clean.invisible",
+    "input": "in\u200bvisi\u00adble\u00a0text",
+    "output": "invisible text"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "\ufeffhello",
+    "output": "hello"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "\u202eabc\u202c \u2066x\u2069",
+    "output": "abc x"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "👩\u200d💻 a\u200db",
+    "output": "👩\u200d💻 ab"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "a\u200cb\u2060c",
+    "output": "abc"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "10\u202fkm",
+    "output": "10 km"
+  },
+  {
+    "transform": "clean.invisible",
+    "input": "🇺🇦 👍🏽",
+    "output": "🇺🇦 👍🏽"
+  },
+  {
+    "transform": "clean.quotes",
+    "input": "\u201cIt\u2019s\u201d",
+    "output": "\"It's\""
+  },
+  {
+    "transform": "clean.quotes",
+    "input": "a \u2013 b \u2014 c",
+    "output": "a \u2013 b \u2014 c"
+  },
+  {
+    "transform": "clean.quotes",
+    "params": {
+      "dashes": true
+    },
+    "input": "a \u2013 b \u2014 c",
+    "output": "a - b - c"
+  },
+  {
+    "transform": "clean.quotes",
+    "input": "\u201elow\u201c \u2018single\u2019",
+    "output": "\"low\" 'single'"
+  }
+]

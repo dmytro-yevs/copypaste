@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut icon: the action's Lucide glyph on the app background. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/app_color_background" />
+    <foreground>
+        <inset android:drawable="@drawable/ic_lucide_clipboard" android:inset="32%" />
+    </foreground>
+</adaptive-icon>

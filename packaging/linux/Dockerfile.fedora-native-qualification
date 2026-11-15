@@ -1,0 +1,21 @@
+FROM fedora:40@sha256:3c86d25fef9d2001712bc3d9b091fc40cf04be4767e48f1aa3b785bf58d300ed
+
+# Fedora 40 provides the Plasma 6 KWin companion runtime and the RPM package
+# manager used by Linux native qualification. The image is disposable: each
+# workflow run mounts exact artifacts and evidence into a fresh container.
+RUN dnf --assumeyes --setopt=install_weak_deps=False install \
+    dbus-daemon dbus-tools gnome-keyring glib2 systemd openssl jq \
+    gtk3 gtk3-devel mesa-dri-drivers libXres-devel gcc pkgconf-pkg-config libsecret python3-gobject python3-pyatspi \
+    kf6-kconfig kf6-kpackage kwin kwin-wayland kwin-x11 plasma-workspace-x11 \
+    xdg-desktop-portal xdg-desktop-portal-kde \
+    xclip wl-clipboard wtype xdotool wmctrl xprop xdpyinfo xorg-x11-server-Xvfb xorg-x11-xauth \
+    dpkg rpm sudo ffmpeg-free qrencode v4l-utils \
+ && python3 -c 'import pyatspi' \
+ && for tool in jq xdpyinfo dbus-daemon dbus-update-activation-environment gdbus busctl \
+      gnome-keyring-daemon secret-tool openssl kpackagetool6 kwriteconfig6 \
+      cc pkg-config plasmashell kwin_x11 Xvfb xprop ffmpeg qrencode v4l2-ctl; \
+      do command -v "$tool" >/dev/null || exit 1; done \
+ && dnf clean all
+
+ENV LIBGL_ALWAYS_SOFTWARE=1 \
+    GALLIUM_DRIVER=llvmpipe

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared background notification and home-screen shortcuts. -->
+<resources>
+    <string name="background_title_paused">キャプチャを一時停止中</string>
+    <string name="background_status_capturing">コピーを保存中</string>
+    <string name="background_status_syncing">バックグラウンドで同期中</string>
+    <string name="background_status_last_sync">最終同期 %1$s</string>
+    <string name="background_status_last_saved">最終保存 %1$s</string>
+    <string name="background_action_pause">一時停止</string>
+    <string name="background_action_resume">再開</string>
+    <string name="background_action_send">クリップボードを送信</string>
+    <string name="background_action_open">開く</string>
+    <string name="shortcut_send_clipboard">クリップボードを送信</string>
+    <string name="shortcut_transform_clipboard">クリップボードを変換</string>
+</resources>

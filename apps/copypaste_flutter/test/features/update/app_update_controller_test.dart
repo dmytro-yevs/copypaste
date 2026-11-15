@@ -1,0 +1,661 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:copypaste_flutter/features/update/update.dart';
+import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'package:pub_semver/pub_semver.dart';
+
+void main() {
+  for (final target in [
+    AppUpdateTarget.macos,
+    AppUpdateTarget.android,
+    AppUpdateTarget.windows,
+  ]) {
+    test(
+      'prepares modules before the $target installer and continues on failure',
+      () async {
+        final ready = Completer<void>();
+        final platform = _FakeUpdatePlatform(target: target);
+        final versions = <Version>[];
+        final controller = AppUpdateController(
+          repository: _FakeUpdateRepository(release: _release()),
+          platform: platform,
+          prepareModules: (version) async {
+            versions.add(version);
+            await ready.future;
+            throw Exception('One module could not be prepared.');
+          },
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final installation = controller.install();
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.phase, AppUpdatePhase.preparingModules);
+        expect(controller.busy, isTrue);
+        expect(platform.installCalls, 0);
+        await controller.install();
+        expect(versions, [Version.parse('1.0.1')]);
+        ready.complete();
+        await installation;
+        expect(platform.installCalls, 1);
+        expect(controller.phase, AppUpdatePhase.installing);
+        expect(controller.message, isNot(contains('module')));
+      },
+    );
+  }
+
+  test(
+    'a background download is reused by install and skipped when metered',
+    () async {
+      final repository = _FakeUpdateRepository(release: _release());
+      final platform = _FakeUpdatePlatform(target: AppUpdateTarget.windows);
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: platform,
+        downloadInBackground: ValueNotifier(true),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpEventQueue();
+      expect(controller.downloaded, isTrue);
+      expect(controller.phase, AppUpdatePhase.available);
+      await controller.install();
+      expect(repository.downloadCalls, 1);
+
+      final metered = _FakeUpdateRepository(release: _release());
+      final meteredController = AppUpdateController(
+        repository: metered,
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.windows,
+          backgroundDownloadAllowed: false,
+        ),
+        downloadInBackground: ValueNotifier(true),
+      );
+      addTearDown(meteredController.dispose);
+      await meteredController.initialize();
+      await pumpEventQueue();
+      expect(meteredController.downloaded, isFalse);
+      expect(metered.downloadCalls, 0);
+    },
+  );
+
+  test(
+    'Android permission continuation reuses prepared module updates',
+    () async {
+      var preparations = 0;
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          installResults: [
+            AppUpdateInstallResult.permissionRequired,
+            AppUpdateInstallResult.started,
+          ],
+        ),
+        prepareModules: (_) async {
+          preparations++;
+        },
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      await controller.install();
+      expect(preparations, 1);
+      expect(controller.phase, AppUpdatePhase.installing);
+    },
+  );
+
+  test('waits for Android confirmation and reports cancellation', () async {
+    final completion = Completer<AppUpdateInstallResult>();
+    final platform = _FakeUpdatePlatform(installCompletion: completion);
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    final installation = controller.install();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.installing);
+    expect(controller.busy, isTrue);
+    await controller.install();
+    expect(platform.installCalls, 1);
+
+    completion.completeError(PlatformException(code: 'installation_cancelled'));
+    await installation;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.busy, isFalse);
+    expect(controller.message, 'The update installation was cancelled.');
+  });
+
+  test('reads the installed version after Android confirms success', () async {
+    final completion = Completer<AppUpdateInstallResult>();
+    final platform = _FakeUpdatePlatform(installCompletion: completion);
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final installation = controller.install();
+    await Future<void>.delayed(Duration.zero);
+    platform.version = '1.0.1';
+    completion.complete(AppUpdateInstallResult.installed);
+    await installation;
+    expect(controller.currentVersion, Version.parse('1.0.1'));
+    expect(controller.phase, AppUpdatePhase.upToDate);
+  });
+
+  test('restores an active Android session and reports its failure', () async {
+    final completion = Completer<AppUpdateInstallResult?>();
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: _FakeUpdatePlatform(restoreCompletion: completion),
+    );
+    addTearDown(controller.dispose);
+    final initialization = controller.initialize();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.installing);
+    completion.completeError(PlatformException(code: 'installation_storage'));
+    await initialization;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.message, 'Free up storage to install the update.');
+  });
+
+  test(
+    'checks the installed channel and exposes an available update',
+    () async {
+      final repository = _FakeUpdateRepository(release: _release());
+      final platform = _FakeUpdatePlatform();
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.phase, AppUpdatePhase.available);
+      expect(controller.currentVersion, Version.parse('1.0.0'));
+      expect(controller.release?.version, Version.parse('1.0.1'));
+      expect(repository.requestedTarget, AppUpdateTarget.android);
+    },
+  );
+
+  test('the installed version is known before and without a lookup', () async {
+    final lookup = Completer<AppRelease?>();
+    final controller = AppUpdateController(
+      repository: _PendingUpdateRepository(lookup.future),
+      platform: _FakeUpdatePlatform(target: AppUpdateTarget.windows),
+    );
+    addTearDown(controller.dispose);
+
+    final check = controller.check();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.checking);
+    expect(controller.currentVersion, Version.parse('1.0.0'));
+
+    lookup.completeError(const SocketException('offline'));
+    await check;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.currentVersion, Version.parse('1.0.0'));
+  });
+
+  test(
+    'Linux selects an update only for its installed package format',
+    () async {
+      const installation = LinuxAppUpdateInstallation(
+        package: LinuxAppUpdatePackage.rpm,
+        architecture: LinuxAppUpdateArchitecture.aarch64,
+      );
+      final repository = _FakeLinuxUpdateRepository(release: _release());
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.linux,
+          availabilityResult: const AppUpdateAvailability.available(
+            linuxInstallation: installation,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.phase, AppUpdatePhase.available);
+      expect(repository.requestedInstallation, installation);
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.installing);
+      expect(controller.message, 'Continue in your system package manager.');
+    },
+  );
+
+  test(
+    'reports Linux host verification failures without claiming installation',
+    () async {
+      final completion = Completer<AppUpdateInstallResult>();
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(installCompletion: completion),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      final installation = controller.install();
+      completion.completeError(PlatformException(code: 'verification_failed'));
+      await installation;
+
+      expect(controller.phase, AppUpdatePhase.error);
+      expect(
+        controller.message,
+        'The downloaded update failed its integrity check.',
+      );
+    },
+  );
+
+  test(
+    'Linux retains the GitHub release page when automatic updates are unavailable',
+    () async {
+      final release = _release();
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: release),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.openReleasePage();
+
+      expect(controller.phase, AppUpdatePhase.unavailable);
+      expect(controller.release, same(release));
+      expect(platform.openedReleasePages, [release.releaseUri]);
+    },
+  );
+
+  test(
+    'Linux opens the trusted latest release fallback when no newer metadata exists',
+    () async {
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.openReleasePage();
+
+      expect(platform.openedReleasePages, [
+        Uri.https('github.com', '/dmytro-yevs/copypaste/releases/latest'),
+      ]);
+    },
+  );
+
+  test(
+    'Linux PackageKit permission requests use package manager copy',
+    () async {
+      final controller = AppUpdateController(
+        repository: _FakeLinuxUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.linux,
+          availabilityResult: const AppUpdateAvailability.available(
+            linuxInstallation: LinuxAppUpdateInstallation(
+              package: LinuxAppUpdatePackage.deb,
+              architecture: LinuxAppUpdateArchitecture.x86_64,
+            ),
+          ),
+          installResults: [AppUpdateInstallResult.permissionRequired],
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.install();
+
+      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      expect(
+        controller.message,
+        'Authenticate in your system package manager to install this update.',
+      );
+    },
+  );
+
+  test(
+    'reuses the verified download after Android grants permission',
+    () async {
+      final repository = _FakeUpdateRepository(release: _release());
+      final platform = _FakeUpdatePlatform(
+        installResults: [
+          AppUpdateInstallResult.permissionRequired,
+          AppUpdateInstallResult.started,
+        ],
+      );
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      await controller.install();
+
+      expect(repository.downloadCalls, 1);
+      expect(platform.installCalls, 2);
+      expect(controller.phase, AppUpdatePhase.installing);
+    },
+  );
+
+  test('macOS delegates installation to Homebrew without a download', () async {
+    final repository = _FakeUpdateRepository(
+      release: AppRelease(
+        version: Version.parse('1.0.1'),
+        releaseUri: Uri.parse(
+          'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+        ),
+        prerelease: false,
+      ),
+    );
+    final platform = _FakeUpdatePlatform(
+      target: AppUpdateTarget.macos,
+      installResults: [AppUpdateInstallResult.restartRequired],
+    );
+    final controller = AppUpdateController(
+      repository: repository,
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.install();
+
+    expect(repository.downloadCalls, 0);
+    expect(controller.phase, AppUpdatePhase.restartRequired);
+    expect(
+      controller.message,
+      'The update is installed. Restart CopyPaste to use it.',
+    );
+  });
+
+  test('macOS bundles download the verified disk image first', () async {
+    final repository = _FakeUpdateRepository(release: _release());
+    final platform = _FakeUpdatePlatform(
+      target: AppUpdateTarget.macos,
+      installResults: [AppUpdateInstallResult.restartRequired],
+      availabilityResult: const AppUpdateAvailability.available(
+        macosInstallation: MacosAppUpdateInstallation.bundle,
+      ),
+    );
+    final controller = AppUpdateController(
+      repository: repository,
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.install();
+
+    expect(repository.downloadCalls, 1);
+    expect(platform.installedPackage?.asset.name, _release().asset!.name);
+    expect(controller.phase, AppUpdatePhase.restartRequired);
+  });
+
+  test('macOS bundles report a release without a signed package', () async {
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(
+        release: AppRelease(
+          version: Version.parse('1.0.1'),
+          releaseUri: Uri.parse(
+            'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+          ),
+          prerelease: false,
+        ),
+      ),
+      platform: _FakeUpdatePlatform(
+        target: AppUpdateTarget.macos,
+        availabilityResult: const AppUpdateAvailability.available(
+          macosInstallation: MacosAppUpdateInstallation.bundle,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.phase, AppUpdatePhase.unavailable);
+    expect(
+      controller.message,
+      'This release has no signed macOS update package.',
+    );
+  });
+
+  test('restart waits for completion and ignores duplicate requests', () async {
+    final completion = Completer<void>();
+    var restartCalls = 0;
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: _FakeUpdatePlatform(
+        target: AppUpdateTarget.macos,
+        installResults: [AppUpdateInstallResult.restartRequired],
+      ),
+      restart: () {
+        restartCalls++;
+        return completion.future;
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.restartApplication();
+    expect(restartCalls, 0);
+    await controller.install();
+    final restart = controller.restartApplication();
+    expect(controller.busy, isTrue);
+    await controller.restartApplication();
+    expect(restartCalls, 1);
+    completion.complete();
+    await restart;
+  });
+
+  test(
+    'failed restart preserves the installed update and can be retried',
+    () async {
+      var restartCalls = 0;
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.macos,
+          installResults: [AppUpdateInstallResult.restartRequired],
+        ),
+        restart: () async {
+          if (++restartCalls == 1) {
+            throw PlatformException(code: 'restart_failed');
+          }
+        },
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.install();
+      await controller.restartApplication();
+      expect(controller.phase, AppUpdatePhase.restartRequired);
+      expect(controller.busy, isFalse);
+      expect(controller.message, 'CopyPaste could not restart. Try again.');
+      await controller.restartApplication();
+      expect(restartCalls, 2);
+    },
+  );
+
+  test(
+    'reports an up-to-date installation without offering a package',
+    () async {
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(),
+        platform: _FakeUpdatePlatform(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.phase, AppUpdatePhase.upToDate);
+      expect(controller.release, isNull);
+    },
+  );
+}
+
+AppRelease _release() {
+  final version = Version.parse('1.0.1');
+  return AppRelease(
+    version: version,
+    releaseUri: Uri.parse(
+      'https://github.com/dmytro-yevs/copypaste/releases/tag/v$version',
+    ),
+    prerelease: false,
+    asset: AppReleaseAsset(
+      name: 'CopyPaste-v$version-android.apk',
+      downloadUri: Uri.parse(
+        'https://github.com/dmytro-yevs/copypaste/releases/download/v$version/CopyPaste-v$version-android.apk',
+      ),
+      sha256: 'a' * 64,
+      sizeBytes: 1024,
+      signatureUri: Uri.parse(
+        'https://github.com/dmytro-yevs/copypaste/releases/download/v$version/CopyPaste-v$version-android.apk.sig',
+      ),
+      signatureSha256: 'b' * 64,
+      signatureSizeBytes: 512,
+    ),
+  );
+}
+
+class _FakeUpdateRepository implements AppUpdateRepository {
+  _FakeUpdateRepository({this.release});
+
+  final AppRelease? release;
+  AppUpdateTarget? requestedTarget;
+  int downloadCalls = 0;
+
+  @override
+  Future<DownloadedAppUpdate> download(
+    AppRelease release, {
+    required void Function(double progress) onProgress,
+  }) async {
+    downloadCalls += 1;
+    onProgress(1);
+    return DownloadedAppUpdate(
+      path: '/tmp/${release.asset!.name}',
+      asset: release.asset!,
+    );
+  }
+
+  @override
+  Future<AppRelease?> findUpdate({
+    required Version currentVersion,
+    required AppUpdateTarget target,
+  }) async {
+    requestedTarget = target;
+    return release != null && release!.version > currentVersion
+        ? release
+        : null;
+  }
+
+  @override
+  void dispose() {}
+}
+
+class _FakeLinuxUpdateRepository extends _FakeUpdateRepository
+    implements LinuxAppUpdateRepository {
+  _FakeLinuxUpdateRepository({super.release});
+
+  LinuxAppUpdateInstallation? requestedInstallation;
+
+  @override
+  Future<AppRelease?> findLinuxUpdate({
+    required Version currentVersion,
+    required LinuxAppUpdateInstallation installation,
+  }) async {
+    requestedInstallation = installation;
+    return release != null && release!.version > currentVersion
+        ? release
+        : null;
+  }
+}
+
+class _FakeUpdatePlatform implements AppUpdatePlatform {
+  _FakeUpdatePlatform({
+    this.target = AppUpdateTarget.android,
+    List<AppUpdateInstallResult>? installResults,
+    this.installCompletion,
+    this.restoreCompletion,
+    this.availabilityResult = const AppUpdateAvailability.available(),
+    bool backgroundDownloadAllowed = true,
+  }) : _installResults = installResults ?? [AppUpdateInstallResult.started],
+       _backgroundDownloadAllowed = backgroundDownloadAllowed;
+
+  @override
+  final AppUpdateTarget target;
+  final List<AppUpdateInstallResult> _installResults;
+  int installCalls = 0;
+  DownloadedAppUpdate? installedPackage;
+  String version = '1.0.0';
+  final Completer<AppUpdateInstallResult>? installCompletion;
+  final Completer<AppUpdateInstallResult?>? restoreCompletion;
+  final AppUpdateAvailability availabilityResult;
+  final List<Uri> openedReleasePages = [];
+
+  @override
+  Future<AppUpdateInstallResult?> restoreInstallation() async =>
+      restoreCompletion == null ? null : await restoreCompletion!.future;
+
+  @override
+  Future<AppUpdateAvailability> availability() async => availabilityResult;
+
+  @override
+  Future<String> currentVersion() async => version;
+
+  @override
+  Future<AppUpdateInstallResult> install({
+    required AppRelease release,
+    DownloadedAppUpdate? package,
+  }) async {
+    final index = installCalls.clamp(0, _installResults.length - 1);
+    installCalls += 1;
+    installedPackage = package;
+    if (installCompletion != null) return installCompletion!.future;
+    return _installResults[index];
+  }
+
+  final bool _backgroundDownloadAllowed;
+
+  @override
+  Future<bool> backgroundDownloadAllowed() async => _backgroundDownloadAllowed;
+
+  @override
+  Future<void> openReleasePage(Uri uri) async {
+    openedReleasePages.add(uri);
+  }
+}
+
+class _PendingUpdateRepository extends _FakeUpdateRepository {
+  _PendingUpdateRepository(this.lookup);
+
+  final Future<AppRelease?> lookup;
+
+  @override
+  Future<AppRelease?> findUpdate({
+    required Version currentVersion,
+    required AppUpdateTarget target,
+  }) => lookup;
+}

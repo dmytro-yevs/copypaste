@@ -1,0 +1,219 @@
+#ifndef RUNNER_FLUTTER_WINDOW_H_
+#define RUNNER_FLUTTER_WINDOW_H_
+
+#include <flutter/dart_project.h>
+#include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+
+#include <functional>
+#include <memory>
+#include <map>
+#include <optional>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "win32_window.h"
+#include "app_update_channel.h"
+#include "device_authentication.h"
+#include "memory_pressure_monitor.h"
+#include "startup_channel.h"
+#include "window_material.h"
+
+// OS-call seam for the existing Quick Paste presentation operation.
+struct QuickPastePresentationApi {
+  decltype(&::GetCursorPos) get_cursor_pos = &::GetCursorPos;
+  decltype(&::MonitorFromPoint) monitor_from_point = &::MonitorFromPoint;
+  decltype(&::GetMonitorInfoW) get_monitor_info = &::GetMonitorInfoW;
+  decltype(&::SetWindowPos) set_window_pos = &::SetWindowPos;
+  decltype(&::GetDpiForWindow) get_dpi_for_window = &::GetDpiForWindow;
+  decltype(&::SetForegroundWindow) set_foreground_window = &::SetForegroundWindow;
+  decltype(&::ShowWindow) show_window = &::ShowWindow;
+  decltype(&::GetForegroundWindow) get_foreground_window = &::GetForegroundWindow;
+};
+
+RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
+                         int width, int height, int gap);
+
+bool PresentQuickPaste(
+    HWND window, const QuickPastePresentationApi& api,
+    const std::function<void()>& opened,
+    const std::function<bool()>& owns = [] { return true; },
+    const std::function<void()>& cleanup = {}, bool inspector_visible = false,
+    const std::optional<RECT>& tray_anchor = std::nullopt, bool reveal = true);
+
+bool RevealQuickPaste(HWND window, HWND pending_foreground,
+                     const QuickPastePresentationApi& api);
+
+bool CanRetireQuickPaste(uint64_t requested_generation, uint64_t generation,
+                        int64_t presentation_id, bool visible);
+
+bool CanFailQuickPasteOpen(uint64_t requested_generation, uint64_t generation,
+                          int64_t requested_id, int64_t current_id, bool retiring);
+
+// Public Win32 calls used by the presentation-scoped target decision flow.
+struct QuickPasteTargetApi {
+  decltype(&::GetForegroundWindow) get_foreground_window = &::GetForegroundWindow;
+  decltype(&::GetAncestor) get_ancestor = &::GetAncestor;
+  decltype(&::GetWindowThreadProcessId) get_owner = &::GetWindowThreadProcessId;
+  decltype(&::GetCurrentProcessId) get_current_process_id = &::GetCurrentProcessId;
+  decltype(&::IsWindow) is_window = &::IsWindow;
+  decltype(&::IsWindowVisible) is_window_visible = &::IsWindowVisible;
+  decltype(&::ShowWindow) show_window = &::ShowWindow;
+  decltype(&::SetForegroundWindow) set_foreground_window = &::SetForegroundWindow;
+  decltype(&::SendInput) send_input = &::SendInput;
+  decltype(&::GetAsyncKeyState) get_async_key_state = &::GetAsyncKeyState;
+};
+
+class QuickPasteTargetSession {
+ public:
+  explicit QuickPasteTargetSession(QuickPasteTargetApi api = {}) : api_(api) {}
+  int64_t Begin(HWND sampled_foreground, HWND popup);
+  bool HideForPreparation(int64_t id, HWND popup);
+  void Invalidate();
+  void Close(int64_t id, HWND popup);
+  bool Paste(int64_t id, HWND popup);
+  int64_t id() const { return id_; }
+  std::optional<DWORD> target_pid() const {
+    return target_ ? std::optional<DWORD>(target_->pid) : std::nullopt;
+  }
+  bool internally_hiding() const { return internally_hiding_; }
+
+ private:
+  struct Target { HWND root; DWORD pid; DWORD tid; };
+  std::optional<Target> Capture(HWND window) const;
+  bool Valid(const Target& target) const;
+  void Hide(HWND popup);
+  QuickPasteTargetApi api_;
+  std::optional<Target> target_;
+  int64_t counter_ = 0;
+  int64_t id_ = 0;
+  bool pasting_ = false;
+  bool internally_hiding_ = false;
+};
+
+enum class NeutralPasteResult { kSent, kCancelled, kFailed };
+
+// Sends Ctrl+V so held hotkey modifiers cannot change the command. `ready`
+// runs after the chord is built and before it is sent; false cancels it.
+NeutralPasteResult SendNeutralPaste(const QuickPasteTargetApi& api,
+                                    const std::function<bool()>& ready);
+
+// The Dart PasteOutcome name when the foreground window cannot receive
+// synthesized input, or nullopt when it can.
+std::optional<std::string> ForegroundInputBlocked(const QuickPasteTargetApi& api,
+                                                  HWND* target_root = nullptr);
+
+bool SendCaretLeft(const QuickPasteTargetApi& api, int count);
+
+bool ShowQuickPastePresentation(
+    HWND window, QuickPasteTargetSession& session, int64_t id,
+    const QuickPastePresentationApi& api, const std::function<void()>& opened,
+    bool inspector_visible = false,
+    const std::optional<RECT>& tray_anchor = std::nullopt, bool reveal = true);
+
+// A window that does nothing but host a Flutter view.
+class FlutterWindow : public Win32Window {
+ public:
+  // Creates a new FlutterWindow hosting a Flutter view running |project|.
+  explicit FlutterWindow(const flutter::DartProject& project,
+                         bool is_protected_pairing_context = false,
+                         std::string pairing_context_id = "",
+                         std::string pairing_ceremony_id = "",
+                         std::string pending_pairing_uri = "",
+                         bool is_quick_paste_context = false);
+  virtual ~FlutterWindow();
+
+  // Leaves the first frame hidden; Dart shows the window when it should.
+  void DeferInitialShow() { defer_initial_show_ = true; }
+
+ protected:
+  // Win32Window:
+  bool OnCreate() override;
+  void OnDestroy() override;
+  LRESULT MessageHandler(HWND window, UINT const message, WPARAM const wparam,
+                         LPARAM const lparam) noexcept override;
+
+ private:
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> security_channel_;
+  bool BeginProtectedPairingContext();
+  bool IsProtectedPairingContextActive() const;
+  bool DetachProtectedPairingContext();
+  bool CancelProtectedPairingContext();
+  std::string OpenProtectedPairingContext(const std::string& ceremony_id);
+  void CloseProtectedPairingContext(const std::string& context_id);
+  bool PrepareQuickPasteContext();
+  bool OpenQuickPasteContext(const std::optional<RECT>& tray_anchor = std::nullopt);
+  void CloseQuickPasteContext();
+  bool ShowQuickPaste(HWND sampled_foreground,
+                      const std::optional<RECT>& tray_anchor = std::nullopt);
+  bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember);
+  bool PasteIntoPreviousWindow(int64_t presentation_id);
+  void NotifyQuickPasteOpened();
+  void ScheduleQuickPasteRetirement();
+  void BeginQuickPasteShutdown();
+  void ShowMainWindow(bool open_settings);
+  void NotifyMemoryPressure();
+  // Foreground input for actions that bypass a Quick Paste presentation.
+  bool HandleForegroundInputCall(
+      const flutter::MethodCall<flutter::EncodableValue>& call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>& result);
+  void ContinueCaretMove();
+  void StartSecureFieldQuery();
+  void CompleteSecureFieldQuery(uint64_t generation, LPARAM state);
+
+  // The project to run.
+  flutter::DartProject project_;
+  bool is_protected_pairing_context_;
+  std::string pairing_context_id_;
+  std::string pairing_ceremony_id_;
+  std::string pending_pairing_uri_;
+  bool is_quick_paste_context_;
+  bool defer_initial_show_ = false;
+  bool quick_paste_inspector_visible_ = false;
+  bool quick_paste_inspector_pinned_ = false;
+  bool quick_paste_ready_ = false;
+  bool quick_paste_retiring_ = false;
+  uint64_t quick_paste_generation_ = 0;
+  int quick_paste_rounded_width_ = 0;
+  int quick_paste_rounded_height_ = 0;
+  void UpdateQuickPasteWindowCorners();
+  HWND main_window_handle_ = nullptr;
+  QuickPasteTargetSession quick_paste_session_;
+  std::optional<RECT> quick_paste_tray_anchor_;
+  HWND quick_paste_pending_foreground_ = nullptr;
+  uint64_t pairing_generation_ = 0;
+  bool pairing_cancellation_approved_ = false;
+  struct PendingCaretMove {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result;
+    int count = 0;
+    int attempts = 0;
+  };
+  std::optional<PendingCaretMove> pending_caret_move_;
+  // The Quick Paste context samples the field once per presentation; the main
+  // window samples it on each request.
+  std::optional<flutter::EncodableValue> secure_field_state_;
+  std::vector<std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>
+      secure_field_waiters_;
+  uint64_t secure_field_generation_ = 0;
+  bool secure_field_query_pending_ = false;
+
+  // The Flutter instance hosted by this window.
+  std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<StartupChannel> startup_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      pairing_presentation_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      pairing_links_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      quick_paste_channel_;
+  std::unique_ptr<AppUpdateChannel> app_update_channel_;
+  std::unique_ptr<DeviceAuthentication> device_authentication_;
+  std::unique_ptr<MemoryPressureMonitor> memory_pressure_monitor_;
+  std::unique_ptr<WindowMaterial> window_material_;
+  std::unique_ptr<FlutterWindow> protected_pairing_window_;
+  std::unique_ptr<FlutterWindow> quick_paste_window_;
+  std::map<uint64_t, std::unique_ptr<FlutterWindow>> retiring_quick_paste_windows_;
+};
+
+#endif  // RUNNER_FLUTTER_WINDOW_H_

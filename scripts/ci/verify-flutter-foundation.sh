@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+APP="$ROOT/apps/copypaste_flutter"
+VERSION_FILE="$ROOT/.flutter-version"
+[[ -f "$VERSION_FILE" ]] || { echo "missing .flutter-version" >&2; exit 1; }
+[[ -f "$APP/pubspec.yaml" ]] || { echo "missing apps/copypaste_flutter/pubspec.yaml" >&2; exit 1; }
+expected="$(tr -d '\r\n[:space:]' < "$VERSION_FILE")"
+[[ "$expected" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo ".flutter-version must be a stable Flutter version" >&2; exit 1; }
+python3 "$ROOT/scripts/release/version.py" check
+grep -Eq '^  shadcn_flutter: 0\.0\.55$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin shadcn_flutter: 0.0.55" >&2; exit 1; }
+grep -Eq '^  flutter_animate: 4\.5\.2$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin flutter_animate: 4.5.2" >&2; exit 1; }
+! grep -Eq '^  shadcn_ui:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain shadcn_ui" >&2; exit 1; }
+! grep -Eq '^  bottom_navigator:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain bottom_navigator" >&2; exit 1; }
+actual="$(flutter --version | awk '$1 == "Flutter" { print $2; exit }')"
+[[ "$actual" == "$expected" ]] || { echo "Flutter $expected is required; found ${actual:-unknown}" >&2; exit 1; }
+cd "$APP"
+flutter pub get --enforce-lockfile
+if [[ "${COPYPASTE_FLUTTER_STATIC_CHECKS:-1}" == 1 ]]; then
+    dart format --output=none --set-exit-if-changed lib test
+    flutter analyze --no-pub
+fi
+flutter test --no-pub
+flutter build "${COPYPASTE_FLUTTER_BUILD_TARGET:?missing Flutter build target}" --debug --no-pub

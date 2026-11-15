@@ -1,0 +1,284 @@
+name: Experimental Linux validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      build_matrix: ${{ steps.manifest.outputs.matrix }}
+      supplemental_matrix: ${{ steps.manifest.outputs.supplemental_matrix }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: manifest
+        run: |
+          echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier all --purpose build)" >> "$GITHUB_OUTPUT"
+          echo "supplemental_matrix=$(python3 scripts/release/platform_manifest.py matrix --tier all --purpose supplemental-build)" >> "$GITHUB_OUTPUT"
+
+  optional-modules:
+    name: Optional modules (${{ matrix.architecture }})
+    needs: platform
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platform.outputs.supplemental_matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/ocr
+      - name: Module lifecycle and OCR contracts
+        env:
+          OPENSSL_SRC_PERL: perl
+        run: |
+          cargo test -p copypaste-modules --locked
+          cargo test --manifest-path modules/ocr/Cargo.toml --locked
+          cargo clippy --manifest-path modules/ocr/Cargo.toml --locked --all-targets -- -D warnings
+          rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+          "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+
+  flutter-foundation:
+    name: Flutter foundation (${{ matrix.architecture }})
+    needs: platform
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platform.outputs.supplemental_matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .flutter-version)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: linux
+          profile: debug
+      - name: Install Linux Flutter build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libgtk-3-dev libsecret-1-dev libssl-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev ninja-build pkg-config
+      - run: ./scripts/ci/verify-flutter-foundation.sh
+        env:
+          COPYPASTE_FLUTTER_BUILD_TARGET: linux
+          CARGO_BUILD_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  linux-native-fixtures:
+    name: Linux native fixtures (${{ matrix.architecture }})
+    needs: platform
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install native fixture dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core build-essential dbus-x11 gobject-introspection libgirepository1.0-dev \
+            libgtk-3-dev libmutter-14-dev libsecret-1-dev libssl-dev \
+            libx11-dev libxres-dev libxi-dev libxtst-dev nodejs pkg-config ripgrep sway \
+            x11-utils xvfb wl-clipboard
+      - name: Run X11, GNOME bridge, portal, PackageKit, restart, companion, and Wayland fixtures
+        run: ./scripts/ci/test-linux-native-fixtures.sh
+
+  linux-mutter-bridges:
+    name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mutter: [46, 47]
+        architecture: [x86_64, aarch64]
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+          - { architecture: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build Mutter 47 in a matching GNOME 47 dependency root
+        if: matrix.mutter == 47
+        run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
+      - name: Install upstream Mutter 46 build dependencies
+        if: matrix.mutter == 46
+        run: |
+          set -euo pipefail
+          sudo python3 - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
+          source, count = re.subn(r'^Types: deb$', 'Types: deb-src', source, flags=re.MULTILINE)
+          if not count:
+              raise ValueError('Ubuntu source repository configuration is unavailable')
+          Path('/etc/apt/sources.list.d/copypaste-mutter.sources').write_text(source)
+          PY
+          sudo apt-get update
+          sudo apt-get build-dep --yes --no-install-recommends mutter
+          sudo apt-get install --yes --no-install-recommends \
+            git meson ninja-build libmutter-14-dev gobject-introspection libgirepository1.0-dev
+      - name: Compile the stock-header shim and introspection metadata
+        if: matrix.mutter == 46
+        run: make -C packaging/linux/desktop-integrations/gnome-shell-extension/native
+      - name: Compile the pinned patched Mutter library
+        if: matrix.mutter == 46
+        working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
+        run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
+
+  linux-kwin-bridges:
+    name: KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        kwin: ['6.0', '6.3']
+        architecture: [x86_64, aarch64]
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04, container_platform: linux/amd64 }
+          - { architecture: aarch64, runner: ubuntu-24.04-arm, container_platform: linux/arm64 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Compile and exercise the private Qt D-Bus wire fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
+          COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
+          export COPYPASTE_QT_PREFIX
+          packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
+      - name: Compile the pinned patched KWin in an isolated Fedora builder
+        run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
+
+  linux-pr-release-candidate:
+    name: Linux release candidate (${{ matrix.architecture }})
+    needs: platform
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: linux
+          profile: release
+      - name: Install Linux release build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            cpio desktop-file-utils gobject-introspection libgirepository1.0-dev \
+            libgtk-3-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libkeybinder-3.0-dev libmutter-14-dev libsecret-1-dev libssl-dev \
+            libxi-dev libxtst-dev ninja-build pkg-config rpm patchelf \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+      - name: Fetch the pinned AppImageTool
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/appimagetool-${{ matrix.architecture }}.AppImage"
+          curl --fail --location --output "$tool" "${{ matrix.appimagetool_url }}"
+          printf '%s  %s\n' "${{ matrix.appimagetool_sha256 }}" "$tool" | sha256sum --check --status
+          chmod 755 "$tool"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
+          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+      - name: Build the unsigned native Flutter bundle and declared package formats
+        run: |
+          set -euo pipefail
+          read -r version build_number _ _ < <(python3 scripts/release/version.py values)
+          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
+          scripts/release/build-linux-flutter.sh "$version" "$build_number" "${{ matrix.architecture }}"
+          python3 scripts/release/verify-linux-runtime-baseline.py \
+            --bundle "dist/linux-${{ matrix.architecture }}/bundle" \
+            --architecture "${{ matrix.architecture }}" \
+            --maximum 2.39 \
+            --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
+          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}" --target-scope
+          IFS=, read -r -a expected_formats <<< "${{ matrix.formats }}"
+          for extension in "${expected_formats[@]}"; do
+            test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 3
+          name: linux-pr-release-candidate-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: |
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.AppImage
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.deb
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.rpm
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
+
+  linux-package-fixtures:
+    name: Linux package fixtures (${{ matrix.architecture }})
+    needs: platform
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build and extract every Linux package format
+        env:
+          COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
+        run: scripts/release/test-linux-packages.sh

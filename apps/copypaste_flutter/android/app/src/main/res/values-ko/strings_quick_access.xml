@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">CopyPaste 클립</string>
+    <string name="quick_access_ime_switch_back">키보드 전환</string>
+    <string name="quick_access_tile_save_label">클립보드 저장</string>
+    <string name="quick_access_tile_capture_label">클립보드 수집</string>
+    <string name="quick_access_widget_label">최근 클립</string>
+    <string name="quick_access_widget_description">최근 클립입니다. 클립을 탭하면 복사됩니다.</string>
+    <string name="quick_access_queue_intake_label">붙여넣기 대기열에 추가</string>
+    <string name="quick_access_transform_label">변환</string>
+</resources>

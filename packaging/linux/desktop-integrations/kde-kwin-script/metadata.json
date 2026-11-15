@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Id": "copypaste-quick-paste",
+    "Name": "CopyPaste Quick Paste",
+    "Description": "Restores the focused window for CopyPaste Quick Paste on Plasma Wayland.",
+    "Icon": "edit-paste",
+    "Version": "1",
+    "License": "MIT",
+    "Website": "https://github.com/copypaste/copy-paste"
+  },
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js",
+  "KPackageStructure": "KWin/Script"
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">CopyPaste-Einträge</string>
+    <string name="quick_access_ime_switch_back">Tastatur wechseln</string>
+    <string name="quick_access_tile_save_label">Zwischenablage speichern</string>
+    <string name="quick_access_tile_capture_label">Erfassung der Zwischenablage</string>
+    <string name="quick_access_widget_label">Letzte Einträge</string>
+    <string name="quick_access_widget_description">Deine neuesten Einträge. Tippe auf einen, um ihn zu kopieren.</string>
+    <string name="quick_access_queue_intake_label">Zur Einfügewarteschlange hinzufügen</string>
+    <string name="quick_access_transform_label">Umwandeln</string>
+</resources>

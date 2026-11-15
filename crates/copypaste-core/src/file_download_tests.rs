@@ -1,0 +1,877 @@
+use crate::{
+    file_download::FileDownloads, file_import, file_transfer, Keyring, Store, StoreSource,
+};
+use copypaste_p2p::{
+    peers::PeerStore,
+    sync::{SyncError, SyncSource},
+    Node, PairingToken, Peer,
+};
+use std::{
+    io::Write,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+};
+
+struct ObservedSource {
+    source: StoreSource,
+    reads: AtomicUsize,
+}
+impl SyncSource for ObservedSource {
+    fn deferred_file(
+        &self,
+        id: &str,
+    ) -> Result<Option<Box<dyn copypaste_p2p::sync::DeferredFileSource>>, SyncError> {
+        self.source.deferred_file(id)
+    }
+    fn observe_file_transfer(
+        &self,
+        id: &str,
+        peer: &str,
+    ) -> Option<Box<dyn copypaste_p2p::sync::FileTransferObserver>> {
+        self.source.observe_file_transfer(id, peer)
+    }
+    fn device_id(&self) -> String {
+        self.source.device_id()
+    }
+    fn device_name(&self) -> String {
+        self.source.device_name()
+    }
+    fn summaries(
+        &self,
+        since: i64,
+    ) -> Result<Vec<copypaste_p2p::protocol::ItemSummary>, SyncError> {
+        self.source.summaries(since)
+    }
+    fn local_summaries(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<copypaste_p2p::protocol::ItemSummary>, SyncError> {
+        self.source.local_summaries(ids)
+    }
+    fn fetch(&self, ids: &[String]) -> Result<Vec<copypaste_p2p::protocol::SyncItem>, SyncError> {
+        self.source.fetch(ids)
+    }
+    fn apply(&self, item: copypaste_p2p::protocol::SyncItem) -> Result<bool, SyncError> {
+        self.source.apply(item)
+    }
+    fn file_chunk(&self, id: &str, hash: &str, index: u64) -> Result<Vec<u8>, SyncError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.source.file_chunk(id, hash, index)
+    }
+    fn file_size(&self, id: &str, hash: &str) -> Result<u64, SyncError> {
+        self.source.file_size(id, hash)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copies() {
+    exercise_download(false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reference_offer_downloads_original_on_demand_and_records_both_directions() {
+    exercise_download(true).await;
+}
+async fn exercise_download(deferred: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let source_key = Arc::new(Keyring::from_secret(&[41; 32]));
+    let target_key = Arc::new(Keyring::from_secret(&[42; 32]));
+    let source = Store::open_in_memory(&source_key.db_key()).unwrap();
+    let target = Store::open_in_memory(&target_key.db_key()).unwrap();
+    let original = dir.path().join("Hail-v1.10.0.apk");
+    if let Some(path) = std::env::var_os("COPYPASTE_TEST_FILE") {
+        std::fs::copy(path, &original).unwrap();
+    } else {
+        let mut file = std::fs::File::create(&original).unwrap();
+        let chunk = [0x5a; file_transfer::CHUNK_BYTES];
+        let mut remaining = 6_158_760;
+        while remaining > 0 {
+            let size = remaining.min(chunk.len());
+            file.write_all(&chunk[..size]).unwrap();
+            remaining -= size;
+        }
+    }
+    let config = copypaste_ipc::ConfigData::default();
+    let row = if deferred {
+        crate::file_reference::import(
+            &source,
+            &source_key,
+            original.to_str().unwrap(),
+            "Hail-v1.10.0.apk",
+            "application/vnd.android.package-archive",
+            &config,
+            None,
+        )
+        .unwrap()
+    } else {
+        file_import::import_file(
+            &source,
+            &source_key,
+            &original,
+            "Hail-v1.10.0.apk",
+            "application/vnd.android.package-archive",
+            original.to_str(),
+            &config,
+        )
+        .unwrap()
+    };
+    let expected = file_transfer::row_offer(&row, &source_key.item_key())
+        .unwrap()
+        .unwrap();
+    assert!(expected.size_bytes > copypaste_ipc::MAX_CONTENT_BYTES as u64);
+    let source_view = Arc::new(ObservedSource {
+        source: StoreSource::new(
+            source.clone(),
+            Arc::clone(&source_key),
+            "sender".into(),
+            "Source".into(),
+            config.clone(),
+        ),
+        reads: AtomicUsize::new(0),
+    });
+    let target_view = StoreSource::new(
+        target.clone(),
+        Arc::clone(&target_key),
+        "receiver".into(),
+        "Destination".into(),
+        config.clone(),
+    );
+    let sender = Arc::new(Node::new(
+        PeerStore::open(
+            &dir.path().join("sender-peers"),
+            &source_key.peer_store_key(),
+        )
+        .unwrap(),
+        None,
+        0,
+        true,
+    ));
+    let receiver = Node::new(
+        PeerStore::open(
+            &dir.path().join("receiver-peers"),
+            &target_key.peer_store_key(),
+        )
+        .unwrap(),
+        None,
+        0,
+        true,
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let token = PairingToken::generate();
+    let peer = Peer {
+        pairing_id: token.pairing_id(),
+        device_id: Some("sender".into()),
+        name: "Source".into(),
+        psk: token.psk(),
+        last_addr: Some(address),
+        last_seen_ms: 0,
+        profile: None,
+        profile_observed_at_ms: 0,
+    };
+    receiver.peers().upsert(peer.clone()).unwrap();
+    let mut sender_peer = peer.clone();
+    sender_peer.device_id = Some("receiver".into());
+    sender.peers().upsert(sender_peer).unwrap();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let server = tokio::spawn(copypaste_p2p::node::listen(
+        Arc::clone(&sender),
+        listener,
+        Arc::clone(&source_view),
+        |_: &str, _: &copypaste_p2p::sync::SyncOutcome| {},
+        |_| {},
+        shutdown,
+    ));
+    receiver.sync_one(&peer, &target_view).await.unwrap();
+    assert_eq!(
+        source_view.reads.load(Ordering::SeqCst),
+        0,
+        "History sync must never request a file chunk"
+    );
+    assert!(!target.has_file_transfer(&row.id).unwrap());
+    let remote = target.get(&row.id).unwrap().unwrap();
+    assert_eq!(
+        file_transfer::row_offer(&remote, &target_key.item_key())
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+    assert!(matches!(
+        file_transfer::prepare_copy(&target, &target_key.item_key(), &remote, u64::MAX),
+        Err(file_transfer::FileTransferError::DownloadFirst)
+    ));
+    let wire = source_view.fetch(std::slice::from_ref(&row.id)).unwrap();
+    assert!(wire[0].binary_content.len() < 256);
+
+    let destination = dir.path().join("received.apk");
+    let downloads = Arc::new(FileDownloads::default());
+    downloads.cancel("pre-cancelled-token");
+    let early = dir.path().join("pre-cancelled.apk");
+    assert!(matches!(
+        downloads
+            .save_with_token(
+                &target,
+                &target_key,
+                &receiver,
+                "receiver",
+                &config,
+                crate::file_download::FileDownloadRequest {
+                    id: &row.id,
+                    destination: &early,
+                    token: Some("pre-cancelled-token")
+                }
+            )
+            .await,
+        Err(file_transfer::FileTransferError::Cancelled)
+    ));
+    assert!(!early.exists());
+
+    let source_completed = source.subscribe_file_operations();
+    let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&progress);
+    downloads
+        .save_with_progress(
+            &target,
+            &target_key,
+            &receiver,
+            "receiver",
+            &config,
+            crate::file_download::FileDownloadRequest {
+                id: &row.id,
+                destination: &destination,
+                token: Some("remote-progress"),
+            },
+            Arc::new(move |written, total| observed.lock().unwrap().push((written, total))),
+        )
+        .await
+        .unwrap();
+    {
+        let progress = progress.lock().unwrap();
+        assert_eq!(
+            progress.last(),
+            Some(&(expected.size_bytes, expected.size_bytes))
+        );
+        assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
+    if !deferred {
+        assert_eq!(
+            source_view.reads.load(Ordering::SeqCst) as u64,
+            expected
+                .size_bytes
+                .div_ceil(file_transfer::CHUNK_BYTES as u64)
+        );
+    }
+    let mut saved = std::fs::File::open(&destination).unwrap();
+    let actual = file_transfer::digest(&mut saved, u64::MAX).unwrap();
+    assert_eq!(actual.size_bytes, expected.size_bytes);
+    if !deferred {
+        assert_eq!(actual.sha256, expected.sha256);
+    }
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        std::fs::read(&original).unwrap()
+    );
+    wait_source_terminal(source_completed).await;
+    let records = target.file_operations(false, None, None).unwrap();
+    assert!(records.iter().any(|record| record.phase
+        == copypaste_ipc::FileOperationPhase::Completed
+        && record.local_path.as_deref() == destination.to_str()));
+    assert!(source
+        .file_operations(false, None, None)
+        .unwrap()
+        .iter()
+        .any(
+            |record| record.kind == copypaste_ipc::FileOperationKind::Send
+                && record.phase == copypaste_ipc::FileOperationPhase::Completed
+        ));
+    let copy = file_transfer::prepare_copy(&target, &target_key.item_key(), &remote, u64::MAX)
+        .unwrap()
+        .unwrap();
+    let path = copy.payload.source_reference().unwrap().to_owned();
+    assert_eq!(std::path::Path::new(&path), destination);
+    assert!(std::path::Path::new(&path).is_file());
+    drop(copy);
+    assert!(
+        std::path::Path::new(&path).is_file(),
+        "Copy reuses the user-owned download without a disposable duplicate"
+    );
+
+    let limited = copypaste_ipc::ConfigData {
+        max_file_size_bytes: 4 * 1024 * 1024,
+        ..config.clone()
+    };
+    let refused = dir.path().join("too-large.apk");
+    let error = downloads
+        .save(
+            &target,
+            &target_key,
+            &receiver,
+            "receiver",
+            &row.id,
+            &refused,
+            &limited,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("4194304"));
+    assert!(!refused.exists());
+
+    let source_cancelled = source.subscribe_file_operations();
+    let cancelled = dir.path().join("cancelled.apk");
+    let cancellation_started = Arc::new(AtomicBool::new(false));
+    let cancel_downloads = Arc::clone(&downloads);
+    let cancel_id = row.id.clone();
+    let cancellation_started_for_progress = Arc::clone(&cancellation_started);
+    let result = downloads
+        .save_with_progress(
+            &target,
+            &target_key,
+            &receiver,
+            "receiver",
+            &config,
+            crate::file_download::FileDownloadRequest {
+                id: &row.id,
+                destination: &cancelled,
+                token: None,
+            },
+            Arc::new(move |written, _| {
+                if written > 0 && !cancellation_started_for_progress.swap(true, Ordering::SeqCst) {
+                    cancel_downloads.cancel(&cancel_id);
+                }
+            }),
+        )
+        .await;
+    assert!(
+        cancellation_started.load(Ordering::SeqCst),
+        "progress must cancel a transfer after its first written bytes"
+    );
+    assert!(matches!(
+        result,
+        Err(file_transfer::FileTransferError::Cancelled)
+    ));
+    assert!(
+        !cancelled.exists(),
+        "Cancelled downloads remove their partial destination"
+    );
+
+    // Source bookkeeping is asynchronous; its terminal event also confirms
+    // file admission has been released before testing a different failure.
+    wait_source_terminal(source_cancelled).await;
+
+    if deferred {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&original)
+            .unwrap()
+            .set_len(expected.size_bytes + 1)
+            .unwrap();
+        let changed = dir.path().join("changed.apk");
+        let error = downloads
+            .save(
+                &target,
+                &target_key,
+                &receiver,
+                "receiver",
+                &row.id,
+                &changed,
+                &config,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("original file changed"),
+            "{error}"
+        );
+        assert!(!changed.exists());
+        assert!(target
+            .file_operations(false, None, None)
+            .unwrap()
+            .iter()
+            .any(|record| record
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("original file changed"))));
+    }
+
+    stop.send(true).unwrap();
+    server.await.unwrap();
+    let offline = dir.path().join("offline.apk");
+    let error = downloads
+        .save(
+            &target,
+            &target_key,
+            &receiver,
+            "receiver",
+            &row.id,
+            &offline,
+            &config,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("unavailable"));
+    assert!(!offline.exists());
+}
+
+#[test]
+fn detached_admission_is_bounded_released_and_closed_on_shutdown() {
+    let downloads = FileDownloads::default();
+    let slot = downloads.reserve_background().unwrap();
+    assert!(matches!(
+        downloads.reserve_background(),
+        Err(file_transfer::FileTransferError::Busy)
+    ));
+    drop(slot);
+    let slot = downloads.reserve_background().unwrap();
+    downloads.cancel_all();
+    drop(slot);
+    assert!(matches!(
+        downloads.reserve_background(),
+        Err(file_transfer::FileTransferError::Cancelled)
+    ));
+}
+
+async fn wait_source_terminal(
+    mut events: tokio::sync::broadcast::Receiver<copypaste_ipc::FileOperationUpdate>,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match events.recv().await {
+                Ok(event)
+                    if event.phase.as_ref().is_some_and(|phase| {
+                        *phase != copypaste_ipc::FileOperationPhase::Running
+                    }) =>
+                {
+                    break
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(error) => panic!("Source operation events closed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("The sender must publish its terminal operation state");
+}
+
+struct Pair {
+    target: Store,
+    target_key: Arc<Keyring>,
+    receiver: Node,
+    stop: tokio::sync::watch::Sender<bool>,
+    server: tokio::task::JoinHandle<()>,
+}
+
+/// Pair two in-memory devices, serve `source_view`, and sync its history.
+async fn pair<S: SyncSource + Send + Sync + 'static>(
+    dir: &std::path::Path,
+    source_key: &Keyring,
+    source_view: Arc<S>,
+) -> Pair {
+    let target_key = Arc::new(Keyring::from_secret(&[52; 32]));
+    let target = Store::open_in_memory(&target_key.db_key()).unwrap();
+    let node = |name: &str, key: &Keyring| {
+        Node::new(
+            PeerStore::open(&dir.join(name), &key.peer_store_key()).unwrap(),
+            None,
+            0,
+            true,
+        )
+    };
+    let sender = Arc::new(node("sender-peers", source_key));
+    let receiver = node("receiver-peers", &target_key);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let token = PairingToken::generate();
+    let peer = Peer {
+        pairing_id: token.pairing_id(),
+        device_id: Some("sender".into()),
+        name: "Source".into(),
+        psk: token.psk(),
+        last_addr: Some(listener.local_addr().unwrap()),
+        last_seen_ms: 0,
+        profile: None,
+        profile_observed_at_ms: 0,
+    };
+    receiver.peers().upsert(peer.clone()).unwrap();
+    let mut sender_peer = peer.clone();
+    sender_peer.device_id = Some("receiver".into());
+    sender.peers().upsert(sender_peer).unwrap();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let server = tokio::spawn(copypaste_p2p::node::listen(
+        sender,
+        listener,
+        source_view,
+        |_: &str, _: &copypaste_p2p::sync::SyncOutcome| {},
+        |_| {},
+        shutdown,
+    ));
+    let target_view = StoreSource::new(
+        target.clone(),
+        Arc::clone(&target_key),
+        "receiver".into(),
+        "Destination".into(),
+        copypaste_ipc::ConfigData::default(),
+    );
+    receiver.sync_one(&peer, &target_view).await.unwrap();
+    Pair {
+        target,
+        target_key,
+        receiver,
+        stop,
+        server,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn copied_files_download_together_into_one_folder_and_copy_back_as_a_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_key = Arc::new(Keyring::from_secret(&[51; 32]));
+    let source = Store::open_in_memory(&source_key.db_key()).unwrap();
+    let nested = dir.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    let files = [
+        (
+            dir.path().join("notes.txt"),
+            vec![1u8; file_transfer::CHUNK_BYTES * 2 + 5],
+        ),
+        (dir.path().join("photo.bin"), vec![2u8; 9]),
+        (nested.join("notes.txt"), vec![3u8; 70_000]),
+    ];
+    for (path, bytes) in &files {
+        std::fs::write(path, bytes).unwrap();
+    }
+    let metadata = |path: &std::path::Path| {
+        crate::FileMetadata::with_source_reference(
+            path.file_name().unwrap().to_str().unwrap(),
+            "application/octet-stream",
+            path.to_str().unwrap(),
+        )
+        .unwrap()
+    };
+    let config = copypaste_ipc::ConfigData::default();
+    let set = crate::file_reference::FileReference::prepare_set(
+        files[0].0.to_str().unwrap(),
+        None,
+        files[1..]
+            .iter()
+            .map(|(path, _)| (metadata(path), None))
+            .collect(),
+        config.capture_limit_bytes("file"),
+    )
+    .unwrap();
+    let row = set
+        .publish(
+            &source,
+            &source_key.item_key(),
+            metadata(&files[0].0),
+            1,
+            None,
+            None,
+            None,
+            &config,
+            true,
+        )
+        .unwrap()
+        .into_item();
+    let total: u64 = files.iter().map(|(_, bytes)| bytes.len() as u64).sum();
+    let source_view = Arc::new(StoreSource::new(
+        source.clone(),
+        Arc::clone(&source_key),
+        "sender".into(),
+        "Source".into(),
+        config.clone(),
+    ));
+    let pair = pair(dir.path(), &source_key, source_view).await;
+    let remote = pair.target.get(&row.id).unwrap().unwrap();
+    let opened = crate::ClipboardPayload::open(&remote, &pair.target_key.item_key()).unwrap();
+    let names: Vec<_> = opened
+        .file_members()
+        .into_iter()
+        .map(|file| file.filename)
+        .collect();
+    assert_eq!(names, ["notes.txt", "photo.bin", "notes.txt"]);
+
+    let folder = dir.path().join("received");
+    std::fs::create_dir(&folder).unwrap();
+    let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&progress);
+    FileDownloads::default()
+        .save_with_progress(
+            &pair.target,
+            &pair.target_key,
+            &pair.receiver,
+            "receiver",
+            &config,
+            crate::file_download::FileDownloadRequest {
+                id: &row.id,
+                destination: &folder,
+                token: None,
+            },
+            Arc::new(move |written, total| observed.lock().unwrap().push((written, total))),
+        )
+        .await
+        .unwrap();
+    let progress = progress.lock().unwrap().clone();
+    assert_eq!(progress.last(), Some(&(total, total)));
+    assert!(progress.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+    let saved = [
+        folder.join("notes.txt"),
+        folder.join("photo.bin"),
+        folder.join("notes (2).txt"),
+    ];
+    for ((_, bytes), path) in files.iter().zip(&saved) {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
+    let record = &pair.target.file_operations(false, None, None).unwrap()[0];
+    assert_eq!(record.file_count, 3);
+    assert_eq!(record.local_path.as_deref(), folder.to_str());
+
+    let copy =
+        file_transfer::prepare_copy(&pair.target, &pair.target_key.item_key(), &remote, u64::MAX)
+            .unwrap()
+            .unwrap();
+    let crate::ClipboardPayload::File {
+        metadata: Some(metadata),
+        ..
+    } = &copy.payload
+    else {
+        panic!("a file payload");
+    };
+    let written: Vec<_> = std::iter::once(metadata.source_reference.clone().unwrap())
+        .chain(metadata.more_references.iter().cloned())
+        .map(std::path::PathBuf::from)
+        .collect();
+    assert_eq!(written, saved);
+    pair.stop.send(true).unwrap();
+    pair.server.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interrupted_download_resumes_from_its_last_verified_chunk() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_key = Arc::new(Keyring::from_secret(&[53; 32]));
+    let source = Store::open_in_memory(&source_key.db_key()).unwrap();
+    let original = dir.path().join("archive.bin");
+    let bytes: Vec<u8> = (0..file_transfer::CHUNK_BYTES * 10 + 7)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    std::fs::write(&original, &bytes).unwrap();
+    let config = copypaste_ipc::ConfigData::default();
+    let row = file_import::import_file(
+        &source,
+        &source_key,
+        &original,
+        "archive.bin",
+        "application/octet-stream",
+        original.to_str(),
+        &config,
+    )
+    .unwrap();
+    let offer = file_transfer::row_offer(&row, &source_key.item_key())
+        .unwrap()
+        .unwrap();
+    let source_view = Arc::new(ObservedSource {
+        source: StoreSource::new(
+            source.clone(),
+            Arc::clone(&source_key),
+            "sender".into(),
+            "Source".into(),
+            config.clone(),
+        ),
+        reads: AtomicUsize::new(0),
+    });
+    let pair = pair(dir.path(), &source_key, Arc::clone(&source_view)).await;
+
+    // State left by an earlier run: four flushed chunks recorded as
+    // verified, plus a torn tail that was written but never checkpointed.
+    let destination = dir.path().join("resumed.bin");
+    let partial = crate::file_partial::partial_path(&destination);
+    let verified = 4 * file_transfer::CHUNK_BYTES;
+    let mut torn = bytes[..verified].to_vec();
+    torn.extend_from_slice(&[0xff; 100]);
+    std::fs::write(&partial, &torn).unwrap();
+    pair.target
+        .put_download_partial(&crate::storage::DownloadPartial {
+            item_id: row.id.clone(),
+            file_index: 0,
+            file_version: offer.sha256.clone(),
+            partial_path: partial.to_string_lossy().into_owned(),
+            destination: destination.to_string_lossy().into_owned(),
+            verified_bytes: verified as u64,
+            updated_at: crate::now_ms(),
+        })
+        .unwrap();
+    assert_eq!(
+        crate::file_download::pending(&pair.target, &pair.target_key).unwrap(),
+        [(row.id.clone(), destination.clone())]
+    );
+
+    FileDownloads::default()
+        .save(
+            &pair.target,
+            &pair.target_key,
+            &pair.receiver,
+            "receiver",
+            &row.id,
+            &destination,
+            &config,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+    assert_eq!(
+        source_view.reads.load(Ordering::SeqCst),
+        7,
+        "Only chunks after the verified prefix are transferred"
+    );
+    assert!(!partial.exists());
+    assert!(pair.target.download_partials().unwrap().is_empty());
+    pair.stop.send(true).unwrap();
+    pair.server.await.unwrap();
+}
+
+fn lone_node(dir: &std::path::Path, keyring: &Keyring) -> Node {
+    Node::new(
+        PeerStore::open(&dir.join("lone-peers"), &keyring.peer_store_key()).unwrap(),
+        None,
+        0,
+        true,
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_kept_copy_saves_after_its_original_is_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let keyring = Arc::new(Keyring::from_secret(&[61; 32]));
+    let store = Store::open_in_memory(&keyring.db_key()).unwrap();
+    let original = dir.path().join("notes.txt");
+    std::fs::write(&original, b"kept bytes").unwrap();
+    let config = copypaste_ipc::ConfigData::default();
+    let row = crate::file_reference::import(
+        &store,
+        &keyring,
+        original.to_str().unwrap(),
+        "notes.txt",
+        "text/plain",
+        &config,
+        None,
+    )
+    .unwrap();
+    assert!(crate::file_reference::keep_copy(&store, &keyring, &row.id, &config).unwrap());
+    assert_eq!(
+        store.get(&row.id).unwrap().unwrap().content_hash,
+        row.content_hash
+    );
+    std::fs::remove_file(&original).unwrap();
+    // A save folder takes the file under its own name.
+    let folder = dir.path().join("saved");
+    std::fs::create_dir(&folder).unwrap();
+    FileDownloads::default()
+        .save(
+            &store,
+            &keyring,
+            &lone_node(dir.path(), &keyring),
+            "",
+            &row.id,
+            &folder,
+            &config,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(folder.join("notes.txt")).unwrap(),
+        b"kept bytes"
+    );
+}
+
+struct FakeCloud(Vec<u8>, String);
+impl crate::file_download::CloudFileSource for FakeCloud {
+    fn fetch(
+        &self,
+        _: &str,
+        _: usize,
+        _: u64,
+    ) -> Option<tokio::sync::mpsc::Receiver<crate::file_download::CloudChunk>> {
+        let (sender, receiver) = tokio::sync::mpsc::channel(2);
+        sender
+            .try_send(crate::file_download::CloudChunk::Bytes(self.0.clone()))
+            .unwrap();
+        sender
+            .try_send(crate::file_download::CloudChunk::Done(self.1.clone()))
+            .unwrap();
+        Some(receiver)
+    }
+    fn cancel(&self, _: &str) {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unpaired_origin_falls_back_to_a_verified_cloud_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source_key, target_key) = (
+        Arc::new(Keyring::from_secret(&[51; 32])),
+        Arc::new(Keyring::from_secret(&[52; 32])),
+    );
+    let source = Store::open_in_memory(&source_key.db_key()).unwrap();
+    let target = Store::open_in_memory(&target_key.db_key()).unwrap();
+    let original = dir.path().join("notes.txt");
+    std::fs::write(&original, b"cloud bytes").unwrap();
+    let config = copypaste_ipc::ConfigData::default();
+    let row = crate::file_reference::import(
+        &source,
+        &source_key,
+        original.to_str().unwrap(),
+        "notes.txt",
+        "text/plain",
+        &config,
+        None,
+    )
+    .unwrap();
+    let source_view = StoreSource::new(
+        source,
+        Arc::clone(&source_key),
+        "sender".into(),
+        "Source".into(),
+        config.clone(),
+    );
+    let target_view = StoreSource::new(
+        target.clone(),
+        Arc::clone(&target_key),
+        "receiver".into(),
+        "Destination".into(),
+        config.clone(),
+    );
+    for item in source_view.fetch(std::slice::from_ref(&row.id)).unwrap() {
+        target_view.apply(item).unwrap();
+    }
+    let node = lone_node(dir.path(), &target_key);
+    let sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(b"cloud bytes"));
+    let save = |cloud: FakeCloud, name: &str| {
+        let downloads = FileDownloads::default();
+        downloads.set_cloud(Arc::new(cloud));
+        let destination = dir.path().join(name);
+        let (target, target_key, node, id, config) =
+            (&target, &target_key, &node, &row.id, &config);
+        async move {
+            let result = downloads
+                .save(
+                    target,
+                    target_key,
+                    node,
+                    "receiver",
+                    id,
+                    &destination,
+                    config,
+                )
+                .await;
+            (result, destination)
+        }
+    };
+    let (saved, destination) = save(FakeCloud(b"cloud bytes".to_vec(), sha.clone()), "a.txt").await;
+    saved.unwrap();
+    assert_eq!(std::fs::read(destination).unwrap(), b"cloud bytes");
+    let (tampered, destination) = save(FakeCloud(b"cloud bytez".to_vec(), sha), "b.txt").await;
+    assert!(matches!(
+        tampered,
+        Err(file_transfer::FileTransferError::Integrity)
+    ));
+    assert!(!destination.exists());
+}

@@ -1,0 +1,77 @@
+{
+  "command": "embed-text",
+  "language_field": "languages",
+  "models": [
+    {
+      "id": "minilm-en-v1",
+      "title": "English",
+      "languages": [
+        "en"
+      ],
+      "dimensions": 384,
+      "max_tokens": 256,
+      "query_prefix": "",
+      "passage_prefix": "",
+      "minimum_similarity": 0.3,
+      "files": [
+        {
+          "path": "model.onnx",
+          "url": "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/751bff37182d3f1213fa05d7196b954e230abad9/onnx/model_quantized.onnx",
+          "sha256": "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1",
+          "size_bytes": 22972370
+        },
+        {
+          "path": "tokenizer.json",
+          "url": "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/751bff37182d3f1213fa05d7196b954e230abad9/tokenizer.json",
+          "sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
+          "size_bytes": 711661
+        }
+      ]
+    },
+    {
+      "id": "e5-multilingual-v1",
+      "title": "Multilingual",
+      "languages": [
+        "en",
+        "uk",
+        "de",
+        "fr",
+        "es",
+        "it",
+        "pt",
+        "pl",
+        "cs",
+        "ru",
+        "ar",
+        "zh",
+        "ja",
+        "ko",
+        "tr",
+        "nl",
+        "sv",
+        "fi",
+        "el",
+        "hi"
+      ],
+      "dimensions": 384,
+      "max_tokens": 512,
+      "query_prefix": "query: ",
+      "passage_prefix": "passage: ",
+      "minimum_similarity": 0.8,
+      "files": [
+        {
+          "path": "model.onnx",
+          "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx",
+          "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+          "size_bytes": 118308185
+        },
+        {
+          "path": "tokenizer.json",
+          "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json",
+          "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+          "size_bytes": 17082730
+        }
+      ]
+    }
+  ]
+}

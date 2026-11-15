@@ -1,0 +1,589 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart' show SynchronousFuture;
+
+import 'package:copypaste_flutter/main.dart';
+import 'package:copypaste_flutter/app/app.dart';
+import 'package:copypaste_flutter/app/theme/app_overlays.dart';
+import 'package:copypaste_flutter/shared/state_view.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
+import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
+import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
+import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
+import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
+import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
+import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../features/onboarding/onboarding_test_support.dart';
+
+import 'package:flutter/services.dart';
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+import 'package:window_manager/window_manager.dart';
+
+void main() {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets(
+      'window quit command reaches the host while a dialog owns focus',
+      (tester) async {
+        final host = _FakeDesktopWindowHost();
+        final window = DesktopWindowController(
+          host: host,
+          geometryStore: const _NoopGeometryStore(),
+        );
+        final navigation = AppNavigationController();
+        try {
+          await tester.pumpWidget(
+            CopyPasteApp(navigation: navigation, desktopWindow: window),
+          );
+          await tester.pumpAndSettle();
+          final context = tester.element(find.byType(StateView).first);
+          unawaited(
+            AppOverlays.showDialog<void>(
+              context,
+              builder: (_) =>
+                  const AlertDialog(title: Text('Keyboard fixture')),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final modifier = platform == TargetPlatform.macOS
+              ? LogicalKeyboardKey.metaLeft
+              : LogicalKeyboardKey.controlLeft;
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
+          await tester.sendKeyUpEvent(modifier);
+          await tester.pumpAndSettle();
+          expect(host.quitCalls, 1);
+          expect(find.text('Keyboard fixture'), findsOneWidget);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(find.text('Keyboard fixture'), findsNothing);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          final disposal = window.dispose();
+          // Drain controller futures while still inside the widget test clock.
+          await tester.pump();
+          await disposal;
+          navigation.dispose();
+        }
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
+  testWidgets(
+    'hidden timeout unloads screens and images, then native focus restores navigation',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
+      final host = _FakeDesktopWindowHost();
+      final desktopWindow = DesktopWindowController(
+        host: host,
+        geometryStore: const _NoopGeometryStore(),
+      );
+      final onboarding = _completedOnboarding();
+      addTearDown(onboarding.dispose);
+      await tester.pumpWidget(
+        CopyPasteRoot(
+          desktopWindow: desktopWindow,
+          onboardingController: onboarding,
+          runtimeEnabled: false,
+        ),
+      );
+      await desktopWindow.initialize();
+      final nativeEvents = FlutterDesktopWindowHost()
+        ..setVisibilityChangedHandler(host.visibilityHandler);
+      addTearDown(() => nativeEvents.setVisibilityChangedHandler(null));
+      await host.requestSettings();
+      await tester.pumpAndSettle();
+      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      final rootSemanticsId = tester
+          .getSemantics(find.byKey(const ValueKey('application-semantics')))
+          .id;
+      final cache = PaintingBinding.instance.imageCache;
+      // Use a deterministic decoded image fixture, independent of asset I/O.
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawPaint(ui.Paint());
+      final picture = recorder.endRecording();
+      final image = picture.toImageSync(1024, 1024);
+      picture.dispose();
+      cache.putIfAbsent(
+        'hidden-memory-fixture',
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture(ImageInfo(image: image)),
+        ),
+      );
+      addTearDown(cache.clear);
+      final cachedBytes = cache.currentSizeBytes;
+      expect(cachedBytes, greaterThan(0));
+      nativeEvents.onWindowEvent('hide');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pump(const Duration(seconds: 59));
+      expect(find.byType(CopyPasteApp), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byType(CopyPasteApp), findsNothing);
+      final hiddenSemantics = tester.getSemantics(
+        find.byKey(const ValueKey('application-semantics')),
+      );
+      expect(hiddenSemantics.id, rootSemanticsId);
+      expect(hiddenSemantics.label, 'CopyPaste');
+      expect(hiddenSemantics.childrenCount, 0);
+      expect(
+        host.disposeCalls,
+        0,
+        reason: 'The native tray host remains alive.',
+      );
+      expect(cache.currentSizeBytes, 0);
+      expect(cache.liveImageCount, 0);
+      debugPrint(
+        'Hidden UI decoded image cache: $cachedBytes bytes -> ${cache.currentSizeBytes} bytes',
+      );
+      nativeEvents.onWindowFocus();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      expect(host.disposeCalls, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      semantics.dispose();
+    },
+  );
+
+  testWidgets('Windows onboarding finishes on the main History screen', (
+    tester,
+  ) async {
+    final windows = windowsOnboarding(
+      store: MemoryOnboardingStore(),
+      startup: _UnavailableStartup(),
+    );
+    addTearDown(windows.dispose);
+    await tester.pumpWidget(
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: windows),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome to CopyPaste'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set up your PC'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('CopyPaste is ready'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Get started'));
+    await tester.pumpAndSettle();
+    expect(windows.complete, isTrue);
+    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('CopyPaste is ready'), findsNothing);
+  });
+  testWidgets(
+    'macOS leaves destructive cleanup out of the native Quit request',
+    (tester) async {
+      final desktop = _QuitHookRecordingController();
+      final onboarding = _completedOnboarding();
+      addTearDown(onboarding.dispose);
+      await tester.pumpWidget(
+        CopyPasteRoot(
+          desktopWindow: desktop,
+          onboardingController: onboarding,
+          runtimeEnabled: false,
+        ),
+      );
+      expect(desktop.quitHookRegistrations, Platform.isMacOS ? 0 : 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('shows the injected macOS onboarding before the app shell', (
+    tester,
+  ) async {
+    final onboarding = macosOnboarding(
+      store: MemoryOnboardingStore(),
+      setup: _GrantedMacosSetupGateway(),
+    );
+    addTearDown(onboarding.dispose);
+
+    await tester.pumpWidget(
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: onboarding),
+    );
+    await tester.pump();
+
+    expect(find.text('Welcome to CopyPaste'), findsOneWidget);
+    expect(find.text('History runtime is unavailable'), findsNothing);
+  });
+
+  testWidgets('shows the injected Android onboarding before the app shell', (
+    tester,
+  ) async {
+    final onboarding = androidOnboarding(
+      store: MemoryAndroidOnboardingStore(),
+      setup: _AndroidSetupGateway(),
+    );
+    addTearDown(onboarding.dispose);
+
+    await tester.pumpWidget(
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: onboarding),
+    );
+    await tester.pump();
+
+    expect(find.text('Welcome to CopyPaste'), findsOneWidget);
+    expect(find.text('History runtime is unavailable'), findsNothing);
+  });
+
+  testWidgets('opens Settings from the desktop tray', (tester) async {
+    final host = _FakeDesktopWindowHost();
+    final onboarding = _completedOnboarding();
+    addTearDown(onboarding.dispose);
+    final desktopWindow = DesktopWindowController(
+      host: host,
+      geometryStore: const _NoopGeometryStore(),
+    );
+
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        desktopWindow: desktopWindow,
+        onboardingController: onboarding,
+        runtimeEnabled: false,
+      ),
+    );
+    await desktopWindow.initialize();
+    await host.requestSettings();
+    await tester.pump();
+
+    expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+  });
+
+  testWidgets('uses a standard header until native setup recovers', (
+    tester,
+  ) async {
+    final host = _FakeDesktopWindowHost(windowInitializationFails: true);
+    final onboarding = _completedOnboarding();
+    addTearDown(onboarding.dispose);
+    final desktopWindow = DesktopWindowController(
+      host: host,
+      geometryStore: const _NoopGeometryStore(),
+    );
+
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        desktopWindow: desktopWindow,
+        onboardingController: onboarding,
+        runtimeEnabled: false,
+      ),
+    );
+    await tester.pump();
+    await desktopWindow.initialize();
+    await tester.pump();
+
+    expect(find.text('Window setup needs attention'), findsOneWidget);
+    expect(find.byType(MacosWindowHeader), findsNothing);
+    expect(find.byType(DragToMoveArea), findsNothing);
+    expect(find.byType(AppBar), findsOneWidget);
+
+    host.windowInitializationFails = false;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('macos-native-controls-reserve')),
+      findsOneWidget,
+    );
+    expect(find.byType(DragToMoveArea), findsOneWidget);
+  }, skip: !Platform.isMacOS);
+
+  testWidgets('updates the onboarding header when native setup becomes ready', (
+    tester,
+  ) async {
+    final host = _FakeDesktopWindowHost();
+    final onboarding = macosOnboarding(
+      store: MemoryOnboardingStore(),
+      setup: _GrantedMacosSetupGateway(),
+    );
+    addTearDown(onboarding.dispose);
+    final desktopWindow = DesktopWindowController(
+      host: host,
+      geometryStore: const _NoopGeometryStore(),
+    );
+
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        desktopWindow: desktopWindow,
+        onboardingController: onboarding,
+        runtimeEnabled: false,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Welcome to CopyPaste'), findsOneWidget);
+    expect(find.byType(MacosWindowHeader), findsNothing);
+    expect(find.byType(DragToMoveArea), findsNothing);
+
+    await desktopWindow.initialize();
+    await tester.pump();
+
+    expect(find.byType(MacosWindowHeader), findsOneWidget);
+    expect(find.byType(DragToMoveArea), findsOneWidget);
+  }, skip: !Platform.isMacOS);
+
+  testWidgets('disposes its owned desktop window during teardown', (
+    tester,
+  ) async {
+    final host = _FakeDesktopWindowHost();
+    final onboarding = _completedOnboarding();
+    addTearDown(onboarding.dispose);
+    final desktopWindow = DesktopWindowController(
+      host: host,
+      geometryStore: const _NoopGeometryStore(),
+    );
+
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        desktopWindow: desktopWindow,
+        onboardingController: onboarding,
+        runtimeEnabled: false,
+      ),
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    expect(host.disposeCalls, 1);
+  });
+}
+
+OnboardingController _completedOnboarding() {
+  return macosOnboarding(
+    store: MemoryOnboardingStore(complete: true),
+    setup: _GrantedMacosSetupGateway(),
+  );
+}
+
+class _GrantedMacosSetupGateway implements MacosSetupGateway {
+  @override
+  Future<bool> accessibilityGranted() async => true;
+
+  @override
+  Future<MacosLoginItemStatus> loginItemStatus() async =>
+      MacosLoginItemStatus.enabled;
+
+  @override
+  Future<void> openLoginItemsSettings() async {}
+
+  @override
+  Future<bool> requestAccessibility() async => true;
+
+  @override
+  Future<MacosLoginItemStatus> setLaunchAtLogin(bool enabled) async => enabled
+      ? MacosLoginItemStatus.enabled
+      : MacosLoginItemStatus.notRegistered;
+}
+
+class _AndroidSetupGateway implements AndroidCaptureSetupGateway {
+  @override
+  Stream<AndroidCaptureSetupState> get changes => const Stream.empty();
+
+  static const stateValue = AndroidCaptureSetupState(
+    packageName: 'com.copypaste.app',
+    privilegedGrants: false,
+    notificationGranted: false,
+    batteryExempt: false,
+    captureEnabled: false,
+    serviceRunning: false,
+    lastCaptureAtMs: 0,
+    shizuku: AndroidShizukuState(
+      supported: true,
+      installed: false,
+      running: false,
+      permission: false,
+    ),
+    adbCommands: [],
+  );
+
+  @override
+  Future<AndroidCaptureSetupState> applyShizukuGrants() async => stateValue;
+
+  @override
+  Future<bool> openShizuku() async => true;
+
+  @override
+  Future<bool> requestBatteryExemption() async => true;
+
+  @override
+  Future<AndroidCaptureSetupState> requestNotifications() async => stateValue;
+
+  @override
+  Future<bool> setForegroundCaptureEnabled(bool enabled) async => true;
+
+  @override
+  Future<AndroidCaptureSetupState> setCaptureMethod(
+    AndroidBackgroundCaptureMethod method,
+  ) async => stateValue;
+
+  @override
+  Future<bool> requestOverlayPermission() async => true;
+
+  @override
+  Future<AndroidCaptureSetupState> startCapture() async => stateValue;
+
+  @override
+  Future<AndroidCaptureSetupState> state() async => stateValue;
+
+  @override
+  Future<AndroidCaptureSetupState> stopCapture() async => stateValue;
+}
+
+class _NoopGeometryStore implements DesktopWindowGeometryStore {
+  const _NoopGeometryStore();
+
+  @override
+  Future<DesktopWindowBounds?> read() async => null;
+
+  @override
+  Future<void> write(DesktopWindowBounds bounds) async {}
+}
+
+class _FakeDesktopWindowHost implements DesktopWindowHost {
+  int quitCalls = 0;
+  @override
+  Future<bool> isFullScreen() async => false;
+
+  @override
+  Future<void> setFullScreen(bool enabled) async {}
+
+  bool taskbarVisible = true;
+  bool trayVisible = true;
+
+  @override
+  Future<void> setTaskbarVisible(bool visible) async {
+    taskbarVisible = visible;
+  }
+
+  @override
+  Future<void> setTrayVisible(bool visible) async {
+    trayVisible = visible;
+  }
+
+  void Function(bool)? visibilityHandler;
+
+  @override
+  void setVisibilityChangedHandler(void Function(bool)? handler) {
+    visibilityHandler = handler;
+  }
+
+  _FakeDesktopWindowHost({this.windowInitializationFails = false});
+
+  int disposeCalls = 0;
+  bool windowInitializationFails;
+  Future<void> Function()? settingsHandler;
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls += 1;
+  }
+
+  @override
+  Future<DesktopWindowBounds> getBounds() async => desktopWindowInitialBounds;
+
+  @override
+  Future<void> hide() async {}
+
+  @override
+  Future<void> initializeTray({
+    bool visible = true,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
+  }) async {
+    settingsHandler = () =>
+        events.onAction(const TrayCommandAction(TrayCommand.openSettings));
+  }
+
+  @override
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu) async {}
+
+  @override
+  Future<void> openQuickPaste() async {}
+
+  @override
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+    bool show = true,
+  }) async {
+    taskbarVisible = showInTaskbar;
+    if (windowInitializationFails) {
+      throw StateError('Native window setup failed.');
+    }
+  }
+
+  @override
+  Future<void> quit() async {
+    quitCalls += 1;
+  }
+
+  @override
+  void setBoundsChangedHandler(Future<void> Function() onBoundsChanged) {}
+
+  @override
+  Future<void> setBounds(DesktopWindowBounds bounds) async {}
+
+  @override
+  Future<void> setCloseHandler(
+    Future<void> Function() onCloseRequested,
+  ) async {}
+
+  @override
+  Future<void> setMinimumSize(DesktopWindowSize size) async {}
+
+  @override
+  Future<void> showAndFocus() async {}
+
+  @override
+  Future<DesktopWorkArea> workAreaFor(DesktopWindowBounds bounds) async {
+    return const DesktopWorkArea(left: 0, top: 0, width: 1440, height: 900);
+  }
+
+  Future<void> requestSettings() async {
+    await settingsHandler?.call();
+  }
+}
+
+class _QuitHookRecordingController extends DesktopWindowController {
+  _QuitHookRecordingController()
+    : super(
+        host: _FakeDesktopWindowHost(),
+        geometryStore: const _NoopGeometryStore(),
+      );
+
+  int quitHookRegistrations = 0;
+
+  @override
+  void setBeforeQuit(Future<void> Function()? callback) {
+    if (callback != null) quitHookRegistrations += 1;
+    super.setBeforeQuit(callback);
+  }
+}
+
+class _UnavailableStartup implements LaunchAtLoginGateway {
+  @override
+  Future<LaunchAtLoginStatus> read() async => LaunchAtLoginStatus.unavailable;
+
+  @override
+  Future<LaunchAtLoginStatus> setEnabled(bool enabled) async =>
+      LaunchAtLoginStatus.unavailable;
+
+  @override
+  Future<void> openSystemSettings() async {}
+}

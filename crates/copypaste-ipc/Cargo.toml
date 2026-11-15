@@ -1,0 +1,43 @@
+[package]
+name = "copypaste-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The one model of the wire contract; no unimported DTO mirror or
+# CLI never imported, a duplicate in the daemon, and untyped Value poking in the
+# CLI. Both the daemon and the CLI depend on this crate and on nothing else for
+# wire types.
+[dependencies]
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+unicode-segmentation.workspace = true
+# `transport` only: the endpoint type every consumer of this crate already
+# frames over, so that "what a local IPC connection is" has one definition
+# rather than one per crate.
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# The Windows endpoint. `interprocess` owns connection waiting, listener
+# instance replacement and the Tokio stream adapter; the digest keeps a path
+# and username out of the machine-global pipe name.
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true
+sha2.workspace = true
+hex.workspace = true
+# Verifying the pipe server's account before a request is sent.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Threading",
+] }
+
+# The peer-uid check on a dialled socket.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }

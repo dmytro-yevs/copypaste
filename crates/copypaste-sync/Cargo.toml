@@ -1,0 +1,25 @@
+[package]
+name = "copypaste-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["storage"]
+storage = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:tokio"]
+
+[dependencies]
+copypaste-p2p = { path = "../copypaste-p2p", optional = true }
+tokio = { workspace = true, optional = true }
+copypaste-core = { path = "../copypaste-core", optional = true }
+copypaste-ipc = { path = "../copypaste-ipc" }
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

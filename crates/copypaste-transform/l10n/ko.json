@@ -1,0 +1,741 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON 서식 지정",
+      "description": "숫자, 이스케이프, 키 순서를 작성된 그대로 유지하며 JSON을 들여씁니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        },
+        "sort_keys": {
+          "label": "키 정렬"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON 축소",
+      "description": "JSON에서 불필요한 공백을 모두 제거합니다."
+    },
+    "structure.json_validate": {
+      "name": "JSON 검증",
+      "description": "텍스트가 올바른 JSON인지 확인하고 문제 위치를 보여 줍니다. 텍스트는 바꾸지 않습니다.",
+      "params": {
+        "lenient": {
+          "label": "주석과 후행 쉼표 허용"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON 키 정렬",
+      "description": "객체 키를 코드 포인트 순으로 정렬합니다. 배열 순서는 유지됩니다.",
+      "params": {
+        "recursive": {
+          "label": "중첩된 객체 포함"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON 문자열로 감싸기",
+      "description": "텍스트를 JSON 문자열 리터럴로 감싸고 따옴표와 줄바꿈을 이스케이프합니다."
+    },
+    "structure.json_unquote": {
+      "name": "JSON 문자열 풀기",
+      "description": "JSON 문자열 리터럴을 일반 텍스트로 되돌립니다. 이중 인코딩된 JSON도 처리합니다."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML을 JSON으로",
+      "description": "YAML 문서 하나를 JSON으로 변환합니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON을 YAML로",
+      "description": "JSON을 블록 스타일 YAML로 변환합니다."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV를 JSON으로",
+      "description": "CSV 또는 TSV 행을 JSON으로 변환합니다. 값은 텍스트로 유지됩니다.",
+      "params": {
+        "header": {
+          "label": "첫 행을 헤더로 사용"
+        },
+        "delimiter": {
+          "label": "구분 기호",
+          "options": {
+            "auto": "자동 감지",
+            "comma": "쉼표",
+            "semicolon": "세미콜론",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML 서식 지정",
+      "description": "텍스트를 바꾸지 않고 XML 요소를 들여씁니다. 외부 엔터티는 불러오지 않습니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML 축소",
+      "description": "XML 요소 사이의 공백을 제거합니다."
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 인코딩",
+      "description": "텍스트의 UTF-8 바이트를 Base64로 인코딩합니다.",
+      "params": {
+        "variant": {
+          "label": "알파벳",
+          "options": {
+            "standard": "표준",
+            "url_safe": "URL 안전"
+          }
+        },
+        "padding": {
+          "label": "패딩(=) 추가"
+        },
+        "wrap": {
+          "label": "76자마다 줄바꿈"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 디코딩",
+      "description": "표준 또는 URL 안전 Base64를 디코딩하며 줄바꿈, 빠진 패딩, data: URI 접두사는 무시합니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "text": "텍스트",
+            "hex": "16진수 바이트"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL 구성 요소 인코딩",
+      "description": "문자, 숫자, - . _ ~ 를 제외한 모든 문자를 퍼센트 인코딩합니다. 쿼리 값이나 경로 조각에 사용합니다.",
+      "params": {
+        "space": {
+          "label": "공백 인코딩 방식",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (폼 형식)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "전체 URL 인코딩",
+      "description": "URL에 허용되지 않는 문자만 인코딩하고 구조와 기존 %XX 시퀀스는 유지합니다."
+    },
+    "encode.url_decode": {
+      "name": "URL 디코딩",
+      "description": "%XX 시퀀스를 디코딩하고 잘못된 시퀀스는 위치를 알려 줍니다.",
+      "params": {
+        "plus_as_space": {
+          "label": "+를 공백으로 처리"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "16진수 인코딩",
+      "description": "텍스트의 UTF-8 바이트를 16진수로 씁니다.",
+      "params": {
+        "separator": {
+          "label": "구분자",
+          "options": {
+            "none": "없음",
+            "space": "공백"
+          }
+        },
+        "case": {
+          "label": "대소문자",
+          "options": {
+            "lower": "소문자",
+            "upper": "대문자"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "16진수 디코딩",
+      "description": "16진수를 다시 텍스트로 바꾸며 공백과 0x 접두사는 무시합니다."
+    },
+    "encode.html_encode": {
+      "name": "HTML 엔티티 인코딩",
+      "description": "& < > \" '를 HTML 엔티티로 바꾸고, 선택하면 ASCII가 아닌 모든 문자를 숫자 참조로 바꿉니다.",
+      "params": {
+        "scope": {
+          "label": "인코딩할 문자",
+          "options": {
+            "minimal": "& < > \" '만",
+            "non_ascii": "ASCII가 아닌 문자도 모두"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML 엔티티 디코딩",
+      "description": "모든 HTML5 이름 엔티티와 숫자 참조를 디코딩합니다. 알 수 없는 엔티티는 그대로 둡니다."
+    },
+    "encode.backslash_escape": {
+      "name": "백슬래시 이스케이프",
+      "description": "백슬래시, 큰따옴표, 줄바꿈, 탭, 제어 문자를 C 및 JSON 방식으로 이스케이프합니다."
+    },
+    "encode.backslash_unescape": {
+      "name": "백슬래시 이스케이프 해제",
+      "description": "\\n, \\t, \\\", \\uXXXX, \\xXX 등의 이스케이프를 문자로 되돌립니다. 알 수 없는 이스케이프는 경고와 함께 그대로 둡니다."
+    },
+    "encode.unicode_escape": {
+      "name": "유니코드 이스케이프",
+      "description": "ASCII가 아닌 모든 문자를 \\uXXXX 이스케이프로 씁니다.",
+      "params": {
+        "astral": {
+          "label": "U+FFFF를 넘는 문자",
+          "options": {
+            "surrogate_pair": "서로게이트 쌍 (\\uD83D\\uDE00)",
+            "braces": "중괄호 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "유니코드 이스케이프 해제",
+      "description": "\\uXXXX와 \\u{...} 이스케이프를 문자로 되돌리고 나머지 텍스트는 그대로 둡니다."
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "대문자",
+      "description": "Unicode 전체 규칙으로 모든 글자를 대문자로 바꿉니다.",
+      "params": {
+        "locale": {
+          "label": "언어 규칙",
+          "options": {
+            "invariant": "언어 중립",
+            "system": "기기 언어"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "소문자",
+      "description": "Unicode 전체 규칙으로 모든 글자를 소문자로 바꿉니다.",
+      "params": {
+        "locale": {
+          "label": "언어 규칙",
+          "options": {
+            "invariant": "언어 중립",
+            "system": "기기 언어"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "제목 스타일",
+      "description": "단어의 첫 글자를 대문자로 바꿉니다. 헤드라인 스타일은 짧은 단어를 소문자로 둡니다.",
+      "params": {
+        "style": {
+          "label": "스타일",
+          "options": {
+            "headline": "헤드라인",
+            "all_words": "모든 단어"
+          }
+        },
+        "keep_acronyms": {
+          "label": "약어 유지"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "문장 스타일",
+      "description": "각 문장의 첫 단어를 대문자로 시작하고 나머지는 소문자로 바꿉니다.",
+      "params": {
+        "keep_acronyms": {
+          "label": "약어 유지"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "단어를 소문자로 시작하는 식별자로 합칩니다.",
+      "params": {
+        "per_line": {
+          "label": "줄마다 따로"
+        },
+        "keep_acronyms": {
+          "label": "약어 유지"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "각 단어를 대문자로 시작하는 식별자로 합칩니다.",
+      "params": {
+        "per_line": {
+          "label": "줄마다 따로"
+        },
+        "keep_acronyms": {
+          "label": "약어 유지"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "소문자 단어를 밑줄로 연결합니다.",
+      "params": {
+        "per_line": {
+          "label": "줄마다 따로"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "소문자 단어를 하이픈으로 연결합니다.",
+      "params": {
+        "per_line": {
+          "label": "줄마다 따로"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "대문자 단어를 밑줄로 연결합니다.",
+      "params": {
+        "per_line": {
+          "label": "줄마다 따로"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "대소문자 바꾸기",
+      "description": "대문자는 소문자로, 소문자는 대문자로 바꿉니다."
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 해시",
+      "description": "MD5 다이제스트입니다. 보안 용도로는 쓰지 마세요. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 해시",
+      "description": "SHA-1 다이제스트입니다. 보안 용도로는 쓰지 마세요. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 해시",
+      "description": "SHA-256 다이제스트입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 해시",
+      "description": "SHA-512 다이제스트입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 체크섬",
+      "description": "ZIP과 PNG에서 쓰는 IEEE 다항식의 CRC-32입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex": "16진수 (8자리)",
+            "decimal": "10진수"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "앞뒤 공백 제거",
+      "description": "텍스트 앞뒤의 공백과 줄바꿈을 제거합니다."
+    },
+    "lines.trim_each": {
+      "name": "각 줄 공백 제거",
+      "description": "각 줄의 앞, 뒤 또는 양쪽 공백을 제거합니다.",
+      "params": {
+        "sides": {
+          "label": "위치",
+          "options": {
+            "both": "양쪽",
+            "start": "앞",
+            "end": "뒤"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "공백 합치기",
+      "description": "연속된 공백과 탭을 공백 하나로 바꿉니다.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "줄바꿈 유지"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "빈 줄 제거",
+      "description": "비어 있거나 공백만 있는 줄을 삭제합니다.",
+      "params": {
+        "whitespace_only": {
+          "label": "공백만 있는 줄도 빈 줄로 처리"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "줄 정렬",
+      "description": "줄을 알파벳순, 자연순, 숫자순 또는 길이순으로 정렬합니다.",
+      "params": {
+        "order": {
+          "label": "순서",
+          "options": {
+            "asc": "오름차순",
+            "desc": "내림차순"
+          }
+        },
+        "mode": {
+          "label": "비교 방식",
+          "options": {
+            "natural": "자연순",
+            "code_point": "코드 포인트",
+            "case_insensitive": "대소문자 무시",
+            "numeric": "숫자",
+            "length": "길이"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "중복 줄 제거",
+      "description": "각 줄의 첫 번째 항목을 원래 순서대로 남깁니다.",
+      "params": {
+        "case_sensitive": {
+          "label": "대소문자 구분"
+        },
+        "compare_trimmed": {
+          "label": "앞뒤 공백 무시"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "줄 순서 뒤집기",
+      "description": "줄의 순서를 반대로 바꿉니다."
+    },
+    "lines.join": {
+      "name": "줄 합치기",
+      "description": "모든 줄을 구분자로 한 줄로 합칩니다.",
+      "params": {
+        "separator": {
+          "label": "구분자",
+          "options": {
+            "space": "공백",
+            "comma": "쉼표",
+            "none": "없음",
+            "custom": "사용자 지정"
+          }
+        },
+        "custom_separator": {
+          "label": "사용자 지정 구분자"
+        },
+        "drop_empty": {
+          "label": "빈 줄 건너뛰기"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "문단 줄바꿈 풀기",
+      "description": "PDF에서 복사한 텍스트처럼 문단 안에서 강제로 나뉜 줄을 이어 붙입니다.",
+      "params": {
+        "dehyphenate": {
+          "label": "하이픈으로 나뉜 단어 잇기"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "줄 앞에 접두사 추가",
+      "description": "각 줄 앞에 글머리 기호, 번호, 인용 표시 또는 사용자 지정 텍스트를 추가합니다.",
+      "params": {
+        "style": {
+          "label": "스타일",
+          "options": {
+            "dash": "대시",
+            "asterisk": "별표",
+            "number": "번호",
+            "quote": "인용",
+            "custom": "사용자 지정"
+          }
+        },
+        "custom_prefix": {
+          "label": "사용자 지정 접두사"
+        },
+        "skip_empty": {
+          "label": "빈 줄 건너뛰기"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "보이지 않는 문자 제거",
+      "description": "폭이 없는 문자, 양방향 제어 문자, 소프트 하이픈을 삭제하고 줄바꿈 없는 공백을 일반 공백으로 바꿉니다."
+    },
+    "clean.quotes": {
+      "name": "따옴표 곧게 하기",
+      "description": "둥근 따옴표를 곧은 따옴표로 바꾸고, 선택하면 대시를 하이픈으로 바꿉니다.",
+      "params": {
+        "dashes": {
+          "label": "대시도 곧게 하기"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "추적 매개변수 제거",
+      "description": "모든 링크에서 utm_ 및 클릭 ID 매개변수를 제거하고 서명된 링크는 그대로 둡니다.",
+      "keywords": [
+        "추적",
+        "링크 정리",
+        "개인정보"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "리디렉션 링크 풀기",
+      "description": "검색, 소셜, Safe Links 리디렉션을 오프라인으로 실제 대상 주소로 바꿉니다.",
+      "keywords": [
+        "리디렉션"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "서식 있는 텍스트를 일반 텍스트로",
+      "description": "서식 있는 내용의 텍스트를 문단과 줄바꿈을 유지한 채 남깁니다.",
+      "keywords": [
+        "일반 텍스트",
+        "서식 제거"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML을 Markdown으로",
+      "description": "제목, 링크, 목록, 표, 코드 블록을 Markdown으로 변환하며 코드의 공백은 유지합니다.",
+      "keywords": [
+        "변환"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown을 일반 텍스트로",
+      "description": "Markdown 문법을 제거하고 텍스트만 남깁니다. 표는 탭으로 구분됩니다.",
+      "keywords": [
+        "일반 텍스트"
+      ],
+      "params": {
+        "link_style": {
+          "label": "링크",
+          "options": {
+            "text": "텍스트만",
+            "text_url": "텍스트와 URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "목록 기호 유지"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: 디코딩",
+      "description": "토큰의 헤더와 페이로드를 JSON으로 보여 줍니다. 서명은 검증하지 않습니다.",
+      "keywords": [
+        "토큰"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "타임스탬프를 날짜로",
+      "description": "Unix 타임스탬프를 날짜로 바꾸며 초, 밀리초, 마이크로초, 나노초를 자동으로 판별합니다.",
+      "keywords": [
+        "타임스탬프",
+        "시간"
+      ],
+      "params": {
+        "unit": {
+          "label": "단위",
+          "options": {
+            "auto": "자동 판별",
+            "seconds": "초",
+            "milliseconds": "밀리초",
+            "microseconds": "마이크로초",
+            "nanoseconds": "나노초"
+          }
+        },
+        "format": {
+          "label": "형식",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (현지 시간)",
+            "rfc2822": "RFC 2822 형식"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "날짜를 타임스탬프로",
+      "description": "ISO 8601, RFC 2822 또는 일반 날짜를 Unix 타임스탬프로 바꿉니다. 오프셋이 없으면 현지 시간을 사용합니다.",
+      "keywords": [
+        "타임스탬프",
+        "시간"
+      ],
+      "params": {
+        "unit": {
+          "label": "단위",
+          "options": {
+            "seconds": "초",
+            "milliseconds": "밀리초"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "찾아 바꾸기",
+      "description": "텍스트 또는 정규식 일치 항목을 바꿉니다. 바꿀 내용의 $1은 그룹을 넣습니다.",
+      "keywords": [
+        "바꾸기",
+        "찾기"
+      ],
+      "params": {
+        "find": {
+          "label": "찾을 내용"
+        },
+        "replace": {
+          "label": "바꿀 내용"
+        },
+        "regex": {
+          "label": "정규식"
+        },
+        "case_sensitive": {
+          "label": "대/소문자 구분"
+        },
+        "whole_word": {
+          "label": "전체 단어만"
+        },
+        "multiline": {
+          "label": "^와 $를 줄마다 적용"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "일치 항목 추출",
+      "description": "URL, 이메일, 숫자, 주소, 색상, UUID 또는 패턴 일치 항목을 한 줄에 하나씩 나열합니다.",
+      "keywords": [
+        "추출"
+      ],
+      "params": {
+        "preset": {
+          "label": "찾을 항목",
+          "options": {
+            "urls": "링크",
+            "emails": "이메일 주소",
+            "numbers": "숫자",
+            "ipv4": "IPv4 주소",
+            "ipv6": "IPv6 주소",
+            "hex_colors": "16진수 색상",
+            "uuids": "UUID 값",
+            "custom": "사용자 지정 패턴"
+          }
+        },
+        "pattern": {
+          "label": "패턴"
+        },
+        "dedupe": {
+          "label": "중복 제거"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "문자 제거",
+      "description": "숫자, 문장 부호, ASCII가 아닌 문자, 이모지 또는 지정한 문자를 삭제합니다.",
+      "keywords": [
+        "삭제",
+        "숫자"
+      ],
+      "params": {
+        "class": {
+          "label": "제거할 문자",
+          "options": {
+            "digits": "숫자",
+            "punctuation": "문장 부호",
+            "non_ascii": "ASCII가 아닌 문자",
+            "emoji": "이모지",
+            "custom": "지정한 문자"
+          }
+        },
+        "chars": {
+          "label": "문자"
+        }
+      }
+    }
+  }
+}

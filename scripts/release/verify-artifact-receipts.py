@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+from pathlib import Path
+from typing import Optional
+import runpy
+
+
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_rpm_preview(root: Path, version: str, commit: str, run_id: str) -> str:
+    name = f"CopyPaste-v{version}-linux-x86_64.rpm"
+    path = root / f"{name}.installation.json"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("RPM preview installation receipt is missing or invalid")
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    package = root / name
+    if not package.is_file() or package.is_symlink():
+        raise ValueError("RPM preview package is missing or invalid")
+    expected = {
+        "schema": 1, "qualification": "package_installation_only",
+        "version": version, "architecture": "x86_64", "commit": commit, "run_id": run_id,
+        "artifact": {"name": name, "bytes": package.stat().st_size, "sha256": sha256(package)},
+        "environment": RELEASE["CONTRACT"]["rpm_preview_environment"],
+        "assertions": {name: True for name in RELEASE["RPM_PREVIEW_ASSERTIONS"]},
+    }
+    if receipt != expected or any(value is not True for value in receipt.get("assertions", {}).values()):
+        raise ValueError("RPM preview installation receipt differs from exact artifact qualification")
+    return path.name
+
+
+def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux: bool = False, require_compositor_runtime: bool = False, linux_origin_run_id: Optional[str] = None) -> None:
+    platforms = ["macos", "android", "windows"]
+    if require_linux:
+        platforms.append("linux")
+    complete_inventory = True
+    for platform in platforms:
+        receipt_path = root / platform / "production-receipt.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        schema = receipt.get("schema")
+        complete_inventory = complete_inventory and receipt.get("inventory_complete") is True
+        if "signing" in receipt:
+            scheme = {"macos": "ad-hoc-codesign", "android": "android-release-keystore",
+                      "windows": "authenticode", "linux": "detached-updater"}[platform]
+            if not isinstance(receipt["signing"], dict) or receipt["signing"].get("scheme") != scheme:
+                raise ValueError("artifact signing metadata differs from the platform contract")
+        if "build" in receipt and (not isinstance(receipt["build"], dict) or receipt["build"].get("schema") != 1
+                                   or receipt["build"].get("profile") != "release"
+                                   or receipt["build"].get("platform") != platform):
+            raise ValueError("artifact build configuration differs from production platform")
+        if "builds" in receipt and (not isinstance(receipt["builds"], list) or not receipt["builds"] or any(
+            not isinstance(build, dict) or build.get("schema") != 1 or build.get("profile") != "release" or build.get("platform") != platform
+            for build in receipt["builds"]
+        )):
+            raise ValueError("merged artifact build configurations differ from production platform")
+        if schema not in (1, 2) or receipt.get("platform") != platform:
+            raise ValueError(f"invalid {platform} receipt identity")
+        for key, expected in (
+            ("version", version),
+            ("commit", commit),
+            ("run_id", linux_origin_run_id if platform == "linux" and linux_origin_run_id else run_id),
+        ):
+            if str(receipt.get(key)) != expected:
+                raise ValueError(f"{platform} receipt has wrong {key}")
+        # Schema 1 remains valid for recovery of previously qualified releases.
+        artifacts = [receipt.get("artifact")] if schema == 1 else receipt.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise ValueError(f"{platform} receipt has no artifact metadata")
+        names = []
+        for metadata in artifacts:
+            if not isinstance(metadata, dict):
+                raise ValueError(f"{platform} receipt has no artifact metadata")
+            name = metadata.get("name")
+            if not isinstance(name, str) or not name or Path(name).name != name:
+                raise ValueError(f"{platform} receipt has an invalid artifact name")
+            names.append(name)
+            artifact = root / platform / name
+            if not artifact.is_file() or artifact.is_symlink():
+                raise ValueError(f"{platform} qualified artifact is missing")
+            if artifact.stat().st_size != metadata.get("bytes"):
+                raise ValueError(f"{platform} artifact size changed")
+            if sha256(artifact) != metadata.get("sha256"):
+                raise ValueError(f"{platform} artifact digest changed")
+        if len(set(names)) != len(names):
+            raise ValueError(f"{platform} receipt has duplicate artifacts")
+        if platform == "android":
+            actual = {path.name for path in (root / platform).glob("*.apk")}
+            if actual != set(names):
+                raise ValueError("Android receipt does not cover every APK")
+        if platform == "android" and schema == 2:
+            expected = {
+                f"CopyPaste-v{version}-android{suffix}.apk"
+                for suffix in ("", "-arm64", "-armv7")
+            }
+            if set(names) != expected:
+                raise ValueError("Android receipt must cover universal, arm64, and armv7 APKs")
+        if receipt.get("inventory_complete") is True:
+            inventory = set(names) | {"production-receipt.json"}
+            for companion in receipt.get("companions", []):
+                name = companion.get("name", "")
+                if not name or Path(name).name != name or name in inventory:
+                    raise ValueError("invalid or ambiguous companion artifact")
+                path = root / platform / name
+                if (not path.is_file() or path.is_symlink() or path.stat().st_size != companion.get("bytes")
+                        or sha256(path) != companion.get("sha256")):
+                    raise ValueError("companion artifact differs from qualification")
+                inventory.add(name)
+            if {path.name for path in (root / platform).iterdir()} != inventory:
+                raise ValueError(f"{platform} directory contains unqualified files")
+        if platform == "linux":
+            expected = {
+                f"CopyPaste-v{version}-linux-{architecture}.{extension}"
+                for architecture in RELEASE["ARCHITECTURES"]
+                for extension in RELEASE["PUBLISHED_FORMATS"]
+            }
+            packages = {name for name in names if name.endswith((".AppImage", ".deb", ".rpm"))}
+            if packages != expected:
+                raise ValueError("Linux receipt must cover every released architecture and package format")
+            for package in packages:
+                if f"{package}.sig" not in names or f"{package}.sha256" not in names:
+                    raise ValueError("Linux receipt must bind each package signature and SHA-256 receipt")
+            baselines = {
+                f"CopyPaste-v{version}-linux-{architecture}.runtime-baseline.json"
+                for architecture in RELEASE["ARCHITECTURES"]
+            }
+            if not baselines <= set(names):
+                raise ValueError("Linux receipt must bind each architecture runtime baseline")
+            if "rpm" in RELEASE["PREVIEW_FORMATS"]:
+                preview_receipt = verify_rpm_preview(root / platform, version, commit, linux_origin_run_id or run_id)
+                if preview_receipt not in names:
+                    raise ValueError("Linux receipt must bind the RPM preview installation receipt")
+    if require_compositor_runtime:
+        if not require_linux:
+            raise ValueError("compositor runtime companions require the Linux release contract")
+        verifier = runpy.run_path(str(Path(__file__).with_name("stage-compositor-runtime-release.py")))
+        expected = verifier["verify_public"](root / "compositor-runtime", version, commit, run_id)
+        receipt_path = root / "compositor-runtime" / "production-receipt.json"
+        try:
+            actual = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("compositor runtime production receipt is missing or invalid") from error
+        if actual != expected:
+            raise ValueError("compositor runtime production receipt does not bind public companion bytes")
+
+    if complete_inventory:
+        expected_directories = set(platforms) | ({"compositor-runtime"} if require_compositor_runtime else set())
+        if {path.name for path in root.iterdir()} != expected_directories or any(
+            not path.is_dir() or path.is_symlink() for path in root.iterdir()
+        ):
+            raise ValueError("qualified root contains an unverified artifact directory")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--require-linux", action="store_true")
+    parser.add_argument("--require-compositor-runtime", action="store_true")
+    parser.add_argument("--linux-origin-run-id")
+    args = parser.parse_args()
+    verify(args.root, args.version, args.commit, args.run_id, require_linux=args.require_linux, require_compositor_runtime=args.require_compositor_runtime, linux_origin_run_id=args.linux_origin_run_id)
+    print("verified production artifacts for macOS, Android, Windows, and Linux" if args.require_linux else "verified production artifacts for macOS, Android, and Windows")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

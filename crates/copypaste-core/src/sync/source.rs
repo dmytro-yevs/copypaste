@@ -1,0 +1,1393 @@
+//! A device's history, as a peer sync session sees it.
+//!
+//! Three rules the session depends on and cannot check for itself:
+//!
+//! * **[`summaries`] lists every stored version.** `serve_items` refuses
+//!   anything outside the advertised set.
+//! * **[`fetch`] returns plaintext**, decrypted under the local item key. The
+//!   sender's ciphertext is useless to a peer — the AEAD binds the item id to a
+//!   key derived from *this* device's secret — so content crosses the Noise
+//!   channel in the clear and is re-sealed on the other side.
+//! * **[`apply`] re-runs the merge.** The session decided from summaries, which
+//!   carry no origin; the re-check needs both `origin_device_id`s and the row as
+//!   it stands now.
+//!
+//! [`summaries`]: SyncSource::summaries
+//! [`fetch`]: SyncSource::fetch
+//! [`apply`]: SyncSource::apply
+
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use copypaste_p2p::protocol::{
+    ItemSummary, SyncItem, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+};
+use copypaste_p2p::sync::{SyncError, SyncSource};
+use tracing::warn;
+
+use super::batch::{apply_remote_p2p_versions, P2pPin};
+use super::merge::{
+    apply_remote_version, open_version, MergeError, OpenVersionError, RemoteVersion,
+};
+use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
+use crate::storage::{origin_or, Store, StoredItem};
+use crate::Keyring;
+
+type ClipReceivedHook = Arc<dyn Fn(&StoredItem) + Send + Sync>;
+type FileReceivedHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+const MAX_SUMMARIES_PER_SESSION: i64 =
+    (MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION) as i64;
+
+/// A [`SyncSource`] over a [`Store`].
+///
+/// Holds the keyring as well as the store: applying an item needs the keyring
+/// to re-seal it locally.
+pub struct StoreSource {
+    store: Store,
+    keyring: Arc<Keyring>,
+    device_id: String,
+    device_name: String,
+    retention_settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
+    retention: Arc<RetentionGate>,
+    on_applied: Option<Arc<dyn Fn(i64) + Send + Sync>>,
+    on_clip_received: Option<ClipReceivedHook>,
+    on_file_received: Option<FileReceivedHook>,
+}
+
+impl std::fmt::Debug for StoreSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreSource")
+            .field("device_id", &self.device_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StoreSource {
+    #[must_use]
+    pub fn new(
+        store: Store,
+        keyring: Arc<Keyring>,
+        device_id: String,
+        device_name: String,
+        settings: copypaste_ipc::ConfigData,
+    ) -> Self {
+        Self::with_retention_settings(store, keyring, device_id, device_name, move || {
+            settings.clone()
+        })
+    }
+
+    /// Build a source whose remote-merge retention policy is read when a
+    /// version arrives. Long-lived peer listeners must not retain a stale
+    /// quota after the user changes it live.
+    #[must_use]
+    pub fn with_retention_settings(
+        store: Store,
+        keyring: Arc<Keyring>,
+        device_id: String,
+        device_name: String,
+        settings: impl Fn() -> copypaste_ipc::ConfigData + Send + Sync + 'static,
+    ) -> Self {
+        if let Err(error) = store.seed_pin_organization(&keyring.item_key()) {
+            tracing::warn!(error = ?error, "could not initialize synchronized pin records");
+        }
+        Self {
+            store,
+            keyring,
+            device_id,
+            device_name,
+            retention_settings: Arc::new(settings),
+            retention: Arc::default(),
+            on_applied: None,
+            on_clip_received: None,
+            on_file_received: None,
+        }
+    }
+
+    /// Called with the stamp of every version this source stores.
+    ///
+    /// The daemon uses it to pull the cloud upload floor back: an item that
+    /// arrived from a peer carries the *sender's* stamp, routinely older than
+    /// this device's upload cursor, so without it a peer's row would never be
+    /// forwarded to the account. It is a hook rather than part of the merge
+    /// because a client with no cloud account has nothing to tell.
+    #[must_use]
+    pub fn on_applied(mut self, f: impl Fn(i64) + Send + Sync + 'static) -> Self {
+        self.on_applied = Some(Arc::new(f));
+        self
+    }
+
+    /// Notify the platform about the newest content version accepted in a page.
+    /// Pin-only changes, tombstones and replays never reach this hook.
+    #[must_use]
+    pub fn on_clip_received(mut self, f: impl Fn(&StoredItem) + Send + Sync + 'static) -> Self {
+        self.on_clip_received = Some(Arc::new(f));
+        self
+    }
+
+    fn clipboard_floor(&self) -> i64 {
+        if self.on_clip_received.is_none() {
+            return i64::MAX;
+        }
+        match self.store.newest_live_key() {
+            Ok(row) => row.map_or(i64::MIN, |(_, stamp)| stamp),
+            Err(_) => i64::MAX,
+        }
+    }
+
+    /// Called with the id of every live file version another device made
+    /// that this source stores. Must only queue work.
+    #[must_use]
+    pub fn on_file_received(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.on_file_received = Some(Arc::new(f));
+        self
+    }
+
+    fn notify_files_received<'a>(&self, versions: impl Iterator<Item = &'a RemoteVersion<'a>>) {
+        let Some(hook) = &self.on_file_received else {
+            return;
+        };
+        for version in versions.filter(|item| {
+            item.content_type == copypaste_ipc::content_type::FILE
+                && !item.deleted
+                && item.origin_device_id != self.device_id
+        }) {
+            hook(version.item_id);
+        }
+    }
+
+    fn notify_clip_received<'a>(
+        &self,
+        floor: i64,
+        versions: impl Iterator<Item = &'a RemoteVersion<'a>>,
+    ) {
+        let Some(hook) = &self.on_clip_received else {
+            return;
+        };
+        let Some(newest) = versions
+            .filter(|item| {
+                item.content_type != crate::storage::organization::CONTENT_TYPE
+                    && !item.deleted
+                    && item.origin_device_id != self.device_id
+                    && item.created_at > floor
+            })
+            .max_by_key(|item| (item.created_at, item.item_id))
+        else {
+            return;
+        };
+        if let Ok(Some(row)) = self.store.get(newest.item_id) {
+            if !row.deleted && row.created_at == newest.created_at {
+                hook(&row);
+            }
+        }
+    }
+
+    /// Reuse history, retention and clipboard behavior without a peer egress hook.
+    #[must_use]
+    pub fn without_version_hook(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            keyring: Arc::clone(&self.keyring),
+            device_id: self.device_id.clone(),
+            device_name: self.device_name.clone(),
+            retention_settings: Arc::clone(&self.retention_settings),
+            retention: Arc::clone(&self.retention),
+            on_applied: None,
+            on_clip_received: self.on_clip_received.clone(),
+            on_file_received: self.on_file_received.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// The live settings, read when asked.
+    #[must_use]
+    pub fn settings(&self) -> copypaste_ipc::ConfigData {
+        (self.retention_settings)()
+    }
+
+    /// Decrypt one stored row for sending. See [`open_version`].
+    #[must_use = "authentication failures must be handled"]
+    pub fn open(&self, row: &StoredItem) -> Result<zeroize::Zeroizing<String>, OpenVersionError> {
+        open_version(&self.keyring, row)
+    }
+
+    /// Decrypt the raw payload for a transport.  Unlike [`Self::open`], this
+    /// retains image and file bytes exactly.
+    #[must_use = "authentication failures must be handled"]
+    pub fn open_bytes(
+        &self,
+        row: &StoredItem,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, OpenVersionError> {
+        super::open_version_bytes(&self.keyring, row)
+    }
+
+    /// Merge one remote version in, whichever transport carried it.
+    pub fn apply_version(&self, incoming: &RemoteVersion<'_>) -> Result<bool, MergeError> {
+        let clipboard_floor = self.clipboard_floor();
+        let applied = apply_remote_version(&self.store, &self.keyring, &self.device_id, incoming)?;
+        if applied {
+            self.enforce_retention();
+            if let Some(hook) = &self.on_applied {
+                hook(incoming.created_at);
+            }
+            self.notify_clip_received(clipboard_floor, std::iter::once(incoming));
+            self.notify_files_received(std::iter::once(incoming));
+        }
+        Ok(applied)
+    }
+
+    /// Merge a whole page in, answering positionally.
+    ///
+    /// The retention bound and the applied hook fire **once for the page**, not
+    /// once per row. Both are already page-shaped jobs: retention is a bound on
+    /// the history rather than a step of the merge (see [`RetentionGate`]), and
+    /// the hook lowers a cursor, so the oldest stamp in the page is the only
+    /// value that changes the outcome — reporting the rest would move the same
+    /// cursor to the same place several more times.
+    ///
+    /// # Errors
+    ///
+    /// [`MergeError`] if the store or the seal fails. A version this device
+    /// declines is `false`.
+    pub fn apply_versions(&self, incoming: &[RemoteVersion<'_>]) -> Result<Vec<bool>, MergeError> {
+        let clipboard_floor = self.clipboard_floor();
+        let applied = super::batch::apply_remote_versions(
+            &self.store,
+            &self.keyring,
+            &self.device_id,
+            incoming,
+        )?;
+        let floor = incoming
+            .iter()
+            .zip(&applied)
+            .filter(|(_, stored)| **stored)
+            .map(|(item, _)| item.created_at)
+            .min();
+        if let Some(floor) = floor {
+            self.enforce_retention();
+            if let Some(hook) = &self.on_applied {
+                hook(floor);
+            }
+            let stored = || {
+                incoming
+                    .iter()
+                    .zip(&applied)
+                    .filter(|(_, applied)| **applied)
+                    .map(|(item, _)| item)
+            };
+            self.notify_clip_received(clipboard_floor, stored());
+            self.notify_files_received(stored());
+        }
+        Ok(applied)
+    }
+
+    /// Hold the retention bound after a stored version, at most once per
+    /// [`RETENTION_DEBOUNCE`]. Its policy is read only after the store's
+    /// destructive-work barrier has been acquired.
+    fn enforce_retention(&self) {
+        if self.retention.claim() {
+            crate::retention::enforce_retention_with(&self.store, || (self.retention_settings)());
+            return;
+        }
+        self.schedule_trailing_retention();
+    }
+
+    fn schedule_trailing_retention(&self) {
+        if self
+            .retention
+            .trailing_scheduled
+            .swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.retention
+                .trailing_scheduled
+                .store(false, Ordering::SeqCst);
+            self.retention.stamp();
+            crate::retention::enforce_retention_with(&self.store, || (self.retention_settings)());
+            return;
+        };
+        let retention = Arc::clone(&self.retention);
+        let settings = Arc::clone(&self.retention_settings);
+        let store = self.store.clone();
+        handle.spawn(async move {
+            tokio::time::sleep(RETENTION_DEBOUNCE).await;
+            // Cleared before the sweep, so a version applied while it runs
+            // schedules the next one rather than being absorbed by this one.
+            retention.trailing_scheduled.store(false, Ordering::SeqCst);
+            retention.stamp();
+            super::blocking(|| crate::retention::enforce_retention_with(&store, || settings()));
+        });
+    }
+
+    /// The row as it will travel, or `None` when it must not.
+    fn to_wire(&self, row: StoredItem) -> Option<SyncItem> {
+        // A tombstone has no payload to open, and carries none on the wire
+        // either (manifest 05 rule T-4).
+        let (content, binary_content) = if row.deleted {
+            (String::new(), Vec::new())
+        } else if copypaste_ipc::content_type::is_binary(&row.content_type) {
+            (
+                String::new(),
+                std::mem::take(&mut *self.open_bytes(&row).ok()?),
+            )
+        } else {
+            (std::mem::take(&mut *self.open(&row).ok()?), Vec::new())
+        };
+        Some(SyncItem {
+            content,
+            binary_content,
+            payload_metadata: self.store.payload_metadata_for_sync(&row).ok()?,
+            source_app_bundle_id: row.app_bundle_id,
+            source_app_name: row.app_name,
+            content_type: row.content_type,
+            created_at: row.created_at,
+            deleted: row.deleted,
+            content_hash: row.content_hash,
+            origin_device_id: origin_or(&row.origin_device_id, &self.device_id).to_string(),
+            pinned: row.pinned,
+            pin_order: row.pin_order,
+            pin_updated_at: row.pin_updated_at,
+            item_id: row.id,
+        })
+    }
+
+    /// The current settings, or the refusal. One clone per call: `apply` needs
+    /// both the switch and the retention policy out of the same read.
+    fn settings_if_sync_enabled(&self) -> Result<copypaste_ipc::ConfigData, SyncError> {
+        let settings = (self.retention_settings)();
+        if settings.sync_enabled {
+            Ok(settings)
+        } else {
+            Err(SyncError::Cancelled)
+        }
+    }
+}
+
+/// A live row this device's privacy and sync policy let leave it.
+fn shareable(row: &StoredItem, settings: &copypaste_ipc::ConfigData) -> bool {
+    !row.deleted
+        && row.clipboard_privacy().allows(settings)
+        && settings.sync_allows(&row.content_type, &[])
+}
+
+fn store_error(e: crate::StoreError, what: &str) -> SyncError {
+    warn!(error = ?e, "{what}");
+    SyncError::Diagnostic(super::diagnostics::store(&e))
+}
+
+fn summary_from_version(version: crate::storage::Version, device_id: &str) -> ItemSummary {
+    ItemSummary {
+        item_id: version.id,
+        created_at: version.created_at,
+        deleted: version.deleted,
+        content_hash: version.content_hash,
+        origin_device_id: origin_or(&version.origin_device_id, device_id).to_string(),
+        pinned: version.pinned,
+        pin_order: version.pin_order,
+        pin_updated_at: version.pin_updated_at,
+    }
+}
+
+impl SyncSource for StoreSource {
+    fn deferred_file(
+        &self,
+        id: &str,
+    ) -> Result<Option<Box<dyn copypaste_p2p::sync::DeferredFileSource>>, SyncError> {
+        self.deferred_member(id, 0)
+    }
+    fn deferred_member(
+        &self,
+        id: &str,
+        file: u32,
+    ) -> Result<Option<Box<dyn copypaste_p2p::sync::DeferredFileSource>>, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        let row = self
+            .store
+            .get(id)
+            .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
+            .filter(|row| shareable(row, &settings))
+            .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+        let source = super::blocking(|| {
+            crate::file_reference::source_or_copy(
+                &self.store,
+                &self.keyring,
+                &row.id,
+                file as usize,
+            )
+        })
+        .map_err(|error| SyncError::Source(error.to_string()))?;
+        Ok(source.map(|source| {
+            Box::new(SharedFileSource {
+                source,
+                store: self.store.clone(),
+                id: row.id,
+                settings: Arc::clone(&self.retention_settings),
+            }) as Box<dyn copypaste_p2p::sync::DeferredFileSource>
+        }))
+    }
+    fn observe_file_transfer(
+        &self,
+        id: &str,
+        peer: &str,
+    ) -> Option<Box<dyn copypaste_p2p::sync::FileTransferObserver>> {
+        self.observe_member_transfer(id, 0, peer)
+    }
+    fn observe_member_transfer(
+        &self,
+        id: &str,
+        file: u32,
+        peer: &str,
+    ) -> Option<Box<dyn copypaste_p2p::sync::FileTransferObserver>> {
+        let row = self.store.get(id).ok()??;
+        let payload = crate::ClipboardPayload::open(&row, &self.keyring.item_key()).ok()?;
+        let metadata = match &payload {
+            crate::ClipboardPayload::File {
+                metadata: Some(metadata),
+                ..
+            } => metadata,
+            _ => return None,
+        };
+        let members = payload.file_members();
+        let (name, total) = match members.get(file as usize) {
+            Some(member) => (member.filename.as_str(), member.size_bytes),
+            None if file == 0 => (
+                metadata.filename.as_str(),
+                metadata.transfer.as_ref()?.size_bytes,
+            ),
+            None => return None,
+        };
+        Some(Box::new(OutgoingOperation {
+            total,
+            operation: crate::file_operation::FileOperationGuard::start(
+                &self.store,
+                id,
+                name,
+                copypaste_ipc::FileOperationKind::Send,
+                self.device_name(),
+                peer.into(),
+                total,
+                None,
+            ),
+        }))
+    }
+    fn summary_workspace(
+        &self,
+    ) -> Result<Box<dyn copypaste_p2p::sync::SummaryWorkspace>, SyncError> {
+        Ok(self.store.summary_workspace())
+    }
+    fn file_chunk(&self, id: &str, sha256: &str, index: u64) -> Result<Vec<u8>, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let row = self
+                .store
+                .get(id)
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
+                .filter(|row| shareable(row, &settings))
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            if !self.store.has_file_transfer(&row.id).unwrap_or(false) {
+                return Err(SyncError::Source("The file is unavailable.".into()));
+            }
+            crate::file_transfer::read_chunk(
+                &self.store,
+                &self.keyring.item_key(),
+                id,
+                sha256,
+                index,
+            )
+            .map(|mut bytes| std::mem::take(&mut *bytes))
+            .map_err(|error| SyncError::Source(error.to_string()))
+        })
+    }
+    fn file_size(&self, id: &str, sha256: &str) -> Result<u64, SyncError> {
+        self.member_size(id, 0, sha256)
+    }
+    fn member_size(&self, id: &str, file: u32, sha256: &str) -> Result<u64, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let row = self
+                .store
+                .get(id)
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
+                .filter(|row| shareable(row, &settings))
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            let offer = crate::file_transfer::member_offer(&row, &self.keyring.item_key(), file)
+                .map_err(|error| SyncError::Source(error.to_string()))?
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            if !sha256.is_empty() && offer.sha256 != sha256 {
+                return Err(SyncError::Source("The file is unavailable.".into()));
+            }
+            Ok(offer.size_bytes)
+        })
+    }
+    fn device_id(&self) -> String {
+        self.device_id.clone()
+    }
+
+    fn device_name(&self) -> String {
+        self.store
+            .current_device_name()
+            .unwrap_or_else(|_| self.device_name.clone())
+    }
+
+    fn withheld_from(
+        &self,
+        peer_device_id: &str,
+        ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        let policy = &settings.device_sync;
+        if !policy.device_enabled(peer_device_id) {
+            return Ok(ids.iter().cloned().collect());
+        }
+        let content = policy.device(peer_device_id).content;
+        if content == copypaste_ipc::device_sync::SyncContent::ALL
+            && policy.this_device == copypaste_ipc::device_sync::SyncContent::ALL
+        {
+            return Ok(std::collections::HashSet::new());
+        }
+        let types = super::blocking(|| self.store.content_types(ids))
+            .map_err(|e| store_error(e, "could not read content types for a sync session"))?;
+        Ok(types
+            .into_iter()
+            .filter(|(_, content_type)| !settings.sync_allows(content_type, &[peer_device_id]))
+            .map(|(id, _)| id)
+            .collect())
+    }
+
+    fn auto_sync_paused(&self, peer_device_id: Option<&str>) -> bool {
+        (self.retention_settings)()
+            .device_sync
+            .auto_sync_paused(peer_device_id)
+    }
+
+    fn accepts_from(&self, peer_device_id: &str, item: &SyncItem) -> bool {
+        (self.retention_settings)().sync_allows(
+            &item.content_type,
+            &[peer_device_id, &item.origin_device_id],
+        )
+    }
+
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let rows = self
+                .store
+                .summaries_since(since_ms, None, MAX_SUMMARIES_PER_SESSION)
+                .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
+            Ok(rows
+                .into_iter()
+                .map(|version| summary_from_version(version, &self.device_id))
+                .collect())
+        })
+    }
+
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        super::blocking(|| {
+            let rows = self
+                .store
+                .version_summaries(&ids)
+                .map_err(|e| store_error(e, "could not read page-local sync summaries"))?;
+            Ok(rows
+                .into_values()
+                .map(|version| summary_from_version(version, &self.device_id))
+                .collect())
+        })
+    }
+
+    fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let rows = self
+                .store
+                .versions(ids)
+                .map_err(|e| store_error(e, "could not read items for a sync session"))?;
+            Ok(rows
+                .into_iter()
+                .filter_map(|row| self.to_wire(row))
+                .collect())
+        })
+    }
+
+    fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+        Ok(self.apply_batch(vec![item])?.pop().unwrap_or(false))
+    }
+
+    fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let versions: Vec<RemoteVersion<'_>> = items
+                .iter()
+                .map(|item| RemoteVersion {
+                    item_id: &item.item_id,
+                    content: &item.content,
+                    binary_content: (!item.binary_content.is_empty())
+                        .then_some(item.binary_content.as_slice()),
+                    payload_metadata: item.payload_metadata.as_deref(),
+                    content_type: &item.content_type,
+                    created_at: item.created_at,
+                    deleted: item.deleted,
+                    content_hash: Some(&item.content_hash),
+                    origin_device_id: &item.origin_device_id,
+                    app_bundle_id: item.source_app_bundle_id.as_deref(),
+                    app_name: item.source_app_name.as_deref(),
+                })
+                .collect();
+            let pins: Vec<P2pPin> = items
+                .iter()
+                .map(|item| P2pPin {
+                    pinned: item.pinned,
+                    pin_order: item.pin_order,
+                    pin_updated_at: item.pin_updated_at,
+                })
+                .collect();
+            let clipboard_floor = self.clipboard_floor();
+            let outcomes = apply_remote_p2p_versions(
+                &self.store,
+                &self.keyring,
+                &self.device_id,
+                &versions,
+                &pins,
+            )
+            .map_err(|error| {
+                SyncError::Diagnostic(match error {
+                    MergeError::Store => {
+                        copypaste_ipc::sync_issue::SyncIssueCode::HistoryUnavailable
+                    }
+                    MergeError::StoreCause(code) => code,
+                    MergeError::Encrypt => {
+                        copypaste_ipc::sync_issue::SyncIssueCode::EncryptionUnavailable
+                    }
+                    MergeError::TooLarge => copypaste_ipc::sync_issue::SyncIssueCode::ItemsTooLarge,
+                })
+            })?;
+            let floor = items
+                .iter()
+                .zip(&outcomes)
+                .filter(|(_, outcome)| outcome.content)
+                .map(|(item, _)| item.created_at)
+                .min();
+            if let Some(floor) = floor {
+                self.enforce_retention();
+                if let Some(hook) = &self.on_applied {
+                    hook(floor);
+                }
+                let stored = || {
+                    versions
+                        .iter()
+                        .zip(&outcomes)
+                        .filter(|(_, outcome)| outcome.content)
+                        .map(|(item, _)| item)
+                };
+                self.notify_clip_received(clipboard_floor, stored());
+                self.notify_files_received(stored());
+            }
+            Ok(outcomes.into_iter().map(|outcome| outcome.any()).collect())
+        })
+    }
+
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+        organization_kinds: u32,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let rows = self
+                .store
+                .summaries_since_for(since_ms, after_id, limit as i64, organization_kinds)
+                .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
+            Ok(rows
+                .into_iter()
+                .map(|version| ItemSummary {
+                    item_id: version.id,
+                    created_at: version.created_at,
+                    deleted: version.deleted,
+                    content_hash: version.content_hash,
+                    origin_device_id: origin_or(&version.origin_device_id, &self.device_id)
+                        .to_string(),
+                    pinned: version.pinned,
+                    pin_order: version.pin_order,
+                    pin_updated_at: version.pin_updated_at,
+                })
+                .collect())
+        })
+    }
+}
+
+struct OutgoingOperation {
+    total: u64,
+    operation: crate::file_operation::FileOperationGuard,
+}
+impl copypaste_p2p::sync::FileTransferObserver for OutgoingOperation {
+    fn progress(&mut self, written: u64) {
+        super::blocking(|| self.operation.progress(written, self.total));
+    }
+    fn finish(&mut self, error: Option<String>) {
+        super::blocking(|| self.operation.finish(error, false, None));
+    }
+}
+
+/// Re-check sharing and clip privacy on every deferred-source block.
+struct SharedFileSource {
+    source: Box<dyn copypaste_p2p::sync::DeferredFileSource>,
+    store: Store,
+    id: String,
+    settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
+}
+impl SharedFileSource {
+    fn check_access(&self) -> Result<(), SyncError> {
+        super::blocking(|| {
+            let settings = (self.settings)();
+            if !settings.sync_enabled {
+                return Err(SyncError::Cancelled);
+            }
+            self.store
+                .get(&self.id)
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
+                .filter(|row| shareable(row, &settings))
+                .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
+            if self
+                .store
+                .file_reference(&self.id)
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
+                .is_none()
+            {
+                return Err(SyncError::Source("The source file changed.".into()));
+            }
+            Ok(())
+        })
+    }
+}
+impl copypaste_p2p::sync::DeferredFileSource for SharedFileSource {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
+        self.check_access()?;
+        self.source.read_chunk()
+    }
+    fn verify(&mut self) -> Result<(), SyncError> {
+        self.check_access()?;
+        self.source.verify()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::test_support::fts_row_count;
+    use crate::sync::testkit::{fixture, fixture_named};
+    use crate::NewItem;
+
+    fn add(f: &crate::sync::testkit::Fixture, id: &str, content: &str, created_at: i64) -> String {
+        let key = f.keyring.item_key();
+        let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, id).unwrap();
+        f.store
+            .insert(NewItem {
+                id: id.to_string(),
+                content_ciphertext: ciphertext,
+                nonce,
+                content_type: "text".into(),
+                content_hash: crate::storage::compute_content_hash(content.as_bytes()),
+                search_text: Some(content.to_string()),
+                created_at,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("insert")
+            .id
+    }
+
+    fn peer_item(item_id: &str, content: &str, created_at: i64) -> SyncItem {
+        SyncItem {
+            item_id: item_id.into(),
+            content: content.into(),
+            binary_content: Vec::new(),
+            payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
+            content_type: "text".into(),
+            created_at,
+            deleted: false,
+            content_hash: crate::storage::compute_content_hash(content.as_bytes()),
+            origin_device_id: "device-a".into(),
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn a_peer_policy_withholds_and_refuses_by_link_and_origin() {
+        use copypaste_ipc::device_sync::{DeviceSyncSettings, PeerSyncPolicy, SyncContent};
+        let f = fixture();
+        let id = add(&f, "mine", "shared thing", 1_000);
+        let no_text = PeerSyncPolicy {
+            content: SyncContent {
+                text: false,
+                ..SyncContent::ALL
+            },
+            ..PeerSyncPolicy::default()
+        };
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            f.here.clone(),
+            "test-device".into(),
+            copypaste_ipc::ConfigData {
+                device_sync: DeviceSyncSettings {
+                    devices: [("device-a".to_string(), no_text)].into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let ids = [id.clone()];
+        assert_eq!(source.withheld_from("device-a", &ids).unwrap().len(), 1);
+        assert!(source.withheld_from("device-b", &ids).unwrap().is_empty());
+        let relayed = peer_item("relayed", "from a", 2_000);
+        assert!(!source.accepts_from("device-b", &relayed));
+        assert!(source.accepts_from(
+            "device-b",
+            &SyncItem {
+                origin_device_id: "device-b".into(),
+                ..relayed
+            }
+        ));
+    }
+
+    #[test]
+    fn a_locally_captured_item_is_advertised_with_this_device_as_its_origin() {
+        let f = fixture();
+        let id = add(&f, "mine", "shared thing", 1_000);
+        let source = f.source();
+
+        let summaries = source.summaries(0).unwrap();
+        assert!(summaries.iter().any(|s| s.item_id == id));
+
+        let items = source.fetch(std::slice::from_ref(&id)).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].content, "shared thing");
+        assert_eq!(
+            items[0].origin_device_id,
+            source.device_id(),
+            "an unstamped origin must leave the device as this device's"
+        );
+        assert_eq!(items[0].content_hash, summaries[0].content_hash);
+        assert_eq!(summaries[0].origin_device_id, source.device_id());
+        assert!(!summaries[0].pinned);
+        assert_eq!(summaries[0].pin_order, None);
+    }
+
+    #[test]
+    fn a_recaptured_local_version_returning_from_a_peer_keeps_one_device_filter() {
+        let phone = fixture_named("CPH2305");
+        let peer = fixture_named("MacBook Air");
+        let phone_source = phone.source();
+        let peer_source = peer.source();
+        let stamp = crate::now_ms();
+        let returned_id = add(&phone, "phone-capture", "needle shared", stamp);
+        let sent = phone_source
+            .fetch(std::slice::from_ref(&returned_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(!phone_source.apply(sent.clone()).unwrap());
+        assert!(peer_source.apply(sent).unwrap());
+
+        assert_eq!(
+            add(&peer, "peer-recapture", "needle shared", stamp + 1),
+            returned_id
+        );
+        let returned = peer_source
+            .fetch(std::slice::from_ref(&returned_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(returned.origin_device_id, phone.here);
+        assert!(phone_source.apply(returned).unwrap());
+        assert_eq!(
+            phone
+                .store
+                .get(&returned_id)
+                .unwrap()
+                .unwrap()
+                .origin_device_id,
+            phone.here
+        );
+
+        let local_id = add(&phone, "new-local-capture", "needle local", stamp + 2);
+        let remote_id = add(&peer, "peer-capture", "needle remote", stamp + 3);
+        let remote = peer_source
+            .fetch(std::slice::from_ref(&remote_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(phone_source.apply(remote).unwrap());
+        phone
+            .store
+            .record_device_name(&peer.here, "MacBook Air")
+            .unwrap();
+        phone
+            .store
+            .record_device_class(&peer.here, copypaste_ipc::DeviceClass::Laptop)
+            .unwrap();
+
+        let facets = phone
+            .store
+            .history_facets(&phone.here, "CPH2305", copypaste_ipc::DeviceClass::Phone)
+            .unwrap();
+        assert_eq!(
+            facets.origin_devices,
+            vec![
+                crate::HistoryDeviceFacet {
+                    id: phone.here.clone(),
+                    label: "CPH2305".into(),
+                    device_class: copypaste_ipc::DeviceClass::Phone,
+                },
+                crate::HistoryDeviceFacet {
+                    id: peer.here.clone(),
+                    label: "MacBook Air".into(),
+                    device_class: copypaste_ipc::DeviceClass::Laptop,
+                },
+            ]
+        );
+
+        for sort in [
+            crate::HistorySort::Newest,
+            crate::HistorySort::Oldest,
+            crate::HistorySort::Relevance,
+        ] {
+            let query = crate::HistoryQuery {
+                search: Some("needle".into()),
+                origin_device_id: Some(phone.here.clone()),
+                sort,
+                ..Default::default()
+            };
+            let mut cursor = None;
+            let mut ids = Vec::new();
+            loop {
+                let page = phone
+                    .store
+                    .query_history_bounded_for_device(
+                        &query,
+                        cursor.as_ref(),
+                        1,
+                        usize::MAX,
+                        Some(&phone.here),
+                    )
+                    .unwrap();
+                ids.extend(page.items.into_iter().map(|item| item.id));
+                let Some(next) = page.next else { break };
+                cursor = Some(crate::HistoryCursor::parse_for(&next.token(), &query).unwrap());
+            }
+            let expected = if sort == crate::HistorySort::Oldest {
+                vec![returned_id.clone(), local_id.clone()]
+            } else {
+                vec![local_id.clone(), returned_id.clone()]
+            };
+            assert_eq!(ids, expected, "sort: {sort:?}");
+        }
+    }
+
+    #[test]
+    fn a_long_lived_source_reads_the_current_device_name() {
+        let f = fixture();
+        let identity = f.store.device_identity("Old name").unwrap();
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            identity.device_id.clone(),
+            identity.device_name,
+            copypaste_ipc::ConfigData::default(),
+        );
+
+        f.store
+            .set_device_name(&identity.device_id, "New name")
+            .unwrap();
+        assert_eq!(source.device_name(), "New name");
+    }
+
+    #[test]
+    fn an_applied_item_is_re_encrypted_under_the_local_key() {
+        let f = fixture_named("beta");
+        let source = f.source();
+
+        assert!(source
+            .apply(peer_item(
+                "peer-item",
+                "from the other device",
+                1_700_000_000_000
+            ))
+            .unwrap());
+
+        let row = f.store.get("peer-item").unwrap().expect("stored");
+        let plain = crate::decrypt(
+            &row.content_ciphertext,
+            &row.nonce,
+            &f.keyring.item_key(),
+            "peer-item",
+        )
+        .expect("the local key must open it");
+        assert_eq!(plain.as_slice(), b"from the other device");
+        assert_eq!(row.origin_device_id, "device-a");
+    }
+
+    #[test]
+    fn an_applied_item_keeps_the_capturing_apps_identity() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let mut item = peer_item("peer-item", "from the other device", 1_700_000_000_000);
+        item.source_app_bundle_id = Some("com.todesktop.230313mzl4w4u92".into());
+        item.source_app_name = Some("Cursor".into());
+
+        assert!(source.apply(item).unwrap());
+
+        let row = f.store.get("peer-item").unwrap().expect("stored");
+        assert_eq!(
+            row.app_bundle_id.as_deref(),
+            Some("com.todesktop.230313mzl4w4u92")
+        );
+        assert_eq!(row.app_name.as_deref(), Some("Cursor"));
+    }
+
+    #[test]
+    fn applying_the_same_version_twice_is_a_no_op() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let item = peer_item("peer-item", "same", 1_700_000_000_000);
+
+        assert!(source.apply(item.clone()).unwrap());
+        assert!(
+            !source.apply(item).unwrap(),
+            "a replayed version must not be re-applied"
+        );
+    }
+
+    #[test]
+    fn identical_clips_from_different_origins_keep_their_distinct_item_ids() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let created_at = 1_700_000_000_000;
+
+        assert!(source
+            .apply(peer_item(
+                "device-a-item",
+                "same clipboard text",
+                created_at
+            ))
+            .unwrap());
+        assert!(source
+            .apply(SyncItem {
+                item_id: "device-b-item".into(),
+                origin_device_id: "device-b".into(),
+                ..peer_item("device-b-item", "same clipboard text", created_at)
+            })
+            .unwrap());
+
+        assert!(f.store.get("device-a-item").unwrap().is_some());
+        assert!(f.store.get("device-b-item").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_disabled_sync_switch_refuses_every_peer_data_path() {
+        let f = fixture_named("beta");
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            f.here.clone(),
+            "test-device".to_string(),
+            copypaste_ipc::ConfigData {
+                sync_enabled: false,
+                ..Default::default()
+            },
+        );
+
+        for result in [
+            source.summaries(0).map(|_| ()),
+            source.fetch(&["anything".to_string()]).map(|_| ()),
+            source
+                .apply(peer_item("peer-item", "not stored", 1_700_000_000_000))
+                .map(|_| ()),
+        ] {
+            assert_eq!(result, Err(SyncError::Cancelled));
+        }
+        assert!(f.store.get("peer-item").unwrap().is_none());
+    }
+
+    #[test]
+    fn remote_merges_enforce_the_byte_quota_without_losing_fts_or_tombstones() {
+        let f = fixture_named("beta");
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            f.here.clone(),
+            "test-device".to_string(),
+            copypaste_ipc::ConfigData {
+                storage_quota_bytes: 1,
+                ..Default::default()
+            },
+        );
+
+        let oldest = peer_item("oldest", "first remote item", 1_000);
+        assert!(source.apply(oldest).unwrap());
+        assert_eq!(fts_row_count(&f.store, "oldest"), 1);
+
+        assert!(source
+            .apply(peer_item("newest", "second remote item", 2_000))
+            .unwrap());
+        assert!(f.store.get("oldest").unwrap().is_none());
+        assert_eq!(fts_row_count(&f.store, "oldest"), 0);
+        assert!(f.store.get("newest").unwrap().is_some());
+
+        assert!(source
+            .apply(peer_item("deleted", "will become a tombstone", 3_000))
+            .unwrap());
+        let live = f.store.version("deleted").unwrap().unwrap();
+        assert!(source
+            .apply(SyncItem {
+                item_id: "deleted".into(),
+                content: String::new(),
+                binary_content: Vec::new(),
+                payload_metadata: None,
+                source_app_bundle_id: None,
+                source_app_name: None,
+                content_type: "text".into(),
+                created_at: 4_000,
+                deleted: true,
+                content_hash: live.content_hash,
+                origin_device_id: "device-a".into(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+            })
+            .unwrap());
+        assert!(f.store.version("deleted").unwrap().unwrap().deleted);
+        assert_eq!(fts_row_count(&f.store, "deleted"), 0);
+    }
+
+    #[test]
+    fn a_p2p_pin_and_order_replace_the_local_state() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let mut remote = peer_item("peer-item", "pinned elsewhere", 1_700_000_000_000);
+        remote.pinned = true;
+        remote.pin_order = Some(3.0);
+
+        assert!(source.apply(remote).unwrap());
+
+        let stored = f.store.version("peer-item").unwrap().unwrap();
+        assert!(stored.pinned);
+        assert_eq!(stored.pin_order, Some(3.0));
+    }
+
+    /// The debounce may sweep later; it may never not sweep at all. A burst
+    /// that ends with no further apply — which is how a session ends when the
+    /// peer disconnects — must still come back under the cap, and only the
+    /// trailing run can bring it there.
+    #[tokio::test]
+    async fn a_burst_of_applies_still_lands_under_the_history_cap() {
+        use std::sync::RwLock;
+
+        let f = fixture_named("beta");
+        let settings = Arc::new(RwLock::new(copypaste_ipc::ConfigData {
+            history_limit: 10,
+            ..Default::default()
+        }));
+        let source = StoreSource::with_retention_settings(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            f.here.clone(),
+            "test-device".to_string(),
+            {
+                let settings = Arc::clone(&settings);
+                move || settings.read().unwrap().clone()
+            },
+        );
+
+        assert!(source
+            .apply(peer_item("item-0", "remote value 0", 1_000))
+            .unwrap());
+        settings.write().unwrap().history_limit = 2;
+        for n in 1..8 {
+            assert!(source
+                .apply(peer_item(
+                    &format!("item-{n}"),
+                    &format!("remote value {n}"),
+                    1_000 + n,
+                ))
+                .unwrap());
+        }
+
+        tokio::time::sleep(RETENTION_DEBOUNCE * 4).await;
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get("item-7").unwrap().is_some());
+    }
+
+    #[test]
+    fn remote_merges_read_the_current_full_retention_policy() {
+        use std::sync::RwLock;
+
+        let f = fixture_named("beta");
+        let settings = Arc::new(RwLock::new(copypaste_ipc::ConfigData::default()));
+        let source = StoreSource::with_retention_settings(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            f.here.clone(),
+            "test-device".to_string(),
+            {
+                let settings = Arc::clone(&settings);
+                move || settings.read().unwrap().clone()
+            },
+        );
+
+        assert!(source.apply(peer_item("old", "first", 1_000)).unwrap());
+        settings.write().unwrap().history_limit = 1;
+        assert!(source.apply(peer_item("new", "second", 2_000)).unwrap());
+        assert!(f.store.get("old").unwrap().is_none());
+        assert!(f.store.get("new").unwrap().is_some());
+
+        settings.write().unwrap().retention_days = 1;
+        assert!(source
+            .apply(peer_item(
+                "expired",
+                "expired remote value",
+                crate::now_ms() - 2 * 86_400_000,
+            ))
+            .unwrap());
+        assert!(
+            f.store.get("expired").unwrap().is_none(),
+            "remote writes must enforce the age limit as well as count and bytes"
+        );
+    }
+
+    #[test]
+    fn an_older_remote_version_loses_to_what_is_stored() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        assert!(source
+            .apply(peer_item("peer-item", "newer", 2_000_000))
+            .unwrap());
+        assert!(!source
+            .apply(peer_item("peer-item", "older", 1_000_000))
+            .unwrap());
+        assert_eq!(
+            f.store.get("peer-item").unwrap().unwrap().created_at,
+            2_000_000
+        );
+    }
+
+    #[test]
+    fn an_incoming_tombstone_deletes_a_local_item() {
+        let f = fixture_named("beta");
+        let id = add(&f, "doomed", "doomed", 1_000);
+        let source = f.source();
+        let local = source
+            .summaries(0)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.item_id == id)
+            .unwrap();
+
+        assert!(source
+            .apply(SyncItem {
+                content: String::new(),
+                deleted: true,
+                created_at: local.created_at + 1,
+                content_hash: local.content_hash,
+                origin_device_id: source.device_id(),
+                ..peer_item(&id, "", 0)
+            })
+            .unwrap());
+
+        assert!(f.store.get(&id).unwrap().is_none());
+        let summary = source
+            .summaries(0)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.item_id == id)
+            .expect("the tombstone is still a version");
+        assert!(summary.deleted);
+    }
+
+    /// The hook exists so the daemon can pull its cloud upload floor back to a
+    /// peer item's own stamp; it must fire on a stored version and on nothing
+    /// else.
+    #[test]
+    fn the_applied_hook_reports_only_versions_that_were_stored() {
+        use std::sync::Mutex;
+        let f = fixture_named("beta");
+        let seen: Arc<Mutex<Vec<i64>>> = Arc::default();
+        let recorder = Arc::clone(&seen);
+        let source = f
+            .source()
+            .on_applied(move |ms| recorder.lock().unwrap().push(ms));
+
+        let item = peer_item("peer-item", "once", 5_000);
+        assert!(source.apply(item.clone()).unwrap());
+        assert!(!source.apply(item).unwrap());
+        assert_eq!(*seen.lock().unwrap(), vec![5_000]);
+    }
+
+    #[test]
+    fn a_row_this_device_cannot_decrypt_is_skipped_rather_than_failing_the_session() {
+        let f = fixture_named("alpha");
+        // Sealed under another device's key: the AEAD must fail closed.
+        let other = fixture_named("beta");
+        let key = other.keyring.item_key();
+        let (nonce, ciphertext) = crate::encrypt(b"not ours", &key, "foreign").unwrap();
+        f.store
+            .insert(NewItem {
+                id: "foreign".into(),
+                content_ciphertext: ciphertext,
+                nonce,
+                content_type: "text".into(),
+                content_hash: crate::storage::compute_content_hash(b"not ours"),
+                search_text: None,
+                created_at: 1_000,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+        add(&f, "readable", "readable", 2_000);
+
+        let source = f.source();
+        let foreign = f.store.version("foreign").unwrap().unwrap();
+        assert_eq!(
+            source.open(&foreign),
+            Err(OpenVersionError::AuthenticationFailed)
+        );
+        let served = source
+            .fetch(&["foreign".to_string(), "readable".to_string()])
+            .unwrap();
+        assert_eq!(served.len(), 1);
+        assert_eq!(served[0].item_id, "readable");
+    }
+
+    #[test]
+    fn a_missing_payload_is_not_reported_as_an_authentication_failure() {
+        let f = fixture_named("alpha");
+        add(&f, "missing", "present in storage", 1_000);
+        let source = f.source();
+        let mut row = f.store.version("missing").unwrap().unwrap();
+
+        row.content_ciphertext.clear();
+        assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
+
+        row.content_ciphertext.push(1);
+        row.nonce.clear();
+        assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
+    }
+}

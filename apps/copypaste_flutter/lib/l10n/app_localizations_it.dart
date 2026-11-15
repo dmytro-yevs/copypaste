@@ -1,0 +1,6924 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Italian (`it`).
+class AppLocalizationsIt extends AppLocalizations {
+  AppLocalizationsIt([String locale = 'it']) : super(locale);
+
+  @override
+  String get commonCancel => 'Annulla';
+
+  @override
+  String get commonClose => 'Chiudi';
+
+  @override
+  String get commonDone => 'Fine';
+
+  @override
+  String get commonRetry => 'Riprova';
+
+  @override
+  String get commonTryAgain => 'Riprova';
+
+  @override
+  String get commonCopy => 'Copia';
+
+  @override
+  String get commonDelete => 'Elimina';
+
+  @override
+  String get commonSave => 'Salva';
+
+  @override
+  String get commonContinue => 'Continua';
+
+  @override
+  String get commonBack => 'Indietro';
+
+  @override
+  String get commonOpenSettings => 'Apri Impostazioni';
+
+  @override
+  String get commonLoading => 'Caricamento';
+
+  @override
+  String get commonApply => 'Applica';
+
+  @override
+  String get commonClear => 'Cancella';
+
+  @override
+  String get commonPin => 'Fissa';
+
+  @override
+  String get commonEnable => 'Attiva';
+
+  @override
+  String get settingsLanguageTitle => 'Lingua';
+
+  @override
+  String get settingsLanguageDescription =>
+      'Scegli la lingua dell\'interfaccia di CopyPaste.';
+
+  @override
+  String get settingsLanguageSystem => 'Predefinita di sistema';
+
+  @override
+  String get settingsLanguageKeywords =>
+      'lingua impostazioni locali traduzione interfaccia language locale translation interface';
+
+  @override
+  String get settingsRuntimeLaunchAtLoginUpdateFailed =>
+      'Impossibile aggiornare l\'apertura al login. Riprova.';
+
+  @override
+  String get settingsRuntimeStartupSettingsOpenFailed =>
+      'Impossibile aprire le impostazioni di avvio del sistema.';
+
+  @override
+  String get settingsRuntimeRefreshFailed =>
+      'Impossibile aggiornare le impostazioni. Riprova.';
+
+  @override
+  String get settingsRuntimeLoadFailed =>
+      'Impossibile caricare le impostazioni.';
+
+  @override
+  String get settingsRuntimeAppAlreadyExcluded => 'Questa app è già esclusa.';
+
+  @override
+  String get settingsRuntimeChangeFailed =>
+      'Impossibile completare la modifica richiesta.';
+
+  @override
+  String get settingsRuntimeCapturePermissionsIncomplete =>
+      'Per riprendere l\'acquisizione, concedi tutte le autorizzazioni di acquisizione degli appunti.';
+
+  @override
+  String get settingsRuntimeCaptureStopUnconfirmed =>
+      'L\'acquisizione degli appunti è in pausa. Il servizio di acquisizione di Android non ha confermato l\'arresto.';
+
+  @override
+  String get settingsRuntimeNotificationPermissionRequired =>
+      'Per attivare le notifiche di acquisizione è necessaria l\'autorizzazione alle notifiche.';
+
+  @override
+  String get settingsRuntimeSavedSettingsUnreadable =>
+      'CopyPaste non è riuscito a leggere le impostazioni salvate. Sono attivi valori di protezione; rivedi e salva le tue preferenze per ripristinarle.';
+
+  @override
+  String get settingsRuntimeSettingsRecovered =>
+      'CopyPaste ha recuperato le impostazioni illeggibili con valori di protezione. Rivedi e salva le tue preferenze per ripristinarle.';
+
+  @override
+  String get settingsRuntimeExcludedAppIdInvalid =>
+      'Gli identificatori delle app non possono essere vuoti e non devono superare 256 byte.';
+
+  @override
+  String get settingsRuntimeExcludedAppsLimit =>
+      'Puoi escludere fino a 256 app.';
+
+  @override
+  String get settingsRuntimeAutoPasteUpdateFailed =>
+      'Impossibile aggiornare l\'incolla automatico.';
+
+  @override
+  String get settingsRuntimeShortcutRegisterFailed =>
+      'Impossibile registrare questa scorciatoia.';
+
+  @override
+  String get settingsRuntimeShortcutPauseFailed =>
+      'Impossibile sospendere la scorciatoia attuale.';
+
+  @override
+  String get settingsRuntimeShortcutRestoreFailed =>
+      'Impossibile ripristinare la scorciatoia.';
+
+  @override
+  String get settingsRuntimeQuickPasteOpenFailed =>
+      'Impossibile aprire Quick Paste.';
+
+  @override
+  String get settingsRuntimeAccessibilityRequestFailed =>
+      'Impossibile richiedere l\'autorizzazione Accessibilità.';
+
+  @override
+  String get settingsRuntimeLinuxIntegrationRefreshFailed =>
+      'Impossibile aggiornare lo stato dell\'integrazione con Linux.';
+
+  @override
+  String get settingsRuntimeClipboardInputNotGranted =>
+      'L\'autorizzazione di input per gli appunti non è stata concessa.';
+
+  @override
+  String get settingsRuntimeClipboardInputRequestFailed =>
+      'Impossibile richiedere l\'autorizzazione di input per gli appunti.';
+
+  @override
+  String get settingsRuntimeDesktopIntegrationSetupOpenFailed =>
+      'Impossibile aprire la configurazione dell\'integrazione desktop.';
+
+  @override
+  String get settingsRuntimeTextHistoryFileType =>
+      'Cronologia testi di CopyPaste';
+
+  @override
+  String get settingsRuntimeEncryptedBackupFileType =>
+      'Backup crittografato di CopyPaste';
+
+  @override
+  String get settingsRuntimeNotificationImage => 'Immagine';
+
+  @override
+  String settingsRuntimeNotificationImageSize(int width, int height) {
+    return 'Immagine · $width × $height';
+  }
+
+  @override
+  String get settingsRuntimeNotificationFile => 'File';
+
+  @override
+  String get updateRestoreInstallationFailed =>
+      'CopyPaste non è riuscito a ripristinare l\'installazione dell\'aggiornamento.';
+
+  @override
+  String get updateLinuxAutomaticUnsupported =>
+      'Questa installazione Linux non può aggiornarsi automaticamente.';
+
+  @override
+  String get updateMacosPackageMissing =>
+      'Questa versione non include un pacchetto di aggiornamento firmato per macOS.';
+
+  @override
+  String get updateInstalledVersionInvalid =>
+      'La versione di CopyPaste installata non è valida.';
+
+  @override
+  String get updateCheckUnreachable =>
+      'CopyPaste non è riuscito a raggiungere GitHub per verificare la disponibilità di aggiornamenti.';
+
+  @override
+  String get updateCheckTimedOut =>
+      'Tempo scaduto durante la verifica degli aggiornamenti.';
+
+  @override
+  String get updateCheckDeviceFailed =>
+      'CopyPaste non è riuscito a verificare gli aggiornamenti su questo dispositivo.';
+
+  @override
+  String get updateCheckFailed =>
+      'CopyPaste non è riuscito a verificare gli aggiornamenti.';
+
+  @override
+  String get updateDownloadFailed =>
+      'CopyPaste non è riuscito a scaricare l\'aggiornamento.';
+
+  @override
+  String get updateDownloadTimedOut =>
+      'Tempo scaduto durante il download dell\'aggiornamento.';
+
+  @override
+  String get updateInstallFailed =>
+      'CopyPaste non è riuscito a installare l\'aggiornamento.';
+
+  @override
+  String get updateContinueInAndroidInstaller =>
+      'Continua nel programma di installazione di Android.';
+
+  @override
+  String get updateContinueInPackageManager =>
+      'Continua nel gestore di pacchetti del sistema.';
+
+  @override
+  String get updateInstallerStarting =>
+      'Avvio del programma di installazione in corso.';
+
+  @override
+  String get updatePermissionRequiredAndroid =>
+      'Consenti a CopyPaste di installare app nelle impostazioni di Android, poi continua.';
+
+  @override
+  String get updatePermissionRequiredLinux =>
+      'Esegui l\'autenticazione nel gestore di pacchetti del sistema per installare questo aggiornamento.';
+
+  @override
+  String get updatePermissionRequired =>
+      'Consenti a CopyPaste di installare questo aggiornamento, poi continua.';
+
+  @override
+  String get updateRestartRequired =>
+      'L\'aggiornamento è installato. Riavvia CopyPaste per usarlo.';
+
+  @override
+  String get updateRestarting => 'Riavvio di CopyPaste in corso.';
+
+  @override
+  String get updateRestartFailed =>
+      'CopyPaste non è riuscito a riavviarsi. Riprova.';
+
+  @override
+  String get updateReleasePageOpenFailed =>
+      'CopyPaste non è riuscito ad aprire la pagina della versione.';
+
+  @override
+  String get updatePackageInvalid =>
+      'L\'aggiornamento scaricato non è un pacchetto CopyPaste valido.';
+
+  @override
+  String get updateSignatureInvalid =>
+      'L\'aggiornamento scaricato ha una firma non valida.';
+
+  @override
+  String get updateDowngradeRefused =>
+      'Il pacchetto scaricato non è più recente di questa versione.';
+
+  @override
+  String get updateHomebrewRequired =>
+      'Installa CopyPaste con Homebrew per aggiornarlo da qui.';
+
+  @override
+  String get updateInstallationCancelled =>
+      'L\'installazione dell\'aggiornamento è stata annullata.';
+
+  @override
+  String get updateInstallationBlocked =>
+      'Android ha bloccato l\'installazione dell\'aggiornamento.';
+
+  @override
+  String get updateInstallationConflict =>
+      'L\'aggiornamento è in conflitto con l\'app installata.';
+
+  @override
+  String get updateInstallationIncompatible =>
+      'L\'aggiornamento non è compatibile con questo dispositivo.';
+
+  @override
+  String get updateInstallationStorage =>
+      'Libera spazio di archiviazione per installare l\'aggiornamento.';
+
+  @override
+  String get updateInstallationInterrupted =>
+      'L\'installazione dell\'aggiornamento è stata interrotta. Riprova.';
+
+  @override
+  String get updateInstallationBusy =>
+      'È già in corso l\'installazione di un aggiornamento.';
+
+  @override
+  String get updatePackageDetailsInvalid =>
+      'I dettagli del pacchetto di aggiornamento non sono validi.';
+
+  @override
+  String get updateIntegrityCheckFailed =>
+      'L\'aggiornamento scaricato non ha superato il controllo di integrità.';
+
+  @override
+  String get updateInstallerLaunchFailed =>
+      'CopyPaste non è riuscito ad avviare il programma di installazione del sistema.';
+
+  @override
+  String get updateInstallLocationTranslocated =>
+      'Sposta CopyPaste nella cartella Applicazioni e aprilo da lì per aggiornarlo.';
+
+  @override
+  String get updateInstallLocationUnwritable =>
+      'CopyPaste non può sostituirsi nella cartella attuale. Usa la pagina della versione per aggiornarlo.';
+
+  @override
+  String get updateReplacementBlocked =>
+      'macOS ha bloccato la sostituzione di CopyPaste. Consentila nelle impostazioni Gestione app o usa la pagina della versione.';
+
+  @override
+  String get updatePackageNotDownloadable =>
+      'Questa piattaforma non usa un pacchetto di aggiornamento scaricabile.';
+
+  @override
+  String get updatePackageSizeInvalid =>
+      'La dimensione del pacchetto di aggiornamento non è valida.';
+
+  @override
+  String get updateUpdaterSignatureInvalid =>
+      'L\'aggiornamento scaricato ha una firma del programma di aggiornamento non valida.';
+
+  @override
+  String get updatePackageUrlUntrusted =>
+      'L\'URL del pacchetto di aggiornamento non è attendibile.';
+
+  @override
+  String get updateDownloadLeftGitHub =>
+      'Il download dell\'aggiornamento è stato reindirizzato fuori da GitHub.';
+
+  @override
+  String get updateDownloadTooManyRedirects =>
+      'Il download dell\'aggiornamento ha usato troppi reindirizzamenti.';
+
+  @override
+  String get updatePackageTooLarge =>
+      'Il pacchetto di aggiornamento è troppo grande.';
+
+  @override
+  String get updateSignatureSizeInvalid =>
+      'La dimensione della firma del programma di aggiornamento non è valida.';
+
+  @override
+  String get updateMetadataInvalid =>
+      'GitHub ha restituito metadati di aggiornamento non validi.';
+
+  @override
+  String get updateMetadataTooLarge =>
+      'I metadati dell\'aggiornamento sono troppo grandi.';
+
+  @override
+  String get quickPasteActionFailedTitle => 'Azione non riuscita';
+
+  @override
+  String get quickPasteOpenAppSemantics => 'Apri CopyPaste';
+
+  @override
+  String get quickPasteSearchPlaceholder => 'Digita per cercare…';
+
+  @override
+  String get quickPasteLoadingHistory =>
+      'Caricamento della cronologia degli appunti.';
+
+  @override
+  String get quickPasteHistoryUnavailable => 'Cronologia non disponibile';
+
+  @override
+  String get quickPasteNoClipsFound => 'Nessun elemento trovato';
+
+  @override
+  String get quickPasteLoadMore => 'Carica altri';
+
+  @override
+  String get quickPasteTransferFailed => 'Non riuscito';
+
+  @override
+  String get quickPasteClipUnavailable => 'Elemento non disponibile';
+
+  @override
+  String get quickPasteFileFallbackName => 'File';
+
+  @override
+  String get quickPastePathUnavailable => 'Percorso non disponibile';
+
+  @override
+  String get quickPastePreferences => 'Preferenze…';
+
+  @override
+  String get quickPasteAbout => 'Informazioni';
+
+  @override
+  String get quickPasteQuit => 'Esci';
+
+  @override
+  String get quickPasteClearHistoryTitle => 'Cancellare la cronologia?';
+
+  @override
+  String get quickPasteClearHistoryMessage =>
+      'Gli elementi fissati resteranno nella cronologia.';
+
+  @override
+  String get quickPasteClearHistoryFailed =>
+      'Impossibile eliminare la cronologia.';
+
+  @override
+  String get quickPasteAboutDescription =>
+      'Cronologia degli appunti privata su macOS, Android, Windows e Linux.';
+
+  @override
+  String get transfersTitle => 'Download e trasferimenti';
+
+  @override
+  String transfersActiveTooltip(int count, String written, String total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trasferimenti attivi',
+      many: '$count trasferimenti attivi',
+      one: '$count trasferimento attivo',
+    );
+    return '$_temp0 · $written / $total';
+  }
+
+  @override
+  String transfersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count attivi',
+      many: '$count attivi',
+      one: '$count attivo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get transfersShowLatest => 'Più recenti';
+
+  @override
+  String get transfersShowEarlier => 'Precedenti';
+
+  @override
+  String get transfersClearCompletedHistory =>
+      'Cancella i trasferimenti completati';
+
+  @override
+  String get transfersErrorTitle => 'Trasferimenti';
+
+  @override
+  String get transfersEmptyTitle => 'Nessun trasferimento';
+
+  @override
+  String get transfersEmptyMessage =>
+      'Le importazioni di file, i download e i trasferimenti in uscita vengono visualizzati qui.';
+
+  @override
+  String transfersSpeed(String size) {
+    return '$size/s';
+  }
+
+  @override
+  String transfersBytesProgress(String written, String total) {
+    return '$written / $total';
+  }
+
+  @override
+  String transfersProgressPercent(int percent) {
+    return '$percent%';
+  }
+
+  @override
+  String transfersStatusSize(String status, String size) {
+    return '$status · $size';
+  }
+
+  @override
+  String transfersStatusProgress(String status, String written, String total) {
+    return '$status · $written / $total';
+  }
+
+  @override
+  String get transfersRemoveFromHistory => 'Rimuovi dalla cronologia';
+
+  @override
+  String get transfersCancelDownload => 'Annulla download';
+
+  @override
+  String get transfersShowFile => 'Mostra file';
+
+  @override
+  String get transfersPhaseSending => 'Invio in corso';
+
+  @override
+  String get transfersPhaseDownloading => 'Download in corso';
+
+  @override
+  String get transfersPhaseAdding => 'Aggiunta in corso';
+
+  @override
+  String get transfersPhaseAdded => 'Aggiunto';
+
+  @override
+  String get transfersPhaseSent => 'Inviato';
+
+  @override
+  String get transfersPhaseCompleted => 'Completato';
+
+  @override
+  String get transfersPhaseCancelled => 'Annullato';
+
+  @override
+  String get transfersPhaseInterrupted => 'Interrotto';
+
+  @override
+  String get transfersPhaseFailed => 'Non riuscito';
+
+  @override
+  String get transfersUpdatesUnavailable =>
+      'Gli aggiornamenti dei trasferimenti non sono disponibili. Riapri per aggiornare.';
+
+  @override
+  String get transfersLoadFailed =>
+      'Impossibile caricare i trasferimenti. Riprova.';
+
+  @override
+  String get transfersUpdatesLoadFailed =>
+      'Impossibile caricare gli aggiornamenti dei trasferimenti.';
+
+  @override
+  String get transfersRetryFailed =>
+      'Impossibile riprovare il download di questo file.';
+
+  @override
+  String get transfersClearHistoryFailed =>
+      'Impossibile cancellare la cronologia dei trasferimenti.';
+
+  @override
+  String get transfersRemoveRecordFailed =>
+      'Impossibile rimuovere questa voce della cronologia.';
+
+  @override
+  String get transfersCancelFailed =>
+      'Impossibile annullare il trasferimento. Potrebbe essere ancora in corso.';
+
+  @override
+  String get transfersSavedFileUnavailable =>
+      'Il file salvato non è disponibile. Potrebbe essere stato spostato o eliminato.';
+
+  @override
+  String notificationsTooltip(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Notifiche · $count non lette',
+      many: 'Notifiche · $count non lette',
+      one: 'Notifiche · $count non letta',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get notificationsTitle => 'Notifiche';
+
+  @override
+  String get notificationsClearRead => 'Cancella notifiche lette';
+
+  @override
+  String get notificationsEmptyTitle => 'Nessuna notifica';
+
+  @override
+  String get notificationsEmptyMessage =>
+      'Le richieste di connessione dei dispositivi e il loro esito vengono visualizzati qui.';
+
+  @override
+  String get notificationsSystemAlertTitle => 'Notifiche di sistema';
+
+  @override
+  String get notificationsReview => 'Controlla';
+
+  @override
+  String get notificationsConnectionRequest => 'Richiesta di connessione';
+
+  @override
+  String get notificationsConfirmConnection => 'Conferma connessione';
+
+  @override
+  String get notificationsDeviceConnected => 'Dispositivo connesso';
+
+  @override
+  String get notificationsConnectionRejected => 'Connessione rifiutata';
+
+  @override
+  String get notificationsConnectionCancelled => 'Connessione annullata';
+
+  @override
+  String get notificationsConnectionRequestExpired =>
+      'Richiesta di connessione scaduta';
+
+  @override
+  String get notificationsConnectionFailed => 'Connessione non riuscita';
+
+  @override
+  String get notificationsNearbyDevice => 'Dispositivo nelle vicinanze';
+
+  @override
+  String get notificationsPermissionDenied =>
+      'Consenti le notifiche di sistema nelle impostazioni del sistema operativo per ricevere le richieste in background.';
+
+  @override
+  String get notificationsSystemUnavailable =>
+      'Le notifiche di sistema non sono disponibili. Le richieste di connessione restano qui.';
+
+  @override
+  String get platformCaptureStateUnavailable => 'Non disponibile';
+
+  @override
+  String get platformCaptureStatePaused => 'In pausa';
+
+  @override
+  String get platformCaptureStateRunning => 'Acquisizione in corso';
+
+  @override
+  String get platformCaptureStateStopped => 'Non in esecuzione';
+
+  @override
+  String get platformCaptureActionUnavailable => 'Acquisizione non disponibile';
+
+  @override
+  String get platformCaptureActionResume => 'Riprendi acquisizione';
+
+  @override
+  String get platformCaptureActionPause => 'Sospendi acquisizione';
+
+  @override
+  String get platformCaptureActionResumeStopped =>
+      'Riprendi acquisizione (non in esecuzione)';
+
+  @override
+  String get platformTrayOpen => 'Apri';
+
+  @override
+  String get platformTraySettings => 'Impostazioni';
+
+  @override
+  String get platformTrayQuit => 'Esci';
+
+  @override
+  String get platformWindowControlsUnavailable =>
+      'I controlli della finestra desktop non sono disponibili. CopyPaste resterà visibile.';
+
+  @override
+  String get platformTrayUnavailable =>
+      'L\'area di notifica non è disponibile. Tieni aperto CopyPaste, poi riprova o esci.';
+
+  @override
+  String get platformQuitFailed => 'Impossibile uscire da CopyPaste. Riprova.';
+
+  @override
+  String get platformVisibilityChangeFailed =>
+      'Impossibile modificare la visibilità dell\'app. Riprova.';
+
+  @override
+  String get platformCaptureNotificationTitle => 'Appunti salvati';
+
+  @override
+  String get platformCaptureNotificationBody =>
+      'Un nuovo elemento è stato aggiunto a CopyPaste.';
+
+  @override
+  String get platformPairingNotificationTitle => 'Richiesta di connessione';
+
+  @override
+  String platformPairingNotificationBody(String peerName) {
+    return '$peerName vuole connettersi. Apri CopyPaste per confrontare il codice e confermare.';
+  }
+
+  @override
+  String get platformPairingNotificationChannelName =>
+      'Richieste di connessione dei dispositivi';
+
+  @override
+  String get platformPairingNotificationChannelDescription =>
+      'Richieste di connessione dai dispositivi nelle vicinanze';
+
+  @override
+  String get platformNotificationDefaultAction => 'Apri';
+
+  @override
+  String get platformFilesSelectionFailed => 'Impossibile selezionare i file.';
+
+  @override
+  String get platformFilesOnlyRegular =>
+      'È possibile importare solo file normali.';
+
+  @override
+  String get platformModulesUnavailable =>
+      'I moduli non sono disponibili su questo dispositivo.';
+
+  @override
+  String get platformSmsAccessConfigureFailed =>
+      'Impossibile configurare l\'accesso agli SMS.';
+
+  @override
+  String get platformSmsAccessVerifyFailed =>
+      'Impossibile verificare l\'accesso agli SMS.';
+
+  @override
+  String get platformUpdatesUnavailableHere =>
+      'Gli aggiornamenti dell\'app non sono disponibili qui.';
+
+  @override
+  String get platformUpdateVersionUnavailable =>
+      'La versione installata non è disponibile.';
+
+  @override
+  String get platformUpdatesUnavailableInstallation =>
+      'Gli aggiornamenti dell\'app non sono disponibili per questa installazione.';
+
+  @override
+  String get platformUpdateLinuxUnsupported =>
+      'Questa installazione Linux non può aggiornarsi automaticamente.';
+
+  @override
+  String get platformUpdateLinuxArchitectureMismatch =>
+      'Questo aggiornamento Linux non corrisponde all\'architettura in uso.';
+
+  @override
+  String get platformUpdateMacosUnsupported =>
+      'Questa installazione macOS non può aggiornarsi automaticamente.';
+
+  @override
+  String get platformUpdateStartFailed =>
+      'CopyPaste non è riuscito ad avviare l\'aggiornamento.';
+
+  @override
+  String get platformGlobalShortcutDescription => 'Apri Quick Paste';
+
+  @override
+  String get settingsSectionGeneral => 'Generali';
+
+  @override
+  String get settingsSectionGeneralSummary => 'Lingua e visibilità dell\'app.';
+
+  @override
+  String get settingsSectionAppearance => 'Aspetto';
+
+  @override
+  String get settingsSectionAppearanceSummary =>
+      'Tema e materiale della finestra.';
+
+  @override
+  String get settingsAppearanceDescription => 'Tema e aspetto delle finestre.';
+
+  @override
+  String get settingsThemeTitle => 'Tema';
+
+  @override
+  String get settingsThemeDescription => 'Chiaro, scuro o come il sistema.';
+
+  @override
+  String get settingsThemeKeywords =>
+      'modalità scura modalità chiara schema colori';
+
+  @override
+  String get settingsThemeSystem => 'Sistema';
+
+  @override
+  String get settingsThemeLight => 'Chiaro';
+
+  @override
+  String get settingsThemeDark => 'Scuro';
+
+  @override
+  String get settingsAccentTitle => 'Colore di risalto';
+
+  @override
+  String get settingsAccentDescription =>
+      'Evidenzia la selezione e la posizione attuale.';
+
+  @override
+  String get settingsAccentKeywords => 'colore evidenziazione tinta';
+
+  @override
+  String get settingsAccentSystem => 'Sistema';
+
+  @override
+  String get settingsAccentStandard => 'Predefinito';
+
+  @override
+  String get settingsAccentPurple => 'Viola';
+
+  @override
+  String get settingsAccentPink => 'Rosa';
+
+  @override
+  String get settingsAccentRed => 'Rosso';
+
+  @override
+  String get settingsAccentOrange => 'Arancione';
+
+  @override
+  String get settingsAccentYellow => 'Giallo';
+
+  @override
+  String get settingsAccentGreen => 'Verde';
+
+  @override
+  String get settingsAccentTeal => 'Turchese';
+
+  @override
+  String get settingsAccentGraphite => 'Grafite';
+
+  @override
+  String get settingsSectionClipboard => 'Appunti';
+
+  @override
+  String get settingsSectionClipboardSummary =>
+      'Acquisizione e limiti della cronologia.';
+
+  @override
+  String get settingsSectionPrivacy => 'Privacy';
+
+  @override
+  String get settingsSectionPrivacySummary =>
+      'Esclusione delle app e protezione dello schermo.';
+
+  @override
+  String get settingsSectionQuickPasteSummary =>
+      'Scorciatoia e comportamento dell\'incolla automatico.';
+
+  @override
+  String get settingsSectionSync => 'Sincronizzazione';
+
+  @override
+  String get settingsSectionSyncSummary =>
+      'Sincronizzazione e rilevamento dei dispositivi nelle vicinanze.';
+
+  @override
+  String get settingsSectionNotifications => 'Notifiche';
+
+  @override
+  String get settingsSectionNotificationsSummary =>
+      'Notifiche e suoni di acquisizione.';
+
+  @override
+  String get settingsSectionData => 'Dati';
+
+  @override
+  String get settingsSectionDataSummary => 'Esportazione, backup e ripristino.';
+
+  @override
+  String get settingsSectionModules => 'Moduli';
+
+  @override
+  String get settingsSectionModulesSummary =>
+      'Installa e gestisci i moduli opzionali.';
+
+  @override
+  String get settingsSectionRules => 'Regole sui contenuti';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Etichetta, ignora, proteggi o fai scadere gli elementi automaticamente.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Accesso rapido';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Tastiera, riquadri e widget della schermata Home.';
+
+  @override
+  String get settingsSectionTransforms => 'Trasformazioni del testo';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Preferiti, sequenze e trasformazioni predefinite per l\'incolla.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Raccogli più copie e incollale in ordine.';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Incollato $position di $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'L\'elemento $position di $total è negli appunti';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi incollati',
+      one: '1 elemento incollato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi sono negli appunti',
+      one: '1 elemento è negli appunti',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Coda completata';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Aggiunto, $total in coda',
+      one: 'Aggiunto, 1 in coda',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Coda vuota, nulla incollato';
+
+  @override
+  String get pasteQueueMixed =>
+      'Incolla tutto funziona con code di solo testo o solo file';
+
+  @override
+  String get pasteQueueSeveralFiles => 'Incolla i file uno alla volta.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi non sono più disponibili',
+      one: '1 elemento non è più disponibile',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Incolla successivo copia soltanto';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Elemento copiato. Consenti Accessibilità per incollare automaticamente.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Impossibile incollare automaticamente. Elemento copiato.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Impossibile incollare in un’app amministratore. Elemento copiato.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Nessuna app in cui incollare. Elemento copiato.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Raccolta delle copie in corso';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Raccolta interrotta';
+
+  @override
+  String get pasteQueueFailed =>
+      'Impossibile completare l\'azione di Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count in attesa',
+      one: '1 in attesa',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count in attesa · Raccolta',
+      one: '1 in attesa · Raccolta',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Raccolta';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Completata';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Coda piena ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Le nuove copie non vengono più aggiunte.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue è vuota';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Raccogli copie o aggiungi elementi dalla cronologia.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copia elementi per aggiungerli';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Ogni copia entra in coda finché non interrompi la raccolta.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Avvia raccolta';
+
+  @override
+  String get pasteQueueStopCollecting => 'Interrompi raccolta';
+
+  @override
+  String get pasteQueueLoading => 'Caricamento della coda…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Impossibile caricare la coda';
+
+  @override
+  String get pasteQueuePasteNext => 'Incolla successivo';
+
+  @override
+  String get pasteQueueCopyNext => 'Copia successivo';
+
+  @override
+  String get pasteQueuePasteAll => 'Incolla tutto';
+
+  @override
+  String get pasteQueueCopyAll => 'Copia tutto';
+
+  @override
+  String get pasteQueueReverse => 'Inverti ordine';
+
+  @override
+  String get pasteQueueStepBack => 'Torna indietro';
+
+  @override
+  String get pasteQueueSkip => 'Salta';
+
+  @override
+  String get pasteQueueRemovePasted => 'Rimuovi incollati';
+
+  @override
+  String get pasteQueueCleared => 'Coda svuotata';
+
+  @override
+  String get pasteQueueUndo => 'Annulla';
+
+  @override
+  String get pasteQueueStartFresh => 'Ricomincia da capo';
+
+  @override
+  String get pasteQueueAppend => 'Aggiungi in coda';
+
+  @override
+  String get pasteQueueRestartTitle => 'Avviare una nuova raccolta?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Ricomincia da capo rimuove gli elementi incollati. Aggiungi in coda li mantiene.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Coda del $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Incollato';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Saltato';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Non più disponibile';
+
+  @override
+  String get pasteQueueEdited => 'Modificato';
+
+  @override
+  String get pasteQueueSecret => 'Segreto';
+
+  @override
+  String get pasteQueueKindImage => 'Immagine';
+
+  @override
+  String get pasteQueueKindFiles => 'File';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Generato alle $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Elemento $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Spostato in posizione $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Sposta su';
+
+  @override
+  String get pasteQueueMoveDown => 'Sposta giù';
+
+  @override
+  String get pasteQueueMoveToTop => 'Sposta in cima';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Sposta in fondo';
+
+  @override
+  String get pasteQueueReorder => 'Trascina per riordinare';
+
+  @override
+  String get pasteQueueMoreActions => 'Altre azioni';
+
+  @override
+  String get pasteQueuePasteNow => 'Incolla ora';
+
+  @override
+  String get pasteQueueEdit => 'Modifica testo';
+
+  @override
+  String get pasteQueueUseOriginal => 'Usa il testo originale';
+
+  @override
+  String get pasteQueueRemove => 'Rimuovi dalla coda';
+
+  @override
+  String get pasteQueueEditTitle => 'Modifica il testo in coda';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Le modifiche valgono solo per questa coda.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Imposta scorciatoie';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Raccogli e incolla senza aprire CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Avvia o interrompi la raccolta';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Incolla successivo come testo semplice';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Una scorciatoia globale che funziona in qualsiasi app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Un\'altra scorciatoia di CopyPaste usa questa combinazione. Resta quella precedente.';
+
+  @override
+  String get pasteQueueShortcutInUse => 'Un’altra app usa questa combinazione.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Il sistema ha rifiutato questa combinazione. Resta quella precedente.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt digita caratteri in molti layout. Scegline un’altra.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Le scorciatoie globali non sono disponibili in questa sessione.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Impossibile impostare questa scorciatoia.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Attiva Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Se disattivata, scorciatoie e raccolta si fermano.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Incolla successivo esegue';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Incolla automaticamente o copia solo negli appunti.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Incolla nell\'app in primo piano';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Solo negli appunti';
+
+  @override
+  String get pasteQueueInsertTitle => 'I nuovi elementi vanno';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Dove entrano in coda gli elementi raccolti e aggiunti.';
+
+  @override
+  String get pasteQueueInsertEnd => 'In fondo (primo entrato, primo uscito)';
+
+  @override
+  String get pasteQueueInsertStart => 'In cima (ultimo entrato, primo uscito)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Dopo l\'ultimo elemento';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Cosa fa Incolla successivo quando tutti gli elementi sono stati incollati.';
+
+  @override
+  String get pasteQueueEndStop => 'Fermati';
+
+  @override
+  String get pasteQueueEndLoop => 'Ricomincia';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Continua a incollare l\'ultimo';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Separatore di Incolla tutto';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Inserito tra gli elementi quando li incolli tutti insieme.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nuova riga';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Riga vuota';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulazione';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Spazio';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Virgola';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Virgola e spazio';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Nessuno';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Personalizzato';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Fino a 32 caratteri; \\n e \\t consentiti';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Incolla sempre come testo semplice';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Rimuove la formattazione dagli elementi in coda.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Interrompi la raccolta dopo';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Interrompi la raccolta dopo questo tempo senza copie.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Mai';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Limite della coda';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Quando è piena, le nuove copie non vengono aggiunte.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Ripristina gli appunti precedenti alla fine';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Ripristina ciò che avevi copiato prima di incollare.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue coda raccogliere ordine scorciatoia separatore';
+
+  @override
+  String get settingsSectionAbout => 'Informazioni';
+
+  @override
+  String get settingsSectionAboutSummary =>
+      'Versione e aggiornamenti dell\'app.';
+
+  @override
+  String get settingsGeneralDescription =>
+      'Lingua, avvio automatico e visibilità dell\'app.';
+
+  @override
+  String get settingsModulesDescription => 'Funzioni opzionali per CopyPaste.';
+
+  @override
+  String get settingsClipboardDescription =>
+      'Acquisisci le modifiche agli appunti e gestisci i limiti della cronologia.';
+
+  @override
+  String get settingsDataDescription =>
+      'Esporta, esegui il backup e ripristina la cronologia degli appunti.';
+
+  @override
+  String get settingsSyncDescription =>
+      'Gestisci la sincronizzazione con i dispositivi abbinati.';
+
+  @override
+  String get settingsPrivacyDescription =>
+      'Scegli quali app acquisire e proteggi il contenuto degli appunti.';
+
+  @override
+  String get settingsNotificationsDescription =>
+      'Scegli notifiche e suoni per gli elementi acquisiti.';
+
+  @override
+  String get settingsAboutDescription =>
+      'Versione di CopyPaste e aggiornamenti dell\'app.';
+
+  @override
+  String get settingsQuickPasteDescription =>
+      'Apri la cronologia degli appunti ovunque, senza cambiare finestra.';
+
+  @override
+  String get settingsLoadingMessage => 'Caricamento delle impostazioni.';
+
+  @override
+  String get settingsUnavailableTitle => 'Impostazioni non disponibili';
+
+  @override
+  String get settingsNoResultsTitle => 'Nessuna impostazione trovata';
+
+  @override
+  String get settingsNoResultsMessage => 'Prova con un\'altra ricerca.';
+
+  @override
+  String get settingsAttentionTitle => 'Le impostazioni richiedono attenzione';
+
+  @override
+  String get settingsSearchPlaceholder => 'Cerca nelle impostazioni';
+
+  @override
+  String get settingsBackToSettings => 'Torna a Impostazioni';
+
+  @override
+  String get settingsStartOnBootTitle =>
+      'Avvia all\'accensione del dispositivo';
+
+  @override
+  String get settingsStartAtLoginTitle => 'Apri al login';
+
+  @override
+  String get settingsStartupSearchDescription =>
+      'Avvia CopyPaste automaticamente.';
+
+  @override
+  String get settingsStartupKeywords =>
+      'avvio login accensione apertura automaticamente autoavvio startup login boot launch automatically autostart';
+
+  @override
+  String get settingsStartupWindowsApproval =>
+      'Disattivata in Gestione attività. Attiva CopyPaste in Impostazioni → App → Avvio.';
+
+  @override
+  String get settingsStartupMacApproval =>
+      'Consenti CopyPaste in Impostazioni di Sistema → Generali → Elementi login.';
+
+  @override
+  String get settingsStartupUnavailable =>
+      'L\'avvio automatico non è disponibile in questa installazione.';
+
+  @override
+  String get settingsStartupAndroidDescription =>
+      'Riprendi i servizi in background dopo il riavvio.';
+
+  @override
+  String get settingsStartupDesktopDescription =>
+      'Apri CopyPaste automaticamente quando esegui il login.';
+
+  @override
+  String get settingsShowInDock => 'Mostra nel Dock';
+
+  @override
+  String get settingsShowInTaskbar => 'Mostra nella barra delle applicazioni';
+
+  @override
+  String get settingsTaskbarVisibilityDescription =>
+      'Mostra l\'icona dell\'app per passare da una finestra all\'altra.';
+
+  @override
+  String get settingsTaskbarVisibilityKeywords =>
+      'dock barra applicazioni icona app visibilità dock taskbar application icon visibility';
+
+  @override
+  String get settingsShowInMenuBar => 'Mostra nella barra dei menu';
+
+  @override
+  String get settingsShowInSystemTray => 'Mostra nell\'area di notifica';
+
+  @override
+  String get settingsTrayVisibilityDescription =>
+      'Mostra l\'accesso rapido a CopyPaste e ai controlli di acquisizione.';
+
+  @override
+  String get settingsTrayVisibilityKeywords =>
+      'area notifica barra menu stato icona visibilità tray menu bar menubar status icon visibility';
+
+  @override
+  String get settingsLightweightModeTitle => 'Modalità leggera';
+
+  @override
+  String get settingsLightweightModeDescription =>
+      'Chiudere la finestra esce dall\'app; acquisizione e sincronizzazione continuano. Area notifica, Quick Paste e scorciatoie tornano quando la riapri.';
+
+  @override
+  String get settingsLightweightModeKeywords =>
+      'leggera chiudi esci background memoria lightweight close quit background memory';
+
+  @override
+  String get settingsVisibilityErrorTitle =>
+      'Impossibile modificare la visibilità';
+
+  @override
+  String get settingsModulesSearchDescription =>
+      'Installa, aggiorna e rimuovi i moduli opzionali.';
+
+  @override
+  String get settingsModulesKeywords =>
+      'funzioni comandi estensioni features commands extensions';
+
+  @override
+  String get settingsAndroidCaptureTitle =>
+      'Acquisizione in background su Android';
+
+  @override
+  String get settingsAndroidCaptureSearchDescription =>
+      'Modalità Completa o Limitata con configurazione tramite Shizuku o ADB.';
+
+  @override
+  String get settingsAndroidCaptureKeywords =>
+      'background autorizzazioni configurazione background permissions setup';
+
+  @override
+  String get settingsAndroidCaptureDescription =>
+      'Modalità Completa o Limitata e configurazione unica con Shizuku o ADB.';
+
+  @override
+  String get settingsOpenSetup => 'Apri configurazione';
+
+  @override
+  String get settingsSaveScreenshotsTitle => 'Salva screenshot';
+
+  @override
+  String get settingsSaveScreenshotsSearchDescription =>
+      'Salva automaticamente i nuovi screenshot di Android nella Cronologia.';
+
+  @override
+  String get settingsSaveScreenshotsKeywords =>
+      'immagini foto acquisizione autorizzazioni images photos capture permissions';
+
+  @override
+  String get settingsSaveScreenshotsDescription =>
+      'Aggiungi automaticamente i nuovi screenshot alla Cronologia.';
+
+  @override
+  String get settingsScreenshotAccessTitle => 'Accesso agli screenshot';
+
+  @override
+  String get settingsScreenshotAccessDescription =>
+      'Necessario per salvare gli screenshot in background.';
+
+  @override
+  String get settingsAllowAccess => 'Consenti accesso';
+
+  @override
+  String get settingsScreenshotCaptureStoppedTitle =>
+      'L\'acquisizione degli screenshot non è in esecuzione';
+
+  @override
+  String get settingsScreenshotCaptureStoppedMessage =>
+      'I nuovi screenshot non vengono salvati. Riprendi l\'acquisizione per riavviare il servizio.';
+
+  @override
+  String get settingsResumeCapture => 'Riprendi acquisizione';
+
+  @override
+  String get settingsClipboardCaptureTitle => 'Acquisizione degli appunti';
+
+  @override
+  String get settingsClipboardCaptureSearchDescription =>
+      'Sospendi o riprendi l\'acquisizione degli appunti.';
+
+  @override
+  String get settingsCaptureStateUnavailable => 'Stato non disponibile';
+
+  @override
+  String get settingsCaptureStoppedTitle =>
+      'L\'acquisizione non è in esecuzione';
+
+  @override
+  String get settingsCaptureStoppedMessage =>
+      'Al momento CopyPaste non riceve le modifiche agli appunti su questo dispositivo.';
+
+  @override
+  String get settingsRetentionTitle => 'Conservazione';
+
+  @override
+  String get settingsRetentionDescription =>
+      'Rimuovi automaticamente i vecchi elementi degli appunti non fissati.';
+
+  @override
+  String get settingsRetentionForever => 'Conserva per sempre';
+
+  @override
+  String get settingsStorageQuotaTitle => 'Quota di archiviazione';
+
+  @override
+  String get settingsStorageQuotaDescription =>
+      'Spazio di archiviazione locale massimo usato dalla cronologia non fissata.';
+
+  @override
+  String get settingsStorageQuotaKeywords =>
+      'disco spazio limite disk space limit';
+
+  @override
+  String get settingsMaxFileSizeTitle => 'Dimensione massima dei file';
+
+  @override
+  String get settingsMaxFileSizeSearchDescription =>
+      'Limite per l\'aggiunta e il download di file.';
+
+  @override
+  String get settingsMaxFileSizeKeywords =>
+      'importazione download trasferimento dimensione limite import download transfer size limit';
+
+  @override
+  String get settingsMaxFileSizeDescription =>
+      'File più grande che puoi aggiungere o scaricare.';
+
+  @override
+  String get settingsFileStorageTitle => 'Archiviazione file';
+
+  @override
+  String get settingsFileStorageDescription =>
+      'Un link funziona solo finché esiste l’originale; una copia conserva il file.';
+
+  @override
+  String get settingsFileStorageKeywords =>
+      'file copia link originale conservare archiviare offline files copy link original keep store offline';
+
+  @override
+  String get settingsFileStorageLink => 'Link all’originale';
+
+  @override
+  String get settingsFileStorageCopy => 'Conserva una copia';
+
+  @override
+  String get settingsSaveFolderTitle => 'Salva i file in';
+
+  @override
+  String get settingsSaveFolderAsk => 'Chiedi ogni volta';
+
+  @override
+  String get settingsSaveFolderAskAction => 'Chiedi ogni volta';
+
+  @override
+  String get settingsSaveFolderChooseAction => 'Scegli cartella';
+
+  @override
+  String get settingsSaveFolderSearchDescription =>
+      'Cartella per i file scaricati.';
+
+  @override
+  String get settingsSaveFolderKeywords =>
+      'download cartella destinazione directory salva posizione download folder destination directory save location';
+
+  @override
+  String get settingsAutoDownloadTitle => 'Scarica i file ricevuti';
+
+  @override
+  String get settingsAutoDownloadDescription =>
+      'Salva nella cartella i file degli altri dispositivi quando sono online.';
+
+  @override
+  String get settingsAutoDownloadNeedsFolder =>
+      'Scegli prima una cartella in cui salvare i file.';
+
+  @override
+  String get settingsAutoDownloadKeywords =>
+      'automatico scaricare ricevere sincronizzare file automatic download receive sync files';
+
+  @override
+  String get settingsHistoryFilesTitle => 'File della cronologia';
+
+  @override
+  String get settingsHistoryFilesSearchDescription =>
+      'Esporta la cronologia, crea backup o ripristina un backup.';
+
+  @override
+  String get settingsHistoryFilesKeywords =>
+      'testo crittografato backup dati text encrypted backup data';
+
+  @override
+  String get settingsExportTextTitle => 'Esporta la cronologia dei testi';
+
+  @override
+  String get settingsExportTextDescription =>
+      'Salva gli elementi di testo in un file portabile.';
+
+  @override
+  String get settingsExportAction => 'Esporta';
+
+  @override
+  String get settingsBackupTitle => 'Backup crittografato';
+
+  @override
+  String get settingsBackupDescription =>
+      'Salva l\'intera cronologia locale di questo dispositivo.';
+
+  @override
+  String get settingsCreateBackupAction => 'Backup';
+
+  @override
+  String get settingsRestoreTitle => 'Ripristina backup';
+
+  @override
+  String get settingsRestoreDescription =>
+      'Sostituisci la cronologia locale con un backup crittografato.';
+
+  @override
+  String get settingsRestoreAction => 'Ripristina';
+
+  @override
+  String get settingsRestoreDialogTitle => 'Sostituire la cronologia locale?';
+
+  @override
+  String get settingsRestoreDialogMessage =>
+      'Il backup sostituisce la cronologia di questo dispositivo. Le impostazioni restano.';
+
+  @override
+  String get settingsRestoreFailed => 'Impossibile ripristinare il backup.';
+
+  @override
+  String get settingsSyncSwitchTitle => 'Sincronizzazione';
+
+  @override
+  String get settingsSyncSwitchDescription =>
+      'Sincronizza la cronologia con i dispositivi associati.';
+
+  @override
+  String get settingsSyncSearchDescription =>
+      'Sincronizzazione con i dispositivi abbinati.';
+
+  @override
+  String get settingsInstantClipboardTitle => 'Appunti istantanei';
+
+  @override
+  String get settingsInstantClipboardSearchDescription =>
+      'Copia automaticamente i nuovi elementi dagli altri dispositivi.';
+
+  @override
+  String get settingsInstantClipboardKeywords =>
+      'automatico copia incolla sincronizzazione ricevuti automatic copy paste sync received';
+
+  @override
+  String get settingsInstantClipboardDescription =>
+      'Copia qui i nuovi elementi dagli altri dispositivi.';
+
+  @override
+  String get settingsLanVisibilityTitle => 'Visibilità LAN';
+
+  @override
+  String get settingsLanVisibilityDescription =>
+      'Consenti ai dispositivi nelle vicinanze di rilevare questo dispositivo.';
+
+  @override
+  String get settingsLanVisibilityKeywords =>
+      'rete locale rilevamento local network discovery';
+
+  @override
+  String get settingsRelayTitle => 'Server relay';
+
+  @override
+  String get settingsRelayDescription =>
+      'Sincronizza i dispositivi associati tra reti diverse tramite il tuo relay. Lascia vuoto per disattivarlo.';
+
+  @override
+  String get settingsRelayKeywords =>
+      'relay server remoto internet rete relay server remote internet network websocket';
+
+  @override
+  String get settingsRelayPlaceholder => 'wss://relay.example.com';
+
+  @override
+  String get settingsRelayConnecting => 'Connessione al relay…';
+
+  @override
+  String get settingsRelayConnected => 'Connesso al relay.';
+
+  @override
+  String get settingsRelayUnauthorized =>
+      'Il relay ha rifiutato il token di accesso.';
+
+  @override
+  String get settingsRelayUnreachable => 'Impossibile raggiungere il relay.';
+
+  @override
+  String get settingsPortMappingTitle => 'Inoltro porte del router';
+
+  @override
+  String get settingsPortMappingDescription =>
+      'Consenti alla sincronizzazione diretta di chiedere al router (UPnP) di aprire una porta per alcuni minuti. Utile quando entrambe le reti bloccano le connessioni dirette.';
+
+  @override
+  String get settingsPortMappingKeywords =>
+      'router porta inoltro diretta router port mapping upnp nat forwarding direct';
+
+  @override
+  String get settingsExcludedAppsTitle => 'App escluse';
+
+  @override
+  String get settingsExcludedAppsSearchDescription =>
+      'Ignora l\'acquisizione automatica dalle app escluse.';
+
+  @override
+  String get settingsExcludedAppsKeywords =>
+      'privacy app identificatori privacy app identifiers';
+
+  @override
+  String get settingsExcludedAppsDesktopDescription =>
+      'Salta l’acquisizione automatica da queste app.';
+
+  @override
+  String get settingsExcludedAppsAndroidDescription =>
+      'L’acquisizione automatica si sospende finché ci sono app escluse.';
+
+  @override
+  String get settingsExcludedAppsUnsupportedDescription =>
+      'L\'esclusione delle app è supportata su macOS, Windows, Android e Linux.';
+
+  @override
+  String get settingsExcludedAppsAdd => 'Aggiungi';
+
+  @override
+  String get settingsExcludedAppsEmpty => 'Nessuna app esclusa.';
+
+  @override
+  String settingsExcludedAppsRemove(String app) {
+    return 'Rimuovi $app';
+  }
+
+  @override
+  String get applicationPickerSearch => 'Cerca app';
+
+  @override
+  String get applicationPickerEmpty => 'Nessuna app trovata';
+
+  @override
+  String get settingsSkipSecretTitle => 'Ignora appunti riservati';
+
+  @override
+  String get settingsSkipSecretDescription =>
+      'Non salvare le copie che le app segnano come segrete.';
+
+  @override
+  String get settingsSkipSecretKeywords =>
+      'segreto password sensibile nascosto spoiler secret password sensitive concealed spoiler';
+
+  @override
+  String get settingsSkipTransientTitle => 'Ignora appunti temporanei';
+
+  @override
+  String get settingsSkipTransientDescription =>
+      'Non salvare le copie che le app segnano come temporanee.';
+
+  @override
+  String get settingsSkipTransientKeywords =>
+      'transitorio temporaneo privacy transient temporary privacy';
+
+  @override
+  String get settingsBlockScreenshotsTitle => 'Blocca screenshot';
+
+  @override
+  String get settingsBlockScreenshotsDescription =>
+      'Impedisci screenshot e registrazioni dello schermo di CopyPaste.';
+
+  @override
+  String get settingsBlockScreenshotsUnsupported =>
+      'Il blocco degli screenshot non è disponibile su questa piattaforma.';
+
+  @override
+  String get settingsBlockScreenshotsKeywords =>
+      'privacy schermo acquisizione protezione abbinamento qr sicurezza codice privacy screen capture protection pairing qr security code';
+
+  @override
+  String get settingsNotifyOnCopyTitle => 'Notifica alla copia';
+
+  @override
+  String get settingsNotifyOnCopyDescription =>
+      'Mostra una notifica dopo un\'acquisizione in background.';
+
+  @override
+  String get settingsNotificationPreviewTitle =>
+      'Mostra contenuto degli appunti';
+
+  @override
+  String get settingsNotificationPreviewDescription =>
+      'Includi un\'anteprima dell\'elemento nelle notifiche di copia.';
+
+  @override
+  String get settingsNotificationPreviewKeywords =>
+      'notifica anteprima testo immagine privacy notification preview text image privacy';
+
+  @override
+  String get settingsSoundOnCopyTitle => 'Suono alla copia';
+
+  @override
+  String get settingsSoundOnCopyDescription =>
+      'Riproduci il feedback della piattaforma dopo un\'acquisizione riuscita.';
+
+  @override
+  String get settingsVersionTitle => 'Versione';
+
+  @override
+  String get settingsVersionDescription => 'Versione di CopyPaste installata.';
+
+  @override
+  String get settingsVersionUnavailable => 'Non disponibile';
+
+  @override
+  String get settingsUpdatesTitle => 'Aggiornamenti dell\'app';
+
+  @override
+  String get settingsUpdatesSearchDescription =>
+      'Verifica e installa gli aggiornamenti di CopyPaste.';
+
+  @override
+  String get settingsUpdatesKeywords =>
+      'versione github release version github release';
+
+  @override
+  String get settingsUpdateIdle =>
+      'Verifica se è disponibile una versione più recente di CopyPaste.';
+
+  @override
+  String get settingsUpdateChecking => 'Verifica degli aggiornamenti in corso.';
+
+  @override
+  String get settingsUpdateUpToDate => 'CopyPaste è aggiornato.';
+
+  @override
+  String settingsUpdateVersionUpToDate(String version) {
+    return 'La versione $version è aggiornata.';
+  }
+
+  @override
+  String settingsUpdateAvailable(String available, String current) {
+    return 'È disponibile la versione $available. Su questo dispositivo è installata la versione $current.';
+  }
+
+  @override
+  String settingsUpdateDownloading(String version, int percent) {
+    return 'Download della versione $version · $percent%.';
+  }
+
+  @override
+  String get settingsUpdatePreparingModules =>
+      'Preparazione degli aggiornamenti dei moduli installati.';
+
+  @override
+  String settingsUpdateInstalling(String version) {
+    return 'Installazione della versione $version.';
+  }
+
+  @override
+  String get settingsUpdateNeedsAttention =>
+      'Gli aggiornamenti dell\'app richiedono attenzione.';
+
+  @override
+  String get settingsUpdateNowAction => 'Aggiorna ora';
+
+  @override
+  String get settingsUpdateOpenReleaseAction => 'Apri pagina versione';
+
+  @override
+  String get settingsUpdateCheckingAction => 'Verifica in corso';
+
+  @override
+  String get settingsUpdateDownloadingAction => 'Download in corso';
+
+  @override
+  String get settingsUpdateInstallingAction => 'Installazione in corso';
+
+  @override
+  String get settingsUpdateRestartAction => 'Riavvia CopyPaste';
+
+  @override
+  String get settingsUpdateCheckAgainAction => 'Verifica di nuovo';
+
+  @override
+  String get settingsUpdateNoneTitle => 'Nessun aggiornamento disponibile';
+
+  @override
+  String get settingsUpdateLatest => 'CopyPaste è alla versione più recente.';
+
+  @override
+  String settingsUpdateVersionLatest(String version) {
+    return 'CopyPaste $version è la versione più recente.';
+  }
+
+  @override
+  String get settingsUpdateAvailableTitle => 'Aggiornamento disponibile';
+
+  @override
+  String get settingsUpdateReady =>
+      'Una versione più recente di CopyPaste è pronta per l\'installazione.';
+
+  @override
+  String settingsUpdateVersionReady(String version) {
+    return 'CopyPaste $version è pronto per l\'installazione.';
+  }
+
+  @override
+  String get settingsUpdateUnavailableTitle => 'Aggiornamento non disponibile';
+
+  @override
+  String get settingsUpdateUnavailableMessage =>
+      'Questa installazione non può aggiornarsi automaticamente.';
+
+  @override
+  String get settingsUpdateCheckFailedTitle =>
+      'Verifica degli aggiornamenti non riuscita';
+
+  @override
+  String get settingsUpdateCheckFailedMessage =>
+      'CopyPaste non è riuscito a verificare gli aggiornamenti.';
+
+  @override
+  String get settingsQuickPasteSetupTitle => 'Configura Quick Paste';
+
+  @override
+  String get settingsQuickPasteSetupMessage =>
+      'Attiva l\'estensione firmata per GNOME o KDE e consenti il controllo della tastiera per tornare all\'app precedente.';
+
+  @override
+  String get settingsQuickPasteDesktopIntegration => 'Integrazione desktop';
+
+  @override
+  String get settingsQuickPasteAllowKeyboard => 'Consenti controllo tastiera';
+
+  @override
+  String get settingsQuickPasteCheckAgain => 'Verifica di nuovo';
+
+  @override
+  String get settingsQuickPasteLoading =>
+      'Caricamento delle impostazioni di Quick Paste.';
+
+  @override
+  String get settingsQuickPasteUnavailableTitle =>
+      'Quick Paste non è disponibile';
+
+  @override
+  String get settingsQuickPasteUnavailableMessage =>
+      'Questo dispositivo non supporta la finestra di Quick Paste.';
+
+  @override
+  String get settingsQuickPasteShortcutTitle => 'Apri Quick Paste';
+
+  @override
+  String get settingsQuickPasteShortcutSearchDescription =>
+      'Configura la scorciatoia globale di Quick Paste.';
+
+  @override
+  String get settingsQuickPasteShortcutKeywords =>
+      'tastiera scorciatoia tasto rapido keyboard hotkey';
+
+  @override
+  String get settingsQuickPasteShortcutDescription =>
+      'Funziona mentre CopyPaste è in esecuzione in background.';
+
+  @override
+  String settingsQuickPasteRegisteredShortcut(String shortcut) {
+    return 'Scorciatoia registrata: $shortcut';
+  }
+
+  @override
+  String get settingsAutoPasteTitle => 'Incolla automaticamente';
+
+  @override
+  String get settingsAutoPasteSearchDescription =>
+      'Incolla l\'elemento selezionato nell\'app precedente.';
+
+  @override
+  String get settingsAutoPasteKeywords =>
+      'accessibilità automatico accessibility automatic';
+
+  @override
+  String get settingsAutoPasteDescription =>
+      'Quando selezioni un elemento, torni all\'app precedente e l\'elemento viene incollato.';
+
+  @override
+  String get settingsAccessibilityRequiredTitle =>
+      'È richiesta l\'autorizzazione Accessibilità';
+
+  @override
+  String get settingsAccessibilityRequiredMessage =>
+      'Finché l\'autorizzazione non viene concessa, selezionando un elemento lo copi senza incollarlo.';
+
+  @override
+  String get settingsQuickPasteAttentionTitle =>
+      'Quick Paste richiede attenzione';
+
+  @override
+  String get settingsShortcutRecording => 'Premi la scorciatoia…';
+
+  @override
+  String get settingsShortcutNotSet => 'Non impostata';
+
+  @override
+  String get settingsShortcutReset => 'Reimposta scorciatoia';
+
+  @override
+  String settingsRetentionDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count giorni',
+      many: '$count giorni',
+      one: '$count giorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get devicesLoading => 'Caricamento dei dispositivi…';
+
+  @override
+  String get devicesUnavailableTitle => 'Dispositivi non disponibili';
+
+  @override
+  String get devicesNearbyTitle => 'Dispositivi nelle vicinanze';
+
+  @override
+  String get devicesScan => 'Cerca';
+
+  @override
+  String get devicesScanning => 'Ricerca in corso…';
+
+  @override
+  String get devicesNoneNearby => 'Nessun dispositivo nelle vicinanze';
+
+  @override
+  String get devicesThisDevice => 'Questo dispositivo';
+
+  @override
+  String get devicesTrusted => 'Attendibile';
+
+  @override
+  String get devicesConnect => 'Connetti';
+
+  @override
+  String devicesCardPing(String ping) {
+    return 'Ping: $ping';
+  }
+
+  @override
+  String devicesCardPingStacked(String ping) {
+    return 'Ping:\n$ping';
+  }
+
+  @override
+  String get devicesRenameDialogTitle => 'Rinomina questo dispositivo';
+
+  @override
+  String get devicesNamePlaceholder => 'Nome del dispositivo';
+
+  @override
+  String get devicesRenameFailed =>
+      'Impossibile salvare il nome del dispositivo.';
+
+  @override
+  String get devicesActionFailedMessage =>
+      'Impossibile completare l\'azione sul dispositivo.';
+
+  @override
+  String get devicesCloseDetails => 'Chiudi dettagli dispositivo';
+
+  @override
+  String get devicesDetailType => 'Tipo di dispositivo';
+
+  @override
+  String get devicesDetailOperatingSystem => 'Sistema operativo';
+
+  @override
+  String get devicesDetailModel => 'Modello';
+
+  @override
+  String get devicesDetailAppVersion => 'Versione di CopyPaste';
+
+  @override
+  String get devicesDetailProtocolVersion => 'Versione del protocollo';
+
+  @override
+  String get devicesDetailStatus => 'Stato';
+
+  @override
+  String get devicesDetailPing => 'Ping';
+
+  @override
+  String get devicesDetailMeasured => 'Misurato';
+
+  @override
+  String get devicesDetailLastSeen => 'Ultimo rilevamento';
+
+  @override
+  String get devicesDetailLanEndpoint => 'Endpoint LAN';
+
+  @override
+  String get devicesDetailDeviceId => 'ID dispositivo';
+
+  @override
+  String get devicesDetailPairingId => 'ID abbinamento';
+
+  @override
+  String get devicesDetailProfileProvenance => 'Provenienza del profilo';
+
+  @override
+  String get devicesDetailProfileTrust => 'Attendibilità del profilo';
+
+  @override
+  String get devicesDetailProfileUpdated => 'Profilo aggiornato';
+
+  @override
+  String get devicesValueUnavailable => 'Non disponibile';
+
+  @override
+  String get devicesRenameDevice => 'Rinomina dispositivo';
+
+  @override
+  String get devicesSyncNow => 'Sincronizza ora';
+
+  @override
+  String get devicesSyncTitle => 'Sincronizzazione';
+
+  @override
+  String get devicesSyncDescription =>
+      'Disattivando un\'opzione gli elementi salvati restano.';
+
+  @override
+  String get devicesSyncThisDevice => 'Sincronizza questo dispositivo';
+
+  @override
+  String get devicesSyncPeer => 'Sincronizza con questo dispositivo';
+
+  @override
+  String get devicesSyncPause => 'Sospendi la sincronizzazione automatica';
+
+  @override
+  String get devicesSyncText => 'Testo';
+
+  @override
+  String get devicesSyncImages => 'Immagini';
+
+  @override
+  String get devicesSyncFiles => 'File';
+
+  @override
+  String get devicesSyncAfterFirstSync =>
+      'Le impostazioni compaiono dopo la prima sincronizzazione con questo dispositivo.';
+
+  @override
+  String get devicesLocal => 'Locale';
+
+  @override
+  String get devicesTrustAuthenticated => 'Autenticato';
+
+  @override
+  String get devicesTrustUnverified => 'Non verificato';
+
+  @override
+  String get devicesProvenanceSelfReported => 'Autodichiarato';
+
+  @override
+  String get devicesProvenanceObserved => 'Osservato';
+
+  @override
+  String get devicesProvenanceMeasured => 'Misurato';
+
+  @override
+  String get devicesConnectionOnline => 'Online';
+
+  @override
+  String get devicesConnectionOffline => 'Offline';
+
+  @override
+  String get devicesConnectionVisible => 'Visibile';
+
+  @override
+  String get devicesConnectionNotSeen => 'Non rilevato';
+
+  @override
+  String get devicesConnectionUnknown => 'Sconosciuto';
+
+  @override
+  String get devicesPeerAvailable => 'Disponibile';
+
+  @override
+  String get devicesPeerVisibleNow => 'Visibile ora';
+
+  @override
+  String get devicesPeerStatusUnknown => 'Stato sconosciuto';
+
+  @override
+  String get devicesPingUnavailable => '— ms';
+
+  @override
+  String get devicesPingUnderOneMillisecond => '<1 ms';
+
+  @override
+  String devicesPingMilliseconds(int milliseconds) {
+    return '$milliseconds ms';
+  }
+
+  @override
+  String get devicesClassDesktop => 'Desktop';
+
+  @override
+  String get devicesClassLaptop => 'Portatile';
+
+  @override
+  String get devicesClassPhone => 'Telefono';
+
+  @override
+  String get devicesClassTablet => 'Tablet';
+
+  @override
+  String get devicesClassUnknown => 'Dispositivo';
+
+  @override
+  String get devicesUnknownOs => 'Sistema operativo sconosciuto';
+
+  @override
+  String get devicesAddDevice => 'Aggiungi dispositivo';
+
+  @override
+  String get devicesScanQr => 'Scansiona QR';
+
+  @override
+  String get devicesEnterCode => 'Inserisci codice';
+
+  @override
+  String get devicesScannerUnavailableTitle => 'Scanner non disponibile';
+
+  @override
+  String get devicesActionFailedTitle => 'Azione non riuscita';
+
+  @override
+  String get devicesRefreshFailedTitle =>
+      'Aggiornamento dei dispositivi non riuscito';
+
+  @override
+  String get devicesNearbyPairingUnavailable =>
+      'L\'abbinamento con i dispositivi nelle vicinanze non è disponibile.';
+
+  @override
+  String get devicesNearbyPairingUnavailableUseAddDevice =>
+      'L\'abbinamento con i dispositivi nelle vicinanze non è disponibile. Usa Aggiungi dispositivo per mostrare un codice di abbinamento.';
+
+  @override
+  String get pairingTitle => 'Abbinamento';
+
+  @override
+  String get pairingPairDevice => 'Abbina un dispositivo';
+
+  @override
+  String get pairingScanQrCode => 'Scansiona codice QR';
+
+  @override
+  String get pairingEnterPairingCode => 'Inserisci il codice di abbinamento';
+
+  @override
+  String get pairingConnectNearbyDevice =>
+      'Connetti dispositivo nelle vicinanze';
+
+  @override
+  String get pairingSendingRequest => 'Invio della richiesta di connessione…';
+
+  @override
+  String get pairingEmptyTitle => 'Scegli un\'azione di abbinamento';
+
+  @override
+  String get pairingEmptyMessage =>
+      'I controlli di abbinamento vengono visualizzati qui.';
+
+  @override
+  String get pairingCreatingInvitation =>
+      'Creazione di un invito di abbinamento.';
+
+  @override
+  String get pairingCode => 'Codice di abbinamento';
+
+  @override
+  String get pairingCodeHint =>
+      'Inserisci il codice di 8 caratteri mostrato sull\'altro dispositivo.';
+
+  @override
+  String get pairingDeviceAddress => 'Indirizzo del dispositivo';
+
+  @override
+  String get pairingDeviceAddressHint =>
+      'Usa l\'indirizzo host:port indicato dall\'altro dispositivo.';
+
+  @override
+  String get pairingCheckDetailsTitle =>
+      'Controlla i dettagli dell\'abbinamento';
+
+  @override
+  String get pairingActionFailed => 'Azione di abbinamento non riuscita';
+
+  @override
+  String get pairingConnectingDevice => 'Connessione del dispositivo…';
+
+  @override
+  String get pairingQrScannerTitle => 'Scanner QR';
+
+  @override
+  String get pairingCameraPreviewPlaceholder =>
+      'L\'anteprima della fotocamera viene visualizzata qui.';
+
+  @override
+  String get pairingScannerNeedsAttention => 'Lo scanner richiede attenzione';
+
+  @override
+  String get pairingCodeIncomplete =>
+      'Inserisci il codice di abbinamento completo di 8 caratteri.';
+
+  @override
+  String get pairingAddressMissing =>
+      'Inserisci l\'indirizzo host:port del dispositivo o configura un server relay nelle impostazioni.';
+
+  @override
+  String get pairingWaitingForOtherDevice =>
+      'In attesa dell\'altro dispositivo';
+
+  @override
+  String get pairingInviteInstructions =>
+      'Sull\'altro dispositivo, scegli Aggiungi dispositivo → Inserisci codice oppure scansiona il codice QR.';
+
+  @override
+  String get pairingDetailsTitle => 'Dettagli dell\'abbinamento';
+
+  @override
+  String get pairingAddress => 'Indirizzo';
+
+  @override
+  String get pairingVerificationCode => 'Codice di verifica';
+
+  @override
+  String get pairingVerificationCodeHint =>
+      'Conferma solo se il codice corrisponde su entrambi i dispositivi.';
+
+  @override
+  String get pairingReject => 'Rifiuta';
+
+  @override
+  String get pairingConfirm => 'Conferma';
+
+  @override
+  String get pairingAccept => 'Accetta';
+
+  @override
+  String get pairingJoinDevice => 'Abbina dispositivo';
+
+  @override
+  String get pairingStartScanner => 'Avvia scanner';
+
+  @override
+  String get pairingActionNotStarted =>
+      'Impossibile avviare l\'azione di abbinamento.';
+
+  @override
+  String get pairingStateHandshaking => 'Verifica del dispositivo';
+
+  @override
+  String get pairingStateAwaitingConfirmation =>
+      'Conferma su entrambi i dispositivi';
+
+  @override
+  String get pairingStateConfirmed => 'Dispositivo abbinato';
+
+  @override
+  String get pairingStateRejected => 'Abbinamento rifiutato';
+
+  @override
+  String get pairingStateCancelled => 'Abbinamento annullato';
+
+  @override
+  String get pairingStateTimedOut => 'Abbinamento scaduto';
+
+  @override
+  String get pairingStateFailed => 'Abbinamento non riuscito';
+
+  @override
+  String get pairingHandshakingDescription =>
+      'I dispositivi stanno stabilendo un canale sicuro.';
+
+  @override
+  String get pairingAwaitingConfirmationDescription =>
+      'Confronta il codice di verifica protetto, poi conferma su entrambi i dispositivi.';
+
+  @override
+  String get pairingConfirmedDescription =>
+      'Il dispositivo è connesso. L\'appartenenza al gruppo verrà sincronizzata automaticamente.';
+
+  @override
+  String get pairingNoDeviceAdded => 'Nessun dispositivo è stato aggiunto.';
+
+  @override
+  String get pairingTimedOutDescription =>
+      'Avvia un nuovo tentativo di abbinamento per continuare.';
+
+  @override
+  String get pairingIdleDescription =>
+      'Avvia un tentativo di abbinamento per connettere un dispositivo.';
+
+  @override
+  String get pairingProtectedUnavailableTitle =>
+      'L\'abbinamento protetto non è disponibile';
+
+  @override
+  String get pairingProtectedUnavailableMessage =>
+      'Questa sessione di abbinamento deve essere aperta in una finestra protetta dedicata.';
+
+  @override
+  String get pairingCancel => 'Annulla abbinamento';
+
+  @override
+  String get pairingOrEnterCode => 'Oppure inserisci un codice di abbinamento';
+
+  @override
+  String get pairingJoinSecurely => 'Abbina in modo sicuro';
+
+  @override
+  String get pairingProtectedWaitingDescription =>
+      'Mostra un codice QR, scansionane uno o inserisci un codice di abbinamento in questa finestra protetta.';
+
+  @override
+  String pairingExpiresInSeconds(int seconds) {
+    return 'Scade tra $seconds s';
+  }
+
+  @override
+  String get pairingInvalidQr =>
+      'Scansiona un codice QR di abbinamento di CopyPaste.';
+
+  @override
+  String get pairingGoogleScannerUnavailable =>
+      'Lo scanner di Google non è disponibile. Inserisci invece il codice di abbinamento.';
+
+  @override
+  String get pairingScannerCouldNotOpen =>
+      'Impossibile aprire lo scanner. Inserisci invece il codice di abbinamento.';
+
+  @override
+  String get pairingSecurePresentationUnavailable =>
+      'La visualizzazione protetta dell\'abbinamento non è disponibile.';
+
+  @override
+  String get pairingVerificationCodeRequired =>
+      'Prima mostra e confronta il codice di verifica.';
+
+  @override
+  String get syncStatusUnavailable =>
+      'Stato della sincronizzazione non disponibile';
+
+  @override
+  String get syncStatusOff => 'Sincronizzazione disattivata';
+
+  @override
+  String get syncStatusWaitingForSync => 'In attesa della sincronizzazione';
+
+  @override
+  String get syncStatusSyncing => 'Sincronizzazione in corso';
+
+  @override
+  String get syncStatusUpToDate => 'Aggiornato';
+
+  @override
+  String get syncStatusInterrupted => 'Sincronizzazione interrotta';
+
+  @override
+  String get syncStatusPartiallySynchronized => 'Sincronizzato parzialmente';
+
+  @override
+  String get syncStatusRetrying => 'Nuovo tentativo in corso';
+
+  @override
+  String get syncStatusWaitingToSync => 'In attesa di sincronizzazione';
+
+  @override
+  String get syncStatusWaitingForDevice => 'In attesa del dispositivo';
+
+  @override
+  String get syncStatusNoPairedDevices => 'Nessun dispositivo abbinato';
+
+  @override
+  String get syncStatusDevicesOffline => 'Dispositivi offline';
+
+  @override
+  String syncStatusWithActivityLogUnavailable(String status) {
+    return '$status · registro attività non disponibile';
+  }
+
+  @override
+  String syncStatusOffWithIssues(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Sincronizzazione disattivata · $count problemi',
+      many: 'Sincronizzazione disattivata · $count problemi',
+      one: 'Sincronizzazione disattivata · $count problema',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusWithOfflineDevices(String status, int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$status · $count offline',
+      many: '$status · $count offline',
+      one: '$status · $count offline',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusDevicesNeedAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dispositivi richiedono attenzione',
+      many: '$count dispositivi richiedono attenzione',
+      one: '$count dispositivo richiede attenzione',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusDevicesOfflineWithIssues(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Dispositivi offline · $count problemi',
+      many: 'Dispositivi offline · $count problemi',
+      one: 'Dispositivi offline · $count problema',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get syncConnectionChecking => 'Verifica della connessione';
+
+  @override
+  String get syncConnectionUnknown => 'Connessione sconosciuta';
+
+  @override
+  String get syncLogDeviceOffline => 'Il dispositivo è andato offline.';
+
+  @override
+  String get syncLogConnectionRestored => 'Connessione ripristinata.';
+
+  @override
+  String get syncLogProblemDetected =>
+      'Rilevato un problema di sincronizzazione.';
+
+  @override
+  String get syncLogProblemResolved => 'Problema di sincronizzazione risolto.';
+
+  @override
+  String get syncLogFailed => 'Sincronizzazione non riuscita.';
+
+  @override
+  String get syncLogRecovered => 'Sincronizzazione ripristinata.';
+
+  @override
+  String syncLogClipsTransferred(int sent, int received) {
+    String _temp0 = intl.Intl.pluralLogic(
+      sent,
+      locale: localeName,
+      other: '$sent elementi inviati',
+      many: '$sent elementi inviati',
+      one: '$sent elemento inviato',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      received,
+      locale: localeName,
+      other: '$received elementi ricevuti',
+      many: '$received elementi ricevuti',
+      one: '$received elemento ricevuto',
+    );
+    return '$_temp0 · $_temp1';
+  }
+
+  @override
+  String syncHeaderSemanticsLabel(String status) {
+    return 'Sincronizzazione: $status';
+  }
+
+  @override
+  String get syncDetailsTitle => 'Sincronizzazione';
+
+  @override
+  String get syncDetailsClose => 'Chiudi dettagli sincronizzazione';
+
+  @override
+  String get syncNoPairedDevicesMessage =>
+      'Abbina un dispositivo per sincronizzare la cronologia degli appunti.';
+
+  @override
+  String get syncActivityLogUnavailableTitle =>
+      'Registro attività non disponibile';
+
+  @override
+  String get syncActivityLogUnavailableMessage =>
+      'Impossibile leggere o salvare l\'attività di sincronizzazione.';
+
+  @override
+  String get syncDetailsDevicesHeading => 'Dispositivi';
+
+  @override
+  String get syncDetailsActivityHeading => 'Attività';
+
+  @override
+  String get syncDetailsNoRecentProblems =>
+      'Nessun problema di sincronizzazione recente';
+
+  @override
+  String get syncDetailsUnknownPeer => 'Dispositivo abbinato';
+
+  @override
+  String get syncPeerConnection => 'Connessione';
+
+  @override
+  String get syncPeerLastCheckStarted => 'Inizio ultimo controllo';
+
+  @override
+  String get syncPeerItemsOverSizeLimit =>
+      'Elementi oltre il limite di dimensione';
+
+  @override
+  String syncPeerLastSeen(String time) {
+    return 'Ultimo rilevamento: $time';
+  }
+
+  @override
+  String syncPeerLastSynced(String time) {
+    return 'Ultima sincronizzazione: $time';
+  }
+
+  @override
+  String get syncPeerLastSuccessfulSync => 'Ultima sincronizzazione riuscita';
+
+  @override
+  String get syncPeerConnectionDetails => 'Dettagli connessione';
+
+  @override
+  String syncPeerConnectionDetailsFor(String device) {
+    return 'Dettagli connessione di $device';
+  }
+
+  @override
+  String get historyKindText => 'Testo';
+
+  @override
+  String get historyKindLink => 'Link';
+
+  @override
+  String get historyKindEmail => 'Email';
+
+  @override
+  String get historyKindColor => 'Colore';
+
+  @override
+  String get historyKindPhone => 'Telefono';
+
+  @override
+  String get historyKindCode => 'Codice';
+
+  @override
+  String get historyKindPath => 'Percorso';
+
+  @override
+  String get historyKindCredentials => 'Credenziali';
+
+  @override
+  String get historyKindImage => 'Immagine';
+
+  @override
+  String get historyKindFile => 'File';
+
+  @override
+  String get historyKindOther => 'Altro';
+
+  @override
+  String get historySortNewest => 'Prima i più recenti';
+
+  @override
+  String get historySortOldest => 'Prima i meno recenti';
+
+  @override
+  String get historySortRelevance => 'Più pertinenti';
+
+  @override
+  String get historyErrorUpdatesUnavailable =>
+      'Gli aggiornamenti della cronologia sono temporaneamente non disponibili.';
+
+  @override
+  String get historyErrorBulkDelete =>
+      'Impossibile eliminare alcuni elementi selezionati. Riprova.';
+
+  @override
+  String get historyErrorBulkPin =>
+      'Impossibile aggiornare il fissaggio di alcuni elementi selezionati. Riprova.';
+
+  @override
+  String get historyErrorRefresh =>
+      'Impossibile aggiornare la cronologia. Riprova.';
+
+  @override
+  String get historyErrorLoad => 'Impossibile caricare la cronologia. Riprova.';
+
+  @override
+  String get historyErrorLoadMore =>
+      'Impossibile caricare altri elementi della cronologia.';
+
+  @override
+  String get historyErrorLoadEarlier =>
+      'Impossibile caricare la cronologia precedente.';
+
+  @override
+  String get historyErrorOpenClip => 'Impossibile aprire questo elemento.';
+
+  @override
+  String get historyErrorCopyPlainText =>
+      'Impossibile copiare il testo semplice.';
+
+  @override
+  String get historyErrorCopyClip => 'Impossibile copiare questo elemento.';
+
+  @override
+  String get historyErrorCopyText => 'Impossibile copiare questo testo.';
+
+  @override
+  String get historyErrorPrepareFile =>
+      'Impossibile scaricare questo file. Controlla il dispositivo di origine e riprova.';
+
+  @override
+  String get historyErrorDownloadFile => 'Impossibile scaricare questo file.';
+
+  @override
+  String get historyErrorSelectFiles =>
+      'Impossibile selezionare i file. Riprova.';
+
+  @override
+  String get historyErrorReadSelectedFile =>
+      'Impossibile leggere il file selezionato. Controlla l\'accesso e lo spazio di archiviazione disponibile.';
+
+  @override
+  String historyErrorImportFiles(
+    int total,
+    int failed,
+    String name,
+    String reason,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other:
+          'Impossibile importare $failed file su $total. Primo: $name. $reason',
+      many:
+          'Impossibile importare $failed file su $total. Primo: $name. $reason',
+      one:
+          'Impossibile importare $failed file su $total. Primo: $name. $reason',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyErrorSecrecyUpdate =>
+      'Impossibile aggiornare lo stato riservato dell\'elemento.';
+
+  @override
+  String get historyErrorPinUpdate => 'Impossibile aggiornare il fissaggio.';
+
+  @override
+  String get historyErrorPinnedOrderSave =>
+      'Impossibile salvare l\'ordine degli elementi fissati. Riprova.';
+
+  @override
+  String get historyErrorPinnedOrderRefresh =>
+      'L\'ordine è stato salvato, ma non è stato possibile aggiornare la cronologia.';
+
+  @override
+  String get historyErrorDeleteClip => 'Impossibile eliminare questo elemento.';
+
+  @override
+  String get historyErrorDeleteAll => 'Impossibile eliminare la cronologia.';
+
+  @override
+  String get historyErrorBulkDeleteFallback =>
+      'Impossibile eliminare gli elementi selezionati.';
+
+  @override
+  String get historyOcrErrorUnavailable =>
+      'L\'OCR non è disponibile. Controlla il modulo in Impostazioni e riprova.';
+
+  @override
+  String get historyOcrErrorStart => 'Impossibile avviare l\'OCR. Riprova.';
+
+  @override
+  String get historyOcrErrorRecognize =>
+      'Impossibile riconoscere il testo dell\'immagine. Riprova.';
+
+  @override
+  String get historyOcrRecognizing =>
+      'Riconoscimento del testo dell\'immagine in corso.';
+
+  @override
+  String get historyOcrFailedTitle => 'OCR non riuscito';
+
+  @override
+  String get historyOcrNoText => 'Nessun testo trovato';
+
+  @override
+  String get historyOcrTitle => 'Testo dell\'immagine';
+
+  @override
+  String get historyOcrTextCopied => 'Testo riconosciuto copiato.';
+
+  @override
+  String get historyOcrCopyError => 'Impossibile copiare il testo. Riprova.';
+
+  @override
+  String get historyTagsErrorLoad => 'Impossibile caricare i tag. Riprova.';
+
+  @override
+  String get historyTagsErrorSave =>
+      'Impossibile salvare la modifica del tag. Usa un nome univoco di massimo 64 caratteri e seleziona elementi fissati.';
+
+  @override
+  String get historyTags => 'Tag';
+
+  @override
+  String get historyTagsUpdateErrorTitle => 'Impossibile aggiornare i tag';
+
+  @override
+  String get historyTagsEmpty => 'Ancora nessun tag';
+
+  @override
+  String get historyTagRename => 'Rinomina';
+
+  @override
+  String get historyTagActions => 'Azioni del tag';
+
+  @override
+  String get historyTagNamePlaceholder => 'Nome del tag';
+
+  @override
+  String get historyCreateTag => 'Crea tag';
+
+  @override
+  String get historySaveTag => 'Salva tag';
+
+  @override
+  String get historyTagsFilterAll => 'Tutti i tag';
+
+  @override
+  String historyTagsFilterCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count tag',
+      many: '$count tag',
+      one: '$count tag',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyTagsFilterTooltip(String selection) {
+    return 'Filtra per tag: $selection';
+  }
+
+  @override
+  String get historyManageTags => 'Gestisci tag';
+
+  @override
+  String get historyTagsFilterSemantics =>
+      'Filtra gli elementi fissati per tag';
+
+  @override
+  String get historyDownloadErrorCancelled =>
+      'Il download del file è stato annullato.';
+
+  @override
+  String get historyDownloadErrorServiceUnavailable =>
+      'Il servizio di download non è disponibile. Riapri CopyPaste e riprova.';
+
+  @override
+  String get historyDownloadErrorServiceTimeout =>
+      'Il servizio di download non si è connesso. Riprova.';
+
+  @override
+  String get historyFileErrorAccess =>
+      'Impossibile accedere al file selezionato.';
+
+  @override
+  String get historySpoilerRevealSemantics =>
+      'Contenuto riservato. Mostra spoiler';
+
+  @override
+  String get historyActionFailedTitle => 'Azione non riuscita';
+
+  @override
+  String get historyLoadingMessage =>
+      'Caricamento della cronologia degli appunti.';
+
+  @override
+  String get historyUnavailableTitle => 'Cronologia non disponibile';
+
+  @override
+  String get historyEmptyTitle => 'Nessun elemento trovato';
+
+  @override
+  String get historyEmptyMessage =>
+      'Gli elementi acquisiti e i risultati della cronologia vengono visualizzati qui.';
+
+  @override
+  String get historyAttentionTitle => 'La cronologia richiede attenzione';
+
+  @override
+  String get historyLoadMore => 'Carica altri';
+
+  @override
+  String get historySectionPinned => 'Fissati';
+
+  @override
+  String get historySectionToday => 'Oggi';
+
+  @override
+  String get historySectionYesterday => 'Ieri';
+
+  @override
+  String historySkippedRowsTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count voci degli appunti sono state ignorate',
+      many: '$count voci degli appunti sono state ignorate',
+      one: '$count voce degli appunti è stata ignorata',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historySkippedRowsMessage =>
+      'Alcuni elementi conservati non possono essere letti e non sono mostrati in questo elenco.';
+
+  @override
+  String get historySearch => 'Cerca nella cronologia';
+
+  @override
+  String get historySearchSuggestions => 'Suggerimenti di ricerca';
+
+  @override
+  String get historySearchSuggestionRecent => 'Recente';
+
+  @override
+  String get historySearchSuggestionTag => 'Tag';
+
+  @override
+  String get historySearchSuggestionApp => 'App';
+
+  @override
+  String get historySearchSuggestionKind => 'Tipo';
+
+  @override
+  String get historySearchSuggestionDevice => 'Dispositivo';
+
+  @override
+  String get historySearchClearRecent => 'Cancella ricerche recenti';
+
+  @override
+  String get historyResetFilters => 'Reimposta filtri';
+
+  @override
+  String get historyImportFiles => 'Importa file';
+
+  @override
+  String get historySelectClips => 'Seleziona elementi';
+
+  @override
+  String get historyCloseSearch => 'Chiudi ricerca';
+
+  @override
+  String get historyFilterAllClips => 'Tutti gli elementi';
+
+  @override
+  String get historyFilterAllDevices => 'Tutti i dispositivi';
+
+  @override
+  String get historyFilterAllApps => 'Tutte le app';
+
+  @override
+  String get historyPinClip => 'Fissa elemento';
+
+  @override
+  String get historyUnpinClip => 'Rimuovi fissaggio';
+
+  @override
+  String get historyReorderPinnedClip => 'Riordina elemento fissato';
+
+  @override
+  String get historyReorderPinnedHint =>
+      'Trascina per spostare. Alt + Freccia su o giù sposta di una posizione.';
+
+  @override
+  String get historyClipUnavailable => 'Elemento non disponibile';
+
+  @override
+  String historyClipKindSemantics(String kind) {
+    return 'Tipo di elemento: $kind';
+  }
+
+  @override
+  String get historyInspectorEmptyTitle => 'Seleziona un elemento';
+
+  @override
+  String get historyInspectorEmptyMessage =>
+      'Il contenuto completo e le azioni vengono visualizzati qui.';
+
+  @override
+  String get historyNoPreview => 'Nessuna anteprima disponibile.';
+
+  @override
+  String get historyCloseClipDetails => 'Chiudi dettagli elemento';
+
+  @override
+  String get historyCopyOptions => 'Opzioni di copia';
+
+  @override
+  String get historyCopyPlainText => 'Copia come testo semplice';
+
+  @override
+  String get historyManageClipTags => 'Gestisci tag dell\'elemento';
+
+  @override
+  String get historyPinnedButton => 'Fissato';
+
+  @override
+  String get historyAddSpoiler => 'Aggiungi spoiler';
+
+  @override
+  String get historyRemoveSpoiler => 'Rimuovi spoiler';
+
+  @override
+  String get historyUpdateFailedTitle => 'Aggiornamento non riuscito';
+
+  @override
+  String get historyRecognizeImageText => 'Riconosci testo nell\'immagine';
+
+  @override
+  String get historyCopiedTitle => 'Copiato';
+
+  @override
+  String get historyCopyFailedTitle => 'Copia non riuscita';
+
+  @override
+  String get historyPlainTextCopied => 'Testo semplice copiato.';
+
+  @override
+  String get historyClipCopied => 'Elemento copiato.';
+
+  @override
+  String get historyDownloadedTitle => 'Scaricato';
+
+  @override
+  String get historyFileSaved => 'File salvato.';
+
+  @override
+  String get historyShare => 'Condividi';
+
+  @override
+  String get historyErrorShareClip =>
+      'Impossibile condividere questo elemento.';
+
+  @override
+  String get historyErrorShareClips =>
+      'Impossibile condividere gli elementi selezionati.';
+
+  @override
+  String get historyBulkShare => 'Condividi selezionati';
+
+  @override
+  String get historyBulkShareFilesOnlyTitle => 'Condivisi solo i file';
+
+  @override
+  String get historyBulkShareFilesOnly =>
+      'Gli elementi di testo sono stati esclusi perché questo sistema non può condividere testo insieme ai file. Condividili separatamente.';
+
+  @override
+  String get historyDownload => 'Scarica';
+
+  @override
+  String get historyDownloading => 'Download in corso…';
+
+  @override
+  String historyDownloadingPercent(int percent) {
+    return 'Download in corso: $percent%';
+  }
+
+  @override
+  String historyDownloadProgressPercent(int percent) {
+    return '$percent%';
+  }
+
+  @override
+  String get historyDownloadCancelling => 'Annullamento…';
+
+  @override
+  String get historyDownloadCancellingTooltip => 'Annullamento del download';
+
+  @override
+  String historyDownloadingCancelTooltip(int percent) {
+    return 'Download in corso: $percent% · Fai clic per annullare';
+  }
+
+  @override
+  String get historyDownloadFailedRetryTooltip =>
+      'Download non riuscito · Fai clic per riprovare';
+
+  @override
+  String historyCancelDownloadSemantics(int percent) {
+    return 'Annulla download, $percent% completato';
+  }
+
+  @override
+  String get historyRetryDownload => 'Riprova download';
+
+  @override
+  String get historyDownloadFailedTitle => 'Download non riuscito';
+
+  @override
+  String get historyShowFile => 'Mostra file';
+
+  @override
+  String get historyMetadataPrivacy => 'Privacy';
+
+  @override
+  String get historyMetadataConfidential => 'Riservato';
+
+  @override
+  String get historyMetadataCaptured => 'Acquisito';
+
+  @override
+  String get historyMetadataObservedApp => 'App rilevata';
+
+  @override
+  String get historyMetadataDevice => 'Dispositivo';
+
+  @override
+  String get historyMetadataClipType => 'Tipo di elemento';
+
+  @override
+  String get historyMetadataType => 'Tipo';
+
+  @override
+  String get historyMetadataPath => 'Percorso';
+
+  @override
+  String get historyMetadataFile => 'File';
+
+  @override
+  String get historyMetadataResolution => 'Risoluzione';
+
+  @override
+  String get historyMetadataSize => 'Dimensione';
+
+  @override
+  String get historyMetadataFiles => 'File';
+
+  @override
+  String get historyMetadataSync => 'Sincronizzazione';
+
+  @override
+  String get historyMetadataTooLargeToSync =>
+      'Troppo grande per la sincronizzazione';
+
+  @override
+  String historyBulkDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eliminare $count elementi selezionati?',
+      many: 'Eliminare $count elementi selezionati?',
+      one: 'Eliminare $count elemento selezionato?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDeleteClipTitle => 'Eliminare questo elemento?';
+
+  @override
+  String get historyBulkTagTooltip =>
+      'Aggiungi tag agli elementi fissati selezionati';
+
+  @override
+  String get historyBulkExit => 'Esci dalla selezione';
+
+  @override
+  String get historyBulkPin => 'Fissa selezionati';
+
+  @override
+  String get historyBulkUnpin => 'Rimuovi fissaggio dai selezionati';
+
+  @override
+  String get historyBulkDelete => 'Elimina selezionati';
+
+  @override
+  String historyBulkSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count selezionati',
+      many: '$count selezionati',
+      one: '$count selezionato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDateFilter => 'Filtra per data';
+
+  @override
+  String get historyDatePresetToday => 'Oggi';
+
+  @override
+  String get historyDatePresetYesterday => 'Ieri';
+
+  @override
+  String historyDatePresetLastDays(int days) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: 'Ultimi $days giorni',
+      many: 'Ultimi $days giorni',
+      one: 'Ultimo giorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDatePresetAllTime => 'Da sempre';
+
+  @override
+  String get appRuntimeStartFailed =>
+      'CopyPaste non è riuscito ad avviare il proprio runtime.';
+
+  @override
+  String get appPreparing => 'Preparazione di CopyPaste.';
+
+  @override
+  String get appRuntimeWaiting =>
+      'CopyPaste è in attesa dell\'accesso alla cronologia protetta. Le parti disponibili dell\'app restano utilizzabili.';
+
+  @override
+  String get appHistoryUnavailableTitle =>
+      'Il runtime della cronologia non è disponibile';
+
+  @override
+  String get appHistoryUnavailableMessage =>
+      'Avvia il runtime dell\'app prima di aprire la cronologia.';
+
+  @override
+  String get appDevicesUnavailableTitle =>
+      'Il runtime dei dispositivi non è disponibile';
+
+  @override
+  String get appDevicesUnavailableMessage =>
+      'Avvia il runtime dell\'app prima di aprire i dispositivi.';
+
+  @override
+  String get appSettingsUnavailableTitle =>
+      'Il runtime delle impostazioni non è disponibile';
+
+  @override
+  String get appSettingsUnavailableMessage =>
+      'Avvia il runtime dell\'app prima di aprire le impostazioni.';
+
+  @override
+  String get appQuit => 'Esci da CopyPaste';
+
+  @override
+  String get appWindowSetupTitle =>
+      'La configurazione della finestra richiede attenzione';
+
+  @override
+  String get appOpenHistory => 'Apri Cronologia';
+
+  @override
+  String get appDestinationHistory => 'Cronologia';
+
+  @override
+  String get appDestinationDevices => 'Dispositivi';
+
+  @override
+  String get appDestinationSettings => 'Impostazioni';
+
+  @override
+  String appDestinationSelected(String destination) {
+    return '$destination, selezionato';
+  }
+
+  @override
+  String get appActiveFilter => 'Filtro attivo';
+
+  @override
+  String get appActionFailed => 'Azione non riuscita';
+
+  @override
+  String get sharedAndroidVersionRequired =>
+      'È richiesto Android 11 o versioni successive';
+
+  @override
+  String get sharedUseAdbTab => 'Usa la scheda ADB su questo dispositivo.';
+
+  @override
+  String get sharedOneTimeAccessApplied => 'Accesso una tantum applicato';
+
+  @override
+  String get sharedInstallShizuku => 'Installa Shizuku';
+
+  @override
+  String get sharedPairAndStartShizuku => 'Accoppia e avvia Shizuku';
+
+  @override
+  String get sharedAllowCopyPaste => 'Consenti CopyPaste';
+
+  @override
+  String get sharedShizukuNoLongerNeeded => 'Shizuku non è più necessario.';
+
+  @override
+  String get sharedGetShizukuDescription =>
+      'Scarica Shizuku per applicare l\'accesso una tantum.';
+
+  @override
+  String get sharedShizukuWirelessDebugging =>
+      'Usa Debug wireless in Shizuku, poi torna qui.';
+
+  @override
+  String get sharedApproveInShizuku =>
+      'Approva CopyPaste una volta in Shizuku.';
+
+  @override
+  String get sharedGetShizuku => 'Scarica Shizuku';
+
+  @override
+  String get sharedOpenShizuku => 'Apri Shizuku';
+
+  @override
+  String get sharedRunOnComputer => 'Esegui sul computer';
+
+  @override
+  String get sharedCopyAllCommands => 'Copia tutti i comandi';
+
+  @override
+  String get sharedEnableUsbDebugging =>
+      'Attiva Debug USB e collega questo telefono.';
+
+  @override
+  String get sharedAllow => 'Consenti';
+
+  @override
+  String get sharedSetupCommandsCopyFailed =>
+      'Impossibile copiare i comandi di configurazione.';
+
+  @override
+  String get sharedShizukuOpenFailed => 'Impossibile aprire Shizuku.';
+
+  @override
+  String sharedSizeBytes(String size) {
+    return '$size B';
+  }
+
+  @override
+  String get onboardingTitle => 'Configura CopyPaste';
+
+  @override
+  String get onboardingWelcomeTitle => 'Ti diamo il benvenuto in CopyPaste';
+
+  @override
+  String get onboardingWelcomeSubtitle =>
+      'I tuoi appunti, pronti quando lo sei tu.';
+
+  @override
+  String get onboardingReadyTitle => 'CopyPaste è pronto';
+
+  @override
+  String get onboardingGetStarted => 'Inizia';
+
+  @override
+  String get onboardingOptionalSetupTitle =>
+      'La configurazione facoltativa richiede attenzione';
+
+  @override
+  String get onboardingOpenSystemSettings => 'Apri Impostazioni';
+
+  @override
+  String get onboardingSetupErrorTitle =>
+      'La configurazione richiede attenzione';
+
+  @override
+  String onboardingStateReadFailed(String platform) {
+    return 'CopyPaste non è riuscito a leggere lo stato di configurazione di $platform.';
+  }
+
+  @override
+  String get onboardingSaveProgressFailed =>
+      'CopyPaste non è riuscito a salvare l\'avanzamento della configurazione iniziale.';
+
+  @override
+  String get onboardingStartAtLogin => 'Apri al login';
+
+  @override
+  String get onboardingStartAtLoginDescription =>
+      'Apri CopyPaste quando esegui il login';
+
+  @override
+  String get onboardingStartAtLoginSemantics => 'Apri CopyPaste al login';
+
+  @override
+  String get onboardingStartAtLoginEnableFailed =>
+      'Impossibile attivare l\'apertura al login. Puoi continuare senza.';
+
+  @override
+  String get onboardingStartAtLoginUpdateFailed =>
+      'Impossibile aggiornare l\'apertura al login. Puoi continuare senza.';
+
+  @override
+  String get onboardingMacosTitle => 'Configura il Mac';
+
+  @override
+  String get onboardingAccessibility => 'Accessibilità';
+
+  @override
+  String get onboardingAutoPasteEnabled => 'Incolla automatico attivato';
+
+  @override
+  String get onboardingAutoPasteOptional =>
+      'Facoltativo per l\'incolla automatico';
+
+  @override
+  String get onboardingMacosStartAtLoginUnavailable =>
+      'Disponibile nell\'app CopyPaste installata.';
+
+  @override
+  String get onboardingLoginItemApprovalTitle =>
+      'È richiesta l\'approvazione dell\'elemento login';
+
+  @override
+  String get onboardingLoginItemApprovalMessage =>
+      'Consenti CopyPaste in Impostazioni di Sistema, poi torna qui.';
+
+  @override
+  String get onboardingMacosStateReadFailed =>
+      'CopyPaste non è riuscito a leggere lo stato di configurazione di macOS.';
+
+  @override
+  String get onboardingMacosAccessibilityRequestFailed =>
+      'Impossibile richiedere l\'autorizzazione Accessibilità.';
+
+  @override
+  String get onboardingMacosStateRefreshFailed =>
+      'CopyPaste non è riuscito ad aggiornare lo stato di configurazione di macOS.';
+
+  @override
+  String get onboardingMacosAccessibilityRefreshFailed =>
+      'Impossibile aggiornare lo stato di Accessibilità.';
+
+  @override
+  String get onboardingMacosLoginItemsOpenFailed =>
+      'Impossibile aprire le impostazioni Elementi login.';
+
+  @override
+  String get onboardingMacosStartAtLoginApproval =>
+      'L\'apertura al login richiede l\'approvazione in Impostazioni di Sistema.';
+
+  @override
+  String get onboardingMacosStartAtLoginDisableFailed =>
+      'Impossibile disattivare l\'apertura al login.';
+
+  @override
+  String get onboardingWindowsTitle => 'Configura il PC';
+
+  @override
+  String get onboardingWindowsStartAtLoginUnavailable =>
+      'Non disponibile in questa installazione. Puoi continuare senza.';
+
+  @override
+  String get onboardingTaskManagerDisabledTitle =>
+      'Disattivata in Gestione attività';
+
+  @override
+  String get onboardingTaskManagerDisabledMessage =>
+      'Attiva CopyPaste nelle app di avvio di Windows, poi torna qui.';
+
+  @override
+  String get onboardingWindowsTaskManagerDisabled =>
+      'L\'apertura al login è disattivata in Gestione attività. Puoi attivarla più tardi nelle Impostazioni di Windows.';
+
+  @override
+  String get onboardingWindowsStartAtLoginUnavailableNotice =>
+      'L\'apertura al login non è disponibile. Puoi continuare senza.';
+
+  @override
+  String get onboardingWindowsStateReadFailed =>
+      'CopyPaste non è riuscito a leggere lo stato di configurazione di Windows.';
+
+  @override
+  String get onboardingWindowsStartupSettingsFailed =>
+      'Impossibile aprire le impostazioni di avvio di Windows.';
+
+  @override
+  String get onboardingWindowsStartAtLoginChangeLater =>
+      'Impossibile aggiornare l\'apertura al login. Puoi modificarla più tardi in Impostazioni.';
+
+  @override
+  String get onboardingLinuxChecking =>
+      'Verifica della sessione desktop Linux in corso.';
+
+  @override
+  String get onboardingLinuxTitle => 'Configura il desktop Linux';
+
+  @override
+  String get onboardingLinuxSubtitle =>
+      'CopyPaste richiede un\'integrazione desktop verificata per l\'attribuzione degli appunti e Quick Paste.';
+
+  @override
+  String get onboardingLinuxSession => 'Sessione desktop';
+
+  @override
+  String get onboardingLinuxX11Detected => 'Rilevata sessione X11.';
+
+  @override
+  String get onboardingLinuxWaylandDetected => 'Rilevata sessione Wayland.';
+
+  @override
+  String get onboardingLinuxSessionUnsupported =>
+      'Non è stata rilevata alcuna sessione desktop X11 o Wayland supportata.';
+
+  @override
+  String get onboardingLinuxCompanion => 'Estensione per GNOME o KDE';
+
+  @override
+  String get onboardingLinuxCompanionReady =>
+      'Il bridge Clipboard v2 autenticato è pronto.';
+
+  @override
+  String get onboardingLinuxCompanionCapturePaused =>
+      'L\'acquisizione degli appunti è sospesa a causa delle esclusioni delle app di origine. Attiva l\'estensione firmata per riprenderla.';
+
+  @override
+  String get onboardingLinuxCompanionInstall =>
+      'Installa e attiva il pacchetto di sessione dell\'estensione firmata, poi torna qui.';
+
+  @override
+  String get onboardingLinuxOpenSetup => 'Apri configurazione';
+
+  @override
+  String get onboardingLinuxKeyboardControl => 'Controllo tastiera';
+
+  @override
+  String get onboardingLinuxKeyboardAllowed =>
+      'Il controllo della tastiera è consentito per Quick Paste.';
+
+  @override
+  String get onboardingLinuxKeyboardUnsupported =>
+      'Il controllo della tastiera non è disponibile in questa sessione desktop.';
+
+  @override
+  String get onboardingLinuxAllowKeyboard => 'Consenti controllo tastiera';
+
+  @override
+  String get onboardingLinuxQuickPasteReady => 'Quick Paste è pronto.';
+
+  @override
+  String get onboardingLinuxQuickPastePending =>
+      'Quick Paste sarà pronto dopo l\'attivazione dell\'integrazione desktop richiesta.';
+
+  @override
+  String get onboardingLinuxStartAtLoginDescription =>
+      'Apri CopyPaste quando esegui il login.';
+
+  @override
+  String get onboardingLinuxLinks => 'Link di CopyPaste';
+
+  @override
+  String get onboardingLinuxLinksRegistered =>
+      'I link di CopyPaste si aprono in questa app.';
+
+  @override
+  String get onboardingLinuxLinksUnregistered =>
+      'Registra i link di CopyPaste per gli inviti di abbinamento.';
+
+  @override
+  String get onboardingLinuxRegisterLinks => 'Registra link';
+
+  @override
+  String get onboardingLinuxScreenshotBlocking => 'Blocco degli screenshot';
+
+  @override
+  String get onboardingLinuxScreenshotBlockingUnavailable =>
+      'Il blocco degli screenshot non è disponibile su Linux. I dati archiviati protetti restano crittografati.';
+
+  @override
+  String get onboardingLinuxCheckAgain => 'Verifica di nuovo';
+
+  @override
+  String get onboardingLinuxStatusReadFailed =>
+      'CopyPaste non è riuscito a leggere lo stato dell\'integrazione con Linux.';
+
+  @override
+  String get onboardingLinuxSetupOpenFailed =>
+      'Impossibile aprire la configurazione dell\'integrazione desktop.';
+
+  @override
+  String get onboardingLinuxKeyboardDenied =>
+      'L\'autorizzazione al controllo della tastiera non è stata concessa.';
+
+  @override
+  String get onboardingLinuxStartAtLoginFailed =>
+      'Impossibile aggiornare l\'apertura al login.';
+
+  @override
+  String get onboardingLinuxLinksFailed =>
+      'Impossibile registrare i link di CopyPaste.';
+
+  @override
+  String get onboardingLinuxStatusRefreshFailed =>
+      'Impossibile aggiornare lo stato dell\'integrazione con Linux.';
+
+  @override
+  String get onboardingLinuxX11ClipboardUnavailable =>
+      'L\'accesso agli appunti non è disponibile in questa sessione X11.';
+
+  @override
+  String get onboardingLinuxSessionRequired =>
+      'CopyPaste richiede una sessione desktop X11 o Wayland.';
+
+  @override
+  String get onboardingAndroidFullCapture => 'Acquisizione completa';
+
+  @override
+  String get onboardingAndroidBackgroundCapture => 'Acquisizione in background';
+
+  @override
+  String get onboardingAndroidFullCaptureDescription =>
+      'Configura una volta, poi verifica con una copia reale.';
+
+  @override
+  String get onboardingAndroidLimitedCapture => 'Acquisizione limitata';
+
+  @override
+  String get onboardingAndroidLimitedCaptureDescription =>
+      'Condividi con CopyPaste o torna qui dopo aver copiato.';
+
+  @override
+  String get onboardingAndroidNotification => 'Notifica di acquisizione';
+
+  @override
+  String get onboardingAndroidNotificationDescription =>
+      'Necessaria durante l\'acquisizione';
+
+  @override
+  String get onboardingAndroidBackgroundActivity => 'Attività in background';
+
+  @override
+  String get onboardingAndroidBackgroundActivityDescription =>
+      'Consigliata per non perdere acquisizioni';
+
+  @override
+  String get onboardingAndroidOpen => 'Apri';
+
+  @override
+  String get onboardingAndroidApplyAccess => 'Applica accesso di acquisizione';
+
+  @override
+  String get onboardingAndroidApplyAccessDescription =>
+      'Applica l\'accesso di acquisizione una tantum.';
+
+  @override
+  String get onboardingAndroidFullCaptureLater =>
+      'Puoi configurare l\'Acquisizione completa più tardi.';
+
+  @override
+  String get onboardingAndroidCaptureWorking =>
+      'L\'acquisizione in background funziona';
+
+  @override
+  String get onboardingAndroidVerifyCopy => 'Verifica con una copia reale';
+
+  @override
+  String get onboardingAndroidCopyReached =>
+      'Una nuova copia è arrivata nella Cronologia locale.';
+
+  @override
+  String get onboardingAndroidCopyInstruction =>
+      'Copia qualcosa in un\'altra app, poi torna qui.';
+
+  @override
+  String get onboardingAndroidStartCapture => 'Avvia acquisizione';
+
+  @override
+  String get onboardingAndroidStateReadFailed =>
+      'CopyPaste non è riuscito a leggere lo stato di configurazione di Android.';
+
+  @override
+  String get onboardingAndroidStateRefreshFailed =>
+      'Impossibile aggiornare lo stato di acquisizione di Android.';
+
+  @override
+  String get onboardingAndroidMonitoringUnavailable =>
+      'Il monitoraggio della configurazione di Android non è disponibile.';
+
+  @override
+  String get onboardingAndroidIntakeFailed =>
+      'Impossibile attivare la ricezione degli appunti.';
+
+  @override
+  String get onboardingAndroidStopCaptureFailed =>
+      'Impossibile interrompere l\'acquisizione in background.';
+
+  @override
+  String get onboardingAndroidBatterySettingsFailed =>
+      'Impossibile aprire le impostazioni della batteria.';
+
+  @override
+  String get onboardingAndroidGrantsFailed =>
+      'CopyPaste è consentito in Shizuku, ma non è stato possibile applicare le autorizzazioni di acquisizione di Android.';
+
+  @override
+  String get onboardingAndroidAllowInShizuku =>
+      'Consenti CopyPaste in Shizuku per applicare le autorizzazioni di acquisizione.';
+
+  @override
+  String get onboardingAndroidGrantAccessFirst =>
+      'Prima concedi l\'accesso agli appunti in background.';
+
+  @override
+  String get onboardingAndroidAllowNotificationsFirst =>
+      'Consenti le notifiche prima di avviare l\'acquisizione in background.';
+
+  @override
+  String get onboardingAndroidStartCaptureFailed =>
+      'Impossibile avviare l\'acquisizione in background.';
+
+  @override
+  String get onboardingAndroidSetupOpenFailed =>
+      'Impossibile aprire la configurazione dell\'acquisizione di Android.';
+
+  @override
+  String get onboardingAndroidChoiceSaveFailed =>
+      'Impossibile salvare la scelta di configurazione di Android.';
+
+  @override
+  String get modulesMarketplaceTab => 'Marketplace';
+
+  @override
+  String get modulesInstalledTab => 'Installati';
+
+  @override
+  String get modulesRefresh => 'Aggiorna';
+
+  @override
+  String get modulesInstallFromFile => 'Installa da file';
+
+  @override
+  String get modulesPackageFileType => 'Modulo CopyPaste';
+
+  @override
+  String get modulesSearchPlaceholder => 'Cerca moduli';
+
+  @override
+  String get modulesOperationFailed => 'Operazione sul modulo non riuscita';
+
+  @override
+  String get modulesLoading => 'Caricamento dei moduli.';
+
+  @override
+  String get modulesUnavailableTitle => 'Moduli non disponibili';
+
+  @override
+  String get modulesUnavailableMessage => 'Prova a caricare di nuovo i moduli.';
+
+  @override
+  String get modulesNoneInstalled => 'Nessun modulo installato';
+
+  @override
+  String get modulesNoMatches => 'Nessun modulo corrispondente';
+
+  @override
+  String get modulesChooseFromMarketplace =>
+      'Scegli un modulo dal Marketplace.';
+
+  @override
+  String get modulesTryDifferentSearch => 'Prova con un\'altra ricerca.';
+
+  @override
+  String get modulesMarketplaceLoading => 'Caricamento del Marketplace.';
+
+  @override
+  String get modulesMarketplaceUnavailableTitle =>
+      'Marketplace non disponibile';
+
+  @override
+  String get modulesMarketplaceUnavailableMessage =>
+      'Prova a caricare di nuovo il Marketplace.';
+
+  @override
+  String get modulesNoneAvailable => 'Nessun modulo disponibile';
+
+  @override
+  String get modulesNoneAvailableMessage =>
+      'I moduli verranno visualizzati qui quando saranno pubblicati.';
+
+  @override
+  String modulesEnableModule(String module) {
+    return 'Attiva $module';
+  }
+
+  @override
+  String get modulesInstall => 'Installa';
+
+  @override
+  String modulesUpdateTo(String version) {
+    return 'Aggiorna alla versione $version';
+  }
+
+  @override
+  String get modulesRemoveModule => 'Rimuovi modulo';
+
+  @override
+  String get modulesModuleSettings => 'Impostazioni del modulo';
+
+  @override
+  String modulesSettingsTitle(String module) {
+    return 'Impostazioni di $module';
+  }
+
+  @override
+  String get modulesDownloadingModel => 'Download del modello linguistico…';
+
+  @override
+  String get modulesRun => 'Esegui';
+
+  @override
+  String modulesRemoveTitle(String module) {
+    return 'Rimuovere $module?';
+  }
+
+  @override
+  String get modulesRemoveMessage =>
+      'Il modulo e le sue impostazioni locali verranno rimossi.';
+
+  @override
+  String get modulesRemove => 'Rimuovi';
+
+  @override
+  String get modulesRemoveFailed => 'Impossibile rimuovere il modulo.';
+
+  @override
+  String get modulesCloseSettings => 'Chiudi impostazioni del modulo';
+
+  @override
+  String get modulesRemoved => 'Modulo rimosso';
+
+  @override
+  String get modulesNoSettingsTitle => 'Nessuna impostazione aggiuntiva';
+
+  @override
+  String get modulesNoSettingsMessage =>
+      'Questo modulo non richiede configurazioni aggiuntive.';
+
+  @override
+  String get modulesSetUpSmsAccess => 'Configura accesso agli SMS';
+
+  @override
+  String get modulesRestartApp => 'Riavvia CopyPaste';
+
+  @override
+  String get modulesSmsAccessTitle => 'Accesso agli SMS';
+
+  @override
+  String get modulesCloseSmsAccess => 'Chiudi accesso agli SMS';
+
+  @override
+  String get modulesSmsChecking => 'Verifica dell\'accesso agli SMS.';
+
+  @override
+  String get modulesSmsReady =>
+      'L\'accesso è pronto. Attiva SMS Codes per iniziare a copiare i nuovi codici.';
+
+  @override
+  String get modulesSmsAllowAccess =>
+      'Consenti l\'accesso per copiare i codici dai nuovi SMS.';
+
+  @override
+  String get modulesSmsNotification => 'Notifica SMS';
+
+  @override
+  String get modulesSmsNotificationDescription =>
+      'Necessaria durante l\'esecuzione di SMS Codes';
+
+  @override
+  String get modulesSmsApplyAccess => 'Applica accesso agli SMS';
+
+  @override
+  String get modulesSmsApplyAccessDescription =>
+      'Applica l\'accesso agli SMS una tantum.';
+
+  @override
+  String get modulesSmsSetupFailed => 'Configurazione SMS non riuscita';
+
+  @override
+  String get modulesFileSelectionFailed => 'Selezione del file non riuscita';
+
+  @override
+  String get modulesChooseLanguages => 'Scegli le lingue';
+
+  @override
+  String get modulesChooseFile => 'Scegli file';
+
+  @override
+  String modulesModelReady(String model) {
+    return 'Il modello $model è pronto';
+  }
+
+  @override
+  String modulesModelDownload(String model, String size) {
+    return 'Modello $model · download di $size MiB';
+  }
+
+  @override
+  String get modulesPlatformsUnknown => 'Piattaforme: sconosciute';
+
+  @override
+  String modulesPlatforms(String platforms) {
+    return 'Piattaforme: $platforms';
+  }
+
+  @override
+  String get modulesCatalogSignatureInvalid =>
+      'La firma del catalogo dei moduli non è valida.';
+
+  @override
+  String get modulesMarketplaceConnectFailed =>
+      'Impossibile connettersi al Marketplace dei moduli.';
+
+  @override
+  String get modulesMarketplaceTimeout =>
+      'Il Marketplace dei moduli non ha risposto.';
+
+  @override
+  String get modulesIncompatible =>
+      'Questo modulo non è compatibile con questo dispositivo.';
+
+  @override
+  String get modulesPackageSizeInvalid =>
+      'La dimensione del pacchetto del modulo non è valida.';
+
+  @override
+  String get modulesDownloadInterrupted =>
+      'Il download del modulo è stato interrotto.';
+
+  @override
+  String get modulesDownloadTimeout =>
+      'Il download del modulo non ha risposto.';
+
+  @override
+  String get modulesPackageUrlUntrusted =>
+      'L\'URL del pacchetto del modulo non è attendibile.';
+
+  @override
+  String get modulesDownloadLeftGithub =>
+      'Il download del modulo è stato reindirizzato fuori da GitHub.';
+
+  @override
+  String get modulesDownloadTooManyRedirects =>
+      'Il download del modulo ha usato troppi reindirizzamenti.';
+
+  @override
+  String get modulesDownloadTooLarge =>
+      'Il download del modulo è troppo grande.';
+
+  @override
+  String get modulesPackageIntegrityFailed =>
+      'Il pacchetto del modulo non ha superato il controllo di integrità.';
+
+  @override
+  String get modulesDownloadUnavailable =>
+      'Il download di questo modulo non è al momento disponibile.';
+
+  @override
+  String get modulesMarketplaceUnavailableRetry =>
+      'Il Marketplace dei moduli non è disponibile. Riprova.';
+
+  @override
+  String get modulesCatalogInvalid => 'Il catalogo dei moduli non è valido.';
+
+  @override
+  String get modulesThisSystem => 'questo sistema';
+
+  @override
+  String modulesSystemRequirement(String system, String version) {
+    return '$system $version o versioni successive';
+  }
+
+  @override
+  String get modulesNotAvailableForDevice =>
+      'Non disponibile per questo dispositivo.';
+
+  @override
+  String get modulesAppVersionUnverified =>
+      'Impossibile verificare la versione di CopyPaste installata.';
+
+  @override
+  String modulesAppVersionUnsupported(String version) {
+    return 'Questo modulo non supporta CopyPaste $version.';
+  }
+
+  @override
+  String modulesRequires(String requirement) {
+    return 'Richiede $requirement.';
+  }
+
+  @override
+  String get modulesMarketplaceLoadFailed =>
+      'Impossibile caricare il Marketplace dei moduli.';
+
+  @override
+  String get modulesSmsSetupRequired =>
+      'Configura l\'accesso agli SMS prima di attivare questo modulo.';
+
+  @override
+  String get modulesSmsMonitoringStillEnabled =>
+      'Impossibile avviare il monitoraggio degli SMS. Il modulo è ancora attivo; disattivalo di nuovo per riprovare.';
+
+  @override
+  String get modulesSmsMonitoringDisabled =>
+      'Impossibile avviare il monitoraggio degli SMS. Il modulo è stato disattivato.';
+
+  @override
+  String get modulesSmsMonitoringUnconfirmed =>
+      'Impossibile avviare il monitoraggio degli SMS. Non è stato possibile confermare lo stato di attivazione del modulo.';
+
+  @override
+  String get modulesSmsMonitoringFailed =>
+      'Impossibile avviare il monitoraggio degli SMS.';
+
+  @override
+  String get modulesSmsAndroidOnly =>
+      'L\'accesso agli SMS è disponibile solo su Android.';
+
+  @override
+  String get modulesSmsMonitoringNeedsSetup =>
+      'Il monitoraggio degli SMS richiede la configurazione.';
+
+  @override
+  String get modulesOperationIncomplete =>
+      'Impossibile completare l\'operazione sul modulo.';
+
+  @override
+  String get modulesUnsupportedEvent =>
+      'Il modulo usa un evento non supportato.';
+
+  @override
+  String get modulesUnsupportedResult =>
+      'Il modulo ha restituito un risultato non supportato.';
+
+  @override
+  String get modulesUnsupportedField =>
+      'Il modulo usa un campo non supportato.';
+
+  @override
+  String get modulesResponseInvalid => 'La risposta del modulo non è valida.';
+
+  @override
+  String get modulesFileSelectionUnavailable =>
+      'La selezione dei file non è disponibile.';
+
+  @override
+  String get modulesFileSelectFailed => 'Impossibile selezionare il file.';
+
+  @override
+  String modulesFileNotAccepted(String field) {
+    return '$field non è un file accettato.';
+  }
+
+  @override
+  String get modulesSmsVerifyFailed =>
+      'Impossibile verificare l\'accesso agli SMS.';
+
+  @override
+  String get modulesSmsAllowNotifications =>
+      'Consenti le notifiche per mantenere attivo SMS Codes in background.';
+
+  @override
+  String get modulesSmsNotGranted =>
+      'L\'accesso agli SMS non è stato concesso.';
+
+  @override
+  String get modulesSmsConfigureFailed =>
+      'Impossibile configurare l\'accesso agli SMS.';
+
+  @override
+  String get onboardingLinuxContinueBasic =>
+      'Continua con l\'acquisizione di base';
+
+  @override
+  String get onboardingLinuxCompanionOptional =>
+      'Facoltativa. Necessaria per Quick Paste e per le esclusioni delle app di origine.';
+
+  @override
+  String get onboardingLinuxKeyboardOptional =>
+      'Facoltativo. Necessario affinché Quick Paste possa tornare all\'app precedente.';
+
+  @override
+  String get onboardingLinuxWaylandClipboardUnavailable =>
+      'L\'accesso agli appunti non è disponibile in questa sessione Wayland. Attiva l\'estensione firmata per GNOME o KDE, poi verifica di nuovo.';
+
+  @override
+  String get historyMoreActions => 'Altre azioni';
+
+  @override
+  String get historyTagsAction => 'Tag…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'sbloccare gli elementi segreti',
+      'other': 'Sblocca gli elementi segreti',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'copiare un elemento segreto',
+      'other': 'Copia un elemento segreto',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Non disponibile su questo sistema';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Configura prima una password, un PIN o la biometria del dispositivo';
+
+  @override
+  String get commonOn => 'Attivato';
+
+  @override
+  String get commonOff => 'Disattivato';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Impossibile avviare Quick Paste, quindi la sua scorciatoia non funziona.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut è usata da un\'altra app. Scegli un\'altra scorciatoia.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'Nessun altro dispositivo abbinato';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Associa un dispositivo sulla stessa rete per sincronizzare la cronologia.';
+
+  @override
+  String get pairingStateNotCompleted => 'Abbinamento non completato';
+
+  @override
+  String get pairingStepInvite => 'Invito';
+
+  @override
+  String get pairingStepScan => 'Scansione';
+
+  @override
+  String get pairingStepCode => 'Codice';
+
+  @override
+  String get pairingStepRequest => 'Richiesta';
+
+  @override
+  String get pairingStepConnect => 'Connessione';
+
+  @override
+  String get pairingStepConfirm => 'Conferma';
+
+  @override
+  String get pairingStepPaired => 'Abbinato';
+
+  @override
+  String get pairingOtherDevice => 'Altro dispositivo';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Non ancora confermato';
+
+  @override
+  String get pairingDecisionSending => 'Invio della decisione…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Confermato';
+
+  @override
+  String get pairingDecisionRejected => 'Rifiutato';
+
+  @override
+  String get pairingDecisionWaiting => 'In attesa di conferma';
+
+  @override
+  String get pairingDecisionUnknown => 'Risposta non nota';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dispositivi',
+      many: '$count dispositivi',
+      one: '$count dispositivo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count righe',
+      many: '$count righe',
+      one: '$count riga',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Navigazione principale';
+
+  @override
+  String sharedStepCounter(int step, int count) {
+    return 'Passaggio $step di $count';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Passaggio $step di $count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'Download';
+
+  @override
+  String get modulesPhaseInstall => 'Installazione';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Installazione di $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Aggiornamento di $module';
+  }
+
+  @override
+  String get commonDismiss => 'Ignora';
+
+  @override
+  String get settingsRetentionConfirmTitle =>
+      'Rimuovere la cronologia meno recente?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'Nuovo limite: $limit. Gli elementi non fissati più vecchi vengono eliminati definitivamente.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle =>
+      'Ridurre la quota di archiviazione?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'Nuova quota: $size. Gli elementi non fissati più vecchi oltre la quota vengono eliminati definitivamente.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Applica limite';
+
+  @override
+  String get settingsHideEverywhereTitle =>
+      'Nascondere completamente CopyPaste?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'Con entrambe disattivate non c’è alcuna icona. Riavvia CopyPaste per aprirlo.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'Con entrambe disattivate non c’è alcuna icona. Per aprirlo, premi $shortcut o riavvia CopyPaste.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Nascondi';
+
+  @override
+  String get settingsExportDoneTitle => 'Cronologia dei testi esportata';
+
+  @override
+  String get settingsBackupDoneTitle => 'Backup creato';
+
+  @override
+  String get settingsRestoreDoneTitle => 'Cronologia ripristinata';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi di testo esportati',
+      many: '$count elementi di testo esportati',
+      one: '$count elemento di testo esportato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count non leggibili',
+      many: '$count non leggibili',
+      one: '$count non leggibile',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Backup crittografato salvato · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'La cronologia degli appunti di questo dispositivo ora corrisponde al backup.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used di $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$used usati su $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used usati';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Quota superata';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'Elemento meno recente: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Archiviazione: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'Nuova quota: $size. Sono in uso $used, quindi gli elementi non fissati più vecchi vengono eliminati definitivamente.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi',
+      many: '$count elementi',
+      one: '$count elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayOpenApp => 'Apri CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Apri Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Apri Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayRecent => 'Recenti';
+
+  @override
+  String get trayRecentLoading => 'Caricamento…';
+
+  @override
+  String get trayRecentFailed => 'Impossibile caricare i clip';
+
+  @override
+  String get trayRecentEmpty => 'Ancora nessun clip';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clip recenti nascosti',
+      one: '1 clip recente nascosto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Segreto';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Copia l\'ultimo da un altro dispositivo';
+
+  @override
+  String get trayCaptureNow => 'Acquisisci ora';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'In pausa fino alle $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Sospendi per…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minuti';
+
+  @override
+  String get trayPauseForOneHour => '1 ora';
+
+  @override
+  String get trayPauseUntilResumed => 'Finché non riprendo';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count elementi',
+      one: 'Paste Queue: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Raccolta: $count elementi',
+      one: 'Raccolta: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Saltati di recente ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Apri le regole sui contenuti';
+
+  @override
+  String get trayRecentSettingsTitle => 'Barra dei menu e area di notifica';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Cosa mostra il menu della barra dei menu o dell\'area di notifica in Recenti.';
+
+  @override
+  String get trayRecentCountTitle => 'Clip recenti';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Quanti dei clip più recenti mostra il menu.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Anteprima dei clip recenti';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Quanto testo dei clip mostra il menu.';
+
+  @override
+  String get trayRecentPreviewFull => 'Anteprima completa';
+
+  @override
+  String get trayRecentPreviewTitles => 'Solo tipo e origine';
+
+  @override
+  String get trayRecentPreviewHidden => 'Nascosto';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'area di notifica barra dei menu recenti anteprima privacy numero';
+
+  @override
+  String get transformsPaletteTitle => 'Trasforma testo';
+
+  @override
+  String get transformsFilterPlaceholder => 'Filtra trasformazioni';
+
+  @override
+  String get transformsNoMatches => 'Nessuna trasformazione corrispondente';
+
+  @override
+  String get transformsGroupResults => 'Risultati';
+
+  @override
+  String get transformsGroupSuggested => 'Suggerite';
+
+  @override
+  String get transformsGroupRecent => 'Recenti';
+
+  @override
+  String get transformsGroupFavorites => 'Preferite';
+
+  @override
+  String get transformsGroupPipelines => 'Pipeline';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV e XML';
+
+  @override
+  String get transformsCategoryEncode => 'Codifica e decodifica';
+
+  @override
+  String get transformsCategoryCase => 'Maiuscole e minuscole';
+
+  @override
+  String get transformsCategoryHash => 'Hash';
+
+  @override
+  String get transformsCategoryLines => 'Righe e spazi';
+
+  @override
+  String get transformsCategoryClean => 'Pulizia';
+
+  @override
+  String get transformsCategoryUrl => 'Link';
+
+  @override
+  String get transformsCategoryMarkup => 'Testo formattato e Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Sviluppatori';
+
+  @override
+  String get transformsCategoryOther => 'Altro';
+
+  @override
+  String get transformsChainEmpty => 'Ancora nessun passaggio';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Poi: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Esegui questo passaggio';
+
+  @override
+  String get transformsMoveEarlier => 'Sposta su';
+
+  @override
+  String get transformsMoveLater => 'Sposta giù';
+
+  @override
+  String get transformsRemoveStep => 'Rimuovi passaggio';
+
+  @override
+  String get transformsSavePipeline => 'Salva come pipeline';
+
+  @override
+  String get transformsSavePipelineTitle => 'Salva pipeline';
+
+  @override
+  String get transformsSavePipelineFailed => 'Impossibile salvare la pipeline.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Nome';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Descrizione (facoltativa)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Passaggi';
+
+  @override
+  String get transformsPipelineNoSteps => 'Aggiungi almeno un passaggio.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Inserisci un nome.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Usa al massimo 80 caratteri.';
+
+  @override
+  String get transformsPipelineNameTaken =>
+      'Un\'altra pipeline ha già questo nome.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Pipeline salvata';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name è disponibile in ogni palette di trasformazione.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Passaggi: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Pipeline eliminata';
+
+  @override
+  String get transformsNeedsNewerVersion =>
+      'Richiede una versione più recente di CopyPaste';
+
+  @override
+  String get transformsLoadFailed => 'Impossibile caricare le trasformazioni.';
+
+  @override
+  String get transformsNotTextTitle => 'Le trasformazioni funzionano sul testo';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Questo elemento è un\'immagine, un file o un colore. Scegli un elemento di testo o copia del testo.';
+
+  @override
+  String get transformsNothingTitle => 'Niente da trasformare';
+
+  @override
+  String get transformsNothingMessage =>
+      'Copia del testo o scegli un elemento della cronologia.';
+
+  @override
+  String get transformsPickTransform => 'Scegli una trasformazione';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab la aggiunge come passaggio. Invio applica il risultato.';
+
+  @override
+  String get transformsPreviewing => 'Aggiornamento anteprima…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Righe: $lines · Parole: $words · Caratteri: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Nessuna modifica';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Visualizzati i primi 64 KiB di $size';
+  }
+
+  @override
+  String get transformsRandom => 'Casuale';
+
+  @override
+  String get transformsNotRun => 'Non eseguito';
+
+  @override
+  String get transformsSensitiveHidden =>
+      'Il risultato è riservato e nascosto.';
+
+  @override
+  String get transformsReveal => 'Mostra';
+
+  @override
+  String get transformsPaneOutput => 'Output';
+
+  @override
+  String get transformsPaneInput => 'Input';
+
+  @override
+  String get transformsPaneChanges => 'Modifiche';
+
+  @override
+  String get transformsCannotTransform =>
+      'Impossibile trasformare questo testo';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Passaggio $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Mostra in esadecimale';
+
+  @override
+  String get transformsActionPaste => 'Incolla';
+
+  @override
+  String get transformsActionSave => 'Salva come nuovo elemento';
+
+  @override
+  String get transformsCopiedMessage =>
+      'Il risultato è negli appunti e nella cronologia.';
+
+  @override
+  String get transformsSavedTitle => 'Salvato';
+
+  @override
+  String get transformsSavedMessage =>
+      'Salvato come nuovo elemento della cronologia.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Impossibile incollare';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'Il risultato è negli appunti. Incollalo manualmente.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message alla riga $line, colonna $column';
+  }
+
+  @override
+  String get transformsErrorBinary =>
+      'I dati decodificati sono binari, non testo';
+
+  @override
+  String get transformsErrorTooLarge => 'Troppo grande da trasformare';
+
+  @override
+  String get transformsErrorInvalidParam =>
+      'Un\'impostazione di questo passaggio non è valida';
+
+  @override
+  String get transformsErrorCancelled => 'Annullato';
+
+  @override
+  String get transformsErrorTooExpensive => 'Schema troppo oneroso';
+
+  @override
+  String get transformsErrorPattern => 'Lo schema non è valido';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Scegli se il numero è in secondi o millisecondi';
+
+  @override
+  String get transformsErrorExternalEntity =>
+      'Le entità esterne non sono consentite';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'I token cifrati non possono essere decodificati';
+
+  @override
+  String get transformsErrorJson => 'JSON non valido';
+
+  @override
+  String get transformsErrorYaml => 'YAML non valido';
+
+  @override
+  String get transformsErrorXml => 'XML non valido';
+
+  @override
+  String get transformsErrorCsv => 'CSV non valido';
+
+  @override
+  String get transformsErrorBase64 => 'Base64 non valido';
+
+  @override
+  String get transformsErrorHex => 'Esadecimale non valido';
+
+  @override
+  String get transformsErrorEscape => 'Sequenza di escape non valida';
+
+  @override
+  String get transformsErrorUrl => 'Codifica percentuale non valida';
+
+  @override
+  String get transformsErrorJwt => 'Non è un JWT valido';
+
+  @override
+  String get transformsErrorDate => 'Data o timestamp non riconosciuti';
+
+  @override
+  String get transformsErrorGeneric =>
+      'Questo passaggio non può trasformare il suo input';
+
+  @override
+  String get transformsWarningSignedLink => 'Link firmato lasciato invariato';
+
+  @override
+  String get transformsWarningExpired => 'Scaduto';
+
+  @override
+  String get transformsWarningNotYetValid => 'Non ancora valido';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Firma non verificata';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Chiavi duplicate';
+
+  @override
+  String get transformsWarningLenientJson => 'JSON non standard accettato';
+
+  @override
+  String get transformsWarningDoubleEncoded =>
+      'Il JSON era codificato due volte';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Sequenze di escape sconosciute mantenute come scritte';
+
+  @override
+  String get transformsWarningLocalZone => 'Fuso orario locale presunto';
+
+  @override
+  String get transformsWarningNoMatches => 'Nessuna corrispondenza';
+
+  @override
+  String get transformsWarningGeneric => 'Controlla il risultato';
+
+  @override
+  String get transformsRestoreTitle => 'Ripristina gli appunti dopo l\'incolla';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Ripristina gli appunti precedenti dopo aver incollato.';
+
+  @override
+  String get transformsDefaultTitle =>
+      'Trasformazione predefinita all\'incolla';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Applicata al testo incollato da Quick Paste.';
+
+  @override
+  String get transformsNoDefault => 'Nessuna';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Predefiniti per app';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Usa un’impostazione predefinita diversa in app specifiche.';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'solo su $platform';
+  }
+
+  @override
+  String get transformsAddApp => 'Aggiungi app';
+
+  @override
+  String get transformsRemove => 'Rimuovi';
+
+  @override
+  String get transformsFavoritesTitle => 'Preferite';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Compaiono per prime in ogni palette.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number nella palette';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Aggiungi preferita';
+
+  @override
+  String get transformsPipelinesTitle => 'Pipeline';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Catene di trasformazioni salvate.';
+
+  @override
+  String get transformsNewPipeline => 'Nuova pipeline';
+
+  @override
+  String get transformsEditPipeline => 'Modifica pipeline';
+
+  @override
+  String get transformsDuplicatePipeline => 'Duplica';
+
+  @override
+  String get transformsDeletePipeline => 'Elimina';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return 'Eliminare $name?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Le preferite e i predefiniti che la usano vengono rimossi.';
+
+  @override
+  String get transformsDeletePipelineFailed =>
+      'Impossibile eliminare la pipeline.';
+
+  @override
+  String get transformsAddStep => 'Aggiungi un passaggio';
+
+  @override
+  String get transformsHiddenTitle => 'Trasformazioni nascoste';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Escluse da palette e suggerimenti.';
+
+  @override
+  String get transformsHideTransform => 'Nascondi una trasformazione';
+
+  @override
+  String get transformsShow => 'Mostra';
+
+  @override
+  String get transformsSuggestionsTitle => 'Suggerimenti';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Suggerisci trasformazioni adatte al testo.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Token';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl =>
+      'Link con parametri di tracciamento';
+
+  @override
+  String get transformsDetectorTimestamp => 'Timestamp';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Parametri di tracciamento';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Parametri dei link da rimuovere anche o da mantenere sempre.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Rimuovi anche';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Mantieni sempre';
+
+  @override
+  String get transformsTrackingPlaceholder => 'nome o nome@dominio, poi Invio';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Stato dell\'accesso rapido non disponibile';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste non è riuscito a leggere lo stato di tastiera, riquadri e widget. Riprova.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Impossibile completare l\'azione';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android non ha aperto la schermata richiesta o non ha salvato la modifica. Riprova.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Tastiera degli elementi';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Attiva Elementi CopyPaste nelle impostazioni della tastiera.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Attivata';
+
+  @override
+  String get quickAccessKeyboardOff => 'Disattivata';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Apri impostazioni tastiera';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Attiva il pannello tastiera Elementi CopyPaste.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'tastiera metodo di inserimento ime pannello attivare';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle =>
+      'Passa alla tastiera degli elementi';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Imposta Elementi CopyPaste come tastiera attuale.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Scegli tastiera';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Tastiera attuale';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Modalità di acquisizione';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Come vengono salvate le copie dalle altre app.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Scopri come vengono salvate le copie dalle altre app.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'acquisizione livello completa pannello manuale shizuku raccogliere';
+
+  @override
+  String get quickAccessTierFull =>
+      'Completa: ogni copia viene salvata in background';
+
+  @override
+  String get quickAccessTierPanelCollecting =>
+      'Pannello selezionato: raccolta in corso';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Modalità pannello: recupero all\'apertura';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuale: salva dall\'app, da un riquadro, dal widget o da Condividi';
+
+  @override
+  String get quickAccessTierPaused => 'Acquisizione in pausa';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Torna alla tastiera precedente dopo l\'inserimento';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Torna indietro dopo aver inserito un elemento.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'tornare tastiera precedente automatico inserire';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Attiva la ricerca all\'apertura del pannello';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Apri il pannello con la ricerca pronta.';
+
+  @override
+  String get quickAccessTilesTitle => 'Riquadri delle Impostazioni rapide';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Aggiungi i riquadri Salva appunti e Acquisizione degli appunti.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'impostazioni rapide riquadro tendina salvare pausa';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Scorri due volte verso il basso, tocca Modifica e aggiungi un riquadro di CopyPaste.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Riquadro Salva appunti';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Salva il contenuto degli appunti dalle Impostazioni rapide.';
+
+  @override
+  String get quickAccessCaptureTileTitle =>
+      'Riquadro Acquisizione degli appunti';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Mette in pausa e riprende l\'acquisizione dalle Impostazioni rapide.';
+
+  @override
+  String get quickAccessAddTile => 'Aggiungi riquadro';
+
+  @override
+  String get quickAccessTileAdded => 'Aggiunto alle Impostazioni rapide';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget Elementi recenti';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Elementi recenti nella schermata Home, copiati con un tocco.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Tieni premuta la schermata Home, tocca Widget e aggiungi Elementi recenti.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widget aggiunti',
+      one: '1 widget aggiunto',
+      zero: 'Non aggiunto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Aggiungi widget';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'schermata home widget launcher recenti';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Troppo grande per essere modificato. Questo elemento si apre in sola lettura.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Continua';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Questo dispositivo non può verificarti. Continua solo se è il tuo.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Conferma che sei tu';
+
+  @override
+  String get snippetsDiscard => 'Scarta';
+
+  @override
+  String get snippetsEditClip => 'Modifica elemento';
+
+  @override
+  String get snippetsFormattingNotice =>
+      'La formattazione verrà rimossa al salvataggio.';
+
+  @override
+  String get snippetsNewText => 'Nuovo testo';
+
+  @override
+  String get snippetsReplaceOriginal => 'Sostituisci l\'originale';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Elimina l’elemento originale dopo il salvataggio.';
+
+  @override
+  String get snippetsSaveFailed => 'Salvataggio non riuscito';
+
+  @override
+  String get snippetsUnsavedMessage =>
+      'Salvare le modifiche prima di chiudere?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Modifiche non salvate';
+
+  @override
+  String get quickPasteTabQueue => 'Coda';
+
+  @override
+  String get quickPasteMaskedMode => 'Campo password: anteprime nascoste';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Nascosto: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Sblocca gli elementi segreti';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Incolla con: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut incolla l\'originale';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Trasformazione predefinita saltata';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => 'È stato usato l\'originale.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Il contenuto è negli appunti. Incollalo manualmente.';
+
+  @override
+  String get quickPastePaste => 'Incolla';
+
+  @override
+  String get rulesLoadFailed => 'Impossibile caricare le regole sui contenuti.';
+
+  @override
+  String get rulesNewRule => 'Nuova regola';
+
+  @override
+  String get rulesEditRule => 'Modifica regola';
+
+  @override
+  String get rulesUntitled => 'Regola senza nome';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Impostazioni privacy predefinite';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Le impostazioni di privacy si applicano prima di ogni regola.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'privacy nascosto temporaneo app escluse integrate credenziali password carte';
+
+  @override
+  String get rulesOpenPrivacy => 'Apri Privacy';
+
+  @override
+  String get rulesMyRulesTitle => 'Le mie regole';
+
+  @override
+  String get rulesMyRulesDescription =>
+      'Vengono eseguite in ordine sulle nuove copie.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'regole automazione etichetta saltare segreto scadenza eliminare modello regex';
+
+  @override
+  String get rulesEmptyTitle => 'Ancora nessuna regola';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Le regole etichettano, proteggono, fanno scadere o saltano le nuove copie.';
+
+  @override
+  String get rulesDeletedTitle => 'Eliminate di recente';
+
+  @override
+  String get rulesDeletedDescription => 'Ripristinabili entro 30 giorni.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Eliminata: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Ripristina';
+
+  @override
+  String get rulesDeletedToast => 'Regola eliminata';
+
+  @override
+  String get rulesDeletedToastMessage => 'Puoi ripristinarla per 30 giorni.';
+
+  @override
+  String get rulesUndo => 'Annulla';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return 'Una modifica simultanea di «$rule» da $device è stata sostituita da una più recente.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'un altro dispositivo';
+
+  @override
+  String get rulesRestoreConflict => 'Usa quella versione';
+
+  @override
+  String get rulesSkipLogTitle => 'Saltati di recente';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Copie che le tue regole non hanno salvato su questo dispositivo.';
+
+  @override
+  String get rulesSkipLogKeywords => 'saltati ignorati non salvati registro';
+
+  @override
+  String get rulesSkipLogShow => 'Mostra';
+
+  @override
+  String get rulesSkipLogEmpty => 'Nessuna copia è stata saltata.';
+
+  @override
+  String get rulesUnknownApp => 'App sconosciuta';
+
+  @override
+  String get rulesMatchesEverything => 'Qualsiasi copia';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, poi fermati';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {'any': ' o ', 'other': ' e '});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Eseguita su $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return 'Nuova da $device';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Aggiornamento necessario';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Aggiorna CopyPaste per eseguire questa regola.';
+
+  @override
+  String get rulesErrorBadge => 'Errore';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Finché non è corretta, le corrispondenze sono protette.';
+  }
+
+  @override
+  String get rulesReorder => 'Trascina per riordinare';
+
+  @override
+  String get rulesMoreActions => 'Altre azioni';
+
+  @override
+  String get rulesEdit => 'Modifica';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Sposta su',
+      'down': 'Sposta giù',
+      'top': 'Sposta in cima',
+      'other': 'Sposta in fondo',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Applica agli elementi esistenti…';
+
+  @override
+  String get rulesResetBuiltin => 'Ripristina predefinito';
+
+  @override
+  String get rulesNameLabel => 'Nome';
+
+  @override
+  String get rulesNamePlaceholder => 'Ad esempio, Link di lavoro';
+
+  @override
+  String get rulesWhenTitle => 'Quando';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Una condizione è soddisfatta',
+      'other': 'Tutte le condizioni sono soddisfatte',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions =>
+      'Nessuna condizione: questa regola si applica a ogni copia.';
+
+  @override
+  String get rulesAddCondition => 'Aggiungi condizione';
+
+  @override
+  String get rulesRemoveCondition => 'Rimuovi condizione';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Testo',
+      'content_type': 'Tipo di contenuto',
+      'detected_kind': 'Tipo rilevato',
+      'source_app': 'App di origine',
+      'size': 'Dimensione',
+      'privacy_marker': 'Indicatore privacy',
+      'capture_origin': 'Origine',
+      'other': 'Condizione sconosciuta',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'contiene',
+      'equals': 'è',
+      'starts_with': 'inizia con',
+      'ends_with': 'finisce con',
+      'matches_regex': 'corrisponde al modello',
+      'other': 'corrisponde',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'non contiene',
+      'equals': 'non è',
+      'starts_with': 'non inizia con',
+      'ends_with': 'non finisce con',
+      'matches_regex': 'non corrisponde al modello',
+      'other': 'non corrisponde',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'non è',
+      'other': 'è',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'è minore di',
+      'other': 'è maggiore di',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'non è minore di',
+      'other': 'non è maggiore di',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'righe',
+      'bytes': 'byte',
+      'other': 'caratteri',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'righe',
+      'bytes': 'byte',
+      'other': 'caratteri',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Testo semplice',
+      'rich_text': 'Testo formattato',
+      'image': 'Immagine',
+      'files': 'File',
+      'color': 'Colore',
+      'link': 'Link',
+      'other': 'Altro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Password o segreto',
+      'url': 'Indirizzo web',
+      'email': 'Indirizzo email',
+      'phone': 'Numero di telefono',
+      'code': 'Codice',
+      'color': 'Valore colore',
+      'json': 'JSON',
+      'file_path': 'Percorso file',
+      'number': 'Numero',
+      'one_time_code': 'Codice monouso',
+      'payment_card': 'Numero di carta',
+      'other': 'Altro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Nascosto',
+      'transient': 'Temporaneo',
+      'auto_generated': 'Generato automaticamente',
+      'excluded_from_history': 'Escluso dalla cronologia',
+      'other': 'Altro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Copiato su questo dispositivo',
+      'received': 'Ricevuto da un altro dispositivo',
+      'created_in_app': 'Creato in CopyPaste',
+      'other': 'Altro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Testo da cercare';
+
+  @override
+  String get rulesPatternPlaceholder => 'Modello, ad esempio ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Lookaround e riferimenti all’indietro non sono supportati.';
+
+  @override
+  String get rulesCaseSensitive => 'Maiuscole/minuscole';
+
+  @override
+  String get rulesChooseValues => 'Scegli';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Questa condizione proviene da una versione più recente di CopyPaste.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Su Android corrispondono solo le copie fatte con la tastiera degli elementi.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Non tutti i sistemi segnalano ogni indicatore.';
+
+  @override
+  String get rulesThenTitle => 'Allora';
+
+  @override
+  String get rulesNoActions => 'Aggiungi almeno un’azione.';
+
+  @override
+  String get rulesAddAction => 'Aggiungi azione';
+
+  @override
+  String get rulesRemoveAction => 'Rimuovi azione';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Non salvare',
+      'mark_secret': 'Segna come segreto',
+      'delete_after': 'Elimina dopo',
+      'add_tags': 'Aggiungi etichette',
+      'transform': 'Trasforma',
+      'other': 'Azione sconosciuta',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone':
+          '«Non salvare» non può essere combinata con altre azioni.',
+      'present': 'Questa regola ha già questa azione.',
+      'other': 'Una regola può avere fino a 8 azioni.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Questa azione proviene da una versione più recente di CopyPaste.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Le copie corrispondenti non vengono mai salvate, indicizzate o sincronizzate.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count minuti',
+      one: '1 minuto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ore',
+      one: '1 ora',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count giorni',
+      one: '1 giorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Svuota anche gli appunti se contengono ancora questa copia.';
+
+  @override
+  String get rulesNoTags => 'Crea etichette nella Cronologia per usarle qui.';
+
+  @override
+  String get rulesNoTransforms => 'Nessuna trasformazione disponibile.';
+
+  @override
+  String get rulesReplaceClipboard =>
+      'Sostituisci anche gli appunti con il risultato';
+
+  @override
+  String get rulesOptionsTitle => 'Opzioni';
+
+  @override
+  String get rulesEnabledSwitch => 'Attiva';
+
+  @override
+  String get rulesStopProcessing =>
+      'Non elaborare le regole successive se questa corrisponde';
+
+  @override
+  String get rulesRunsOnLabel => 'Eseguita su';
+
+  @override
+  String get rulesAllDevices => 'Tutti i dispositivi';
+
+  @override
+  String get rulesChosenDevices => 'Dispositivi scelti';
+
+  @override
+  String get rulesTestTitle => 'Prova';
+
+  @override
+  String get rulesTestDescription => 'Prova la regola su un testo di esempio.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Incolla o digita un testo di esempio';
+
+  @override
+  String get rulesTestFullSet => 'Prova insieme a tutte le regole';
+
+  @override
+  String get rulesRunTest => 'Esegui prova';
+
+  @override
+  String get rulesTestFailed => 'Impossibile eseguire la prova.';
+
+  @override
+  String get rulesPreviewHistory => 'Anteprima sulla cronologia';
+
+  @override
+  String get rulesSaveFailed => 'Impossibile salvare la regola.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Creata da una versione più recente di CopyPaste. Aggiorna per modificarla o eseguirla.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'Impossibile leggere la regola.',
+      'unsupported_schema':
+          'Questa regola richiede una versione più recente di CopyPaste.',
+      'unknown_condition_type':
+          'Questa condizione richiede una versione più recente di CopyPaste.',
+      'unknown_action_type':
+          'Questa azione richiede una versione più recente di CopyPaste.',
+      'too_many_conditions': 'Una regola può avere fino a 20 condizioni.',
+      'too_many_actions': 'Una regola può avere fino a 8 azioni.',
+      'too_many_rules': 'Vengono eseguite solo le prime 200 regole.',
+      'no_actions': 'Aggiungi almeno un’azione.',
+      'conflicting_actions':
+          '«Non salvare» non può essere combinata con altre azioni.',
+      'duplicate_action': 'Ogni azione può essere usata una sola volta.',
+      'empty_value': 'Inserisci un valore.',
+      'empty_list': 'Scegli almeno un valore.',
+      'too_many_values': 'Scegli fino a 64 valori.',
+      'invalid_value': 'Questo valore non è valido.',
+      'pattern_too_long': 'I modelli possono avere fino a 2.000 caratteri.',
+      'unsupported_look_around':
+          'Lookahead e lookbehind non sono supportati. Usa invece due condizioni con «Tutte le condizioni sono soddisfatte».',
+      'unsupported_backreference':
+          'I riferimenti all’indietro non sono supportati.',
+      'pattern_too_large':
+          'Questo modello è troppo complesso. Semplifica le ripetizioni.',
+      'invalid_pattern': 'Questo modello non è valido.',
+      'invalid_duration': 'Scegli una durata da 1 minuto a 90 giorni.',
+      'invalid_tags': 'Scegli almeno un’etichetta.',
+      'invalid_transform': 'Scegli una trasformazione.',
+      'other': 'Questa regola ha un problema.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'corrisponde',
+      'not_matched': 'non corrisponde',
+      'unknown': 'sconosciuto',
+      'skipped': 'non eseguita',
+      'other': 'errore',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Condizione $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'Nessuna regola è stata valutata.';
+
+  @override
+  String get rulesTraceStopped =>
+      'Le regole successive non sono state eseguite.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Sconosciuto per questa copia, quindi non corrisponde.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Questa regola non è stata eseguita, quindi le corrispondenze sono protette.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Risultato';
+
+  @override
+  String get rulesTraceNoEffect => 'Nessuna regola modifica questa copia.';
+
+  @override
+  String get rulesTraceSkipped => 'Non salvata';
+
+  @override
+  String get rulesTraceSecret => 'Salvata come segreta';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return 'Eliminata dopo $duration';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Etichettata: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Trasformata con $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Testo trasformato';
+
+  @override
+  String get rulesPreviewTitle => 'Applica agli elementi esistenti';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Controllo degli ultimi $count elementi…';
+  }
+
+  @override
+  String get rulesPreviewNone =>
+      'Nessun elemento recente corrisponde a questa regola.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi corrispondono',
+      one: '1 elemento corrisponde',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count verrebbero eliminati',
+      one: '1 verrebbe eliminato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count verrebbero segnati come segreti',
+      one: '1 verrebbe segnato come segreto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count riceverebbero un orario di eliminazione',
+      one: '1 riceverebbe un orario di eliminazione',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count verrebbero etichettati',
+      one: '1 verrebbe etichettato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Sono stati controllati solo gli ultimi $count elementi.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 'e altri $count';
+  }
+
+  @override
+  String get rulesPreviewNote => 'Nulla cambia finché non applichi.';
+
+  @override
+  String get rulesSecretItem => 'Elemento segreto';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return 'Elemento segreto da $app';
+  }
+
+  @override
+  String get rulesPreviewCancelled =>
+      'L’anteprima è stata interrotta. Non è cambiato nulla.';
+
+  @override
+  String get rulesPreviewFailed => 'Impossibile eseguire l’anteprima.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eliminare $count elementi?',
+      one: 'Eliminare 1 elemento?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'I clip corrispondenti vengono eliminati su tutti i tuoi dispositivi. L’azione è irreversibile.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Elimina e applica';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Applicazione: $done di $total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi modificati',
+      one: '1 elemento modificato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi eliminati',
+      one: '1 elemento eliminato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Impossibile modificare $count elementi',
+      one: 'Impossibile modificare 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled =>
+      'Interrotto. Le modifiche già fatte restano.';
+
+  @override
+  String get historyActionEdit => 'Modifica';
+
+  @override
+  String get historyActionAddToQueue => 'Aggiungi a Paste Queue';
+
+  @override
+  String get historyActionSendTo => 'Invia a…';
+
+  @override
+  String get historySendDialogTitle => 'Invia al dispositivo';
+
+  @override
+  String get historySendDescription =>
+      'Invia subito, anche se la sincronizzazione automatica è sospesa.';
+
+  @override
+  String get historySendNoDevices =>
+      'Nessun dispositivo associato è ancora stato sincronizzato.';
+
+  @override
+  String get historySendAction => 'Invia';
+
+  @override
+  String get historySentTitle => 'Inviato';
+
+  @override
+  String historySentTo(String devices) {
+    return 'Inviato a $devices.';
+  }
+
+  @override
+  String get historySendFailedTitle => 'Non inviato';
+
+  @override
+  String historySendBlocked(String device) {
+    return 'Le impostazioni di sincronizzazione di $device non consentono questo elemento.';
+  }
+
+  @override
+  String historySendFailed(String device) {
+    return '$device non ha potuto ricevere l\'elemento. Verifica che sia online e riprova.';
+  }
+
+  @override
+  String get historySendUnavailable => 'L\'invio non è disponibile al momento.';
+
+  @override
+  String get historyActionTransform => 'Trasforma…';
+
+  @override
+  String get historyActionExplain => 'Perché è qui?';
+
+  @override
+  String get historyActionKeep => 'Mantieni';
+
+  @override
+  String get historyNewClip => 'Nuovo elemento';
+
+  @override
+  String get historySavedTitle => 'Salvato';
+
+  @override
+  String get historyEditSaved =>
+      'Il testo modificato è un nuovo elemento in cima alla cronologia.';
+
+  @override
+  String get historyNewClipSaved => 'Il testo è stato salvato.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi aggiunti alla coda.',
+      one: '1 elemento aggiunto alla coda.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Impossibile aggiungere a Paste Queue. Verifica che sia attiva.';
+
+  @override
+  String get historyKeepFailed => 'Impossibile mantenere questo elemento.';
+
+  @override
+  String get historyExplainFailed => 'Impossibile caricare la spiegazione.';
+
+  @override
+  String get historyDeletesSoon => 'Eliminato tra meno di un minuto';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eliminato tra $count min',
+      one: 'Eliminato tra 1 min',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eliminato tra $count h',
+      one: 'Eliminato tra 1 h',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eliminato tra $count giorni',
+      one: 'Eliminato tra 1 giorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Manuale';
+
+  @override
+  String get historyProvenanceEdited => 'Modificato';
+
+  @override
+  String get historyProvenanceTransformed => 'Trasformato';
+
+  @override
+  String get historyProvenanceModule => 'Modulo';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (auto)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Eliminazione';
+
+  @override
+  String get historyMetadataRuleTags => 'Tag automatici';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return 'Attivare $module?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Potrà:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Leggere la cronologia degli appunti',
+      'clipboard_write': 'Copiare negli appunti',
+      'library_write': 'Salvare frammenti e fissare elementi',
+      'snippets': 'Leggere i tuoi frammenti',
+      'synced_records': 'Sincronizzare i suoi dati tra i tuoi dispositivi',
+      'local_state': 'Conservare i suoi dati su questo dispositivo',
+      'prompts': 'Chiederti di confermare azioni',
+      'endpoints': 'Accettare connessioni da app locali',
+      'other': 'Usare un servizio di CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Da $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Modulo sconosciuto';
+
+  @override
+  String get modulesPromptAnswerFailed =>
+      'La tua risposta non è stata inviata.';
+
+  @override
+  String get modulesPromptNotificationBody => 'Apri CopyPaste per rispondere.';
+
+  @override
+  String get modulesUnknownDevice => 'Dispositivo sconosciuto';
+
+  @override
+  String get modulesChooseDevices => 'Scegli dispositivi';
+
+  @override
+  String get modulesAddApp => 'Aggiungi app';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return 'Rimuovi $app';
+  }
+
+  @override
+  String get modulesNoApps => 'Nessuna app scelta';
+
+  @override
+  String get settingsSectionDiagnostics => 'Diagnostica';
+
+  @override
+  String get settingsSectionDiagnosticsSummary =>
+      'Log di esecuzione per la risoluzione dei problemi. Il contenuto degli appunti non viene mai registrato.';
+
+  @override
+  String get diagnosticsSearchPlaceholder => 'Cerca nei log';
+
+  @override
+  String get diagnosticsAllLevels => 'Tutti i livelli';
+
+  @override
+  String get diagnosticsAllProcesses => 'Tutti i processi';
+
+  @override
+  String get diagnosticsLevelError => 'Errore';
+
+  @override
+  String get diagnosticsLevelWarning => 'Avviso';
+
+  @override
+  String get diagnosticsLevelInfo => 'Info';
+
+  @override
+  String get diagnosticsLevelDebug => 'Debug';
+
+  @override
+  String get diagnosticsLevelTrace => 'Trace';
+
+  @override
+  String get diagnosticsProcessApp => 'App';
+
+  @override
+  String get diagnosticsProcessDaemon => 'Servizio in background';
+
+  @override
+  String get diagnosticsRefresh => 'Aggiorna';
+
+  @override
+  String get diagnosticsExport => 'Esporta';
+
+  @override
+  String get diagnosticsExportFileType => 'File di testo';
+
+  @override
+  String get diagnosticsExported => 'Diagnostica esportata';
+
+  @override
+  String get diagnosticsExportedMessage =>
+      'Il file di log è pronto da inviare all’assistenza.';
+
+  @override
+  String get diagnosticsExportFailed => 'Esportazione non riuscita';
+
+  @override
+  String get diagnosticsExportFailedMessage =>
+      'Impossibile salvare il file di log.';
+
+  @override
+  String get diagnosticsLoadFailed => 'Impossibile caricare i log';
+
+  @override
+  String get diagnosticsEmpty => 'Nessuna voce di log';
+
+  @override
+  String get diagnosticsLogLevelTitle => 'Livello di log';
+
+  @override
+  String get diagnosticsLogLevelDescription =>
+      'Quanti dettagli vengono registrati su questo dispositivo. I log non includono mai il contenuto degli appunti.';
+
+  @override
+  String get onboardingAndroidCaptureMethod => 'Metodo di rilevamento';
+
+  @override
+  String get onboardingAndroidLogTrigger => 'Log di sistema (consigliato)';
+
+  @override
+  String get onboardingAndroidLogTriggerDescription =>
+      'Immediato, senza consumo extra di batteria. Richiede una volta l\'accesso tramite Shizuku o ADB.';
+
+  @override
+  String get onboardingAndroidPolling => 'Polling';
+
+  @override
+  String get onboardingAndroidPollingDescription =>
+      'Controlla ogni secondo mentre lo schermo è acceso. Richiede solo l\'accesso in sovrapposizione; consuma più batteria.';
+
+  @override
+  String get onboardingAndroidOverlay => 'Mostra sopra altre app';
+
+  @override
+  String get onboardingAndroidOverlayDescription =>
+      'Consente a una finestra invisibile di 1 pixel di leggere gli appunti.';
+
+  @override
+  String get onboardingAndroidOverlaySettingsFailed =>
+      'Impossibile aprire le impostazioni di sovrapposizione.';
+
+  @override
+  String get settingsBackgroundSyncTitle => 'Sincronizzazione in background';
+
+  @override
+  String get settingsBackgroundSyncDescription =>
+      'Continua a sincronizzare con l\'app chiusa. Mostra una notifica.';
+
+  @override
+  String get settingsBackgroundSyncKeywords =>
+      'background persistente servizio notifica batteria keep alive persistent service notification battery';
+
+  @override
+  String get settingsBackgroundSyncStoppedTitle =>
+      'La sincronizzazione in background non è attiva';
+
+  @override
+  String get settingsBackgroundSyncStoppedMessage =>
+      'Consenti le notifiche perché Android mantenga attiva la sincronizzazione.';
+
+  @override
+  String get settingsBackgroundSyncResume => 'Riprendi sincronizzazione';
+
+  @override
+  String get quickAccessSendShortcutTitle => 'Scorciatoia «Invia appunti»';
+
+  @override
+  String get quickAccessSendShortcutDescription =>
+      'Salva gli appunti attuali e li invia ai tuoi dispositivi.';
+
+  @override
+  String get quickAccessTransformShortcutTitle =>
+      'Scorciatoia «Trasforma appunti»';
+
+  @override
+  String get quickAccessTransformShortcutDescription =>
+      'Apre le trasformazioni per gli appunti attuali.';
+
+  @override
+  String get quickAccessAddToHomeScreen => 'Aggiungi alla schermata Home';
+
+  @override
+  String get quickAccessShortcutKeywords =>
+      'scorciatoia schermata home launcher icona shortcut home screen launcher icon';
+
+  @override
+  String fileSetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count file',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get fileSetShowFolder => 'Mostra cartella';
+
+  @override
+  String get historyFilesSaved => 'File salvati.';
+
+  @override
+  String get transfersResume => 'Riprendi';
+
+  @override
+  String get settingsStartInBackgroundTitle => 'Avvia in background';
+
+  @override
+  String get settingsStartInBackgroundDescription =>
+      'Quando CopyPaste si avvia all’accesso, la finestra resta chiusa.';
+
+  @override
+  String get settingsWindowGlassTitle => 'Effetto vetro';
+
+  @override
+  String get settingsWindowGlassDescription =>
+      'Sfoca la scrivania dietro la finestra. Si disattiva se il sistema riduce la trasparenza.';
+
+  @override
+  String get settingsRestoreClipboardTitle =>
+      'Ripristina gli appunti all’avvio';
+
+  @override
+  String get settingsRestoreClipboardDescription =>
+      'All’avvio rimette l’ultimo elemento negli appunti vuoti. Gli elementi segreti vengono saltati.';
+
+  @override
+  String get settingsStorageUsageTitle => 'Spazio utilizzato';
+
+  @override
+  String get settingsStorageUsageDescription =>
+      'Spazio usato da CopyPaste su questo dispositivo.';
+
+  @override
+  String get settingsStorageUsageUnavailable =>
+      'Impossibile leggere lo spazio utilizzato.';
+
+  @override
+  String get settingsStorageHistory => 'Cronologia';
+
+  @override
+  String get settingsStorageFiles => 'File';
+
+  @override
+  String get settingsStorageCaches => 'Cache';
+
+  @override
+  String get settingsStorageUpgradeBackups => 'Backup di aggiornamento';
+
+  @override
+  String get settingsStorageOther => 'Log, moduli e impostazioni';
+
+  @override
+  String get settingsStorageTotal => 'Totale';
+
+  @override
+  String get settingsClearCacheTitle => 'Svuota cache';
+
+  @override
+  String get settingsClearCacheDescription =>
+      'Rimuove anteprime e file temporanei. La cronologia resta.';
+
+  @override
+  String get settingsClearCacheAction => 'Svuota';
+
+  @override
+  String get settingsClearCacheDoneTitle => 'Cache svuotata';
+
+  @override
+  String get settingsClearCacheDoneMessage =>
+      'Le anteprime vengono ricreate quando servono.';
+
+  @override
+  String get settingsClearCacheFailed => 'Impossibile svuotare la cache.';
+
+  @override
+  String get settingsDataFolderTitle => 'Cartella dati';
+
+  @override
+  String get settingsDataFolderDescription =>
+      'Mostra dove si trovano cronologia, backup e moduli.';
+
+  @override
+  String get settingsLogsFolderTitle => 'Cartella log';
+
+  @override
+  String get settingsLogsFolderDescription =>
+      'Mostra i log di diagnostica di questo dispositivo.';
+
+  @override
+  String get settingsOpenFolderAction => 'Apri';
+
+  @override
+  String get settingsOpenFolderFailed => 'Impossibile aprire la cartella.';
+
+  @override
+  String get settingsConfirmDeleteTitle => 'Conferma prima di eliminare';
+
+  @override
+  String get settingsConfirmDeleteDescription =>
+      'Chiedi prima di eliminare un elemento. Eliminarne più chiede sempre.';
+
+  @override
+  String get settingsUpgradeBackupsTitle => 'Backup di aggiornamento';
+
+  @override
+  String get settingsUpgradeBackupsDescription =>
+      'Copie cifrate fatte prima degli aggiornamenti dei dati. Si tengono le ultime 5.';
+
+  @override
+  String get settingsUpgradeBackupsEmpty => 'Nessun backup di aggiornamento.';
+
+  @override
+  String settingsUpgradeBackupEntry(String date, String size) {
+    return '$date · $size';
+  }
+
+  @override
+  String get settingsUpgradeBackupRestoreAction => 'Ripristina';
+
+  @override
+  String get settingsUpgradeBackupRestoreTitle => 'Ripristinare questo backup?';
+
+  @override
+  String settingsUpgradeBackupRestoreMessage(String date) {
+    return 'La cronologia viene sostituita dalla copia del $date. Gli elementi aggiunti da allora vengono rimossi.';
+  }
+
+  @override
+  String get settingsDownloadUpdatesTitle =>
+      'Scarica gli aggiornamenti in background';
+
+  @override
+  String get settingsDownloadUpdatesDescription =>
+      'Scarica e verifica l’aggiornamento trovato per un’installazione immediata. Attende su reti a consumo e in risparmio energetico.';
+
+  @override
+  String settingsUpdateDownloadedReady(String available) {
+    return 'CopyPaste $available è scaricato e pronto da installare.';
+  }
+
+  @override
+  String get devicesSpaceTitle => 'Il tuo spazio';
+
+  @override
+  String devicesSpaceSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dispositivi',
+      one: 'Solo questo dispositivo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get devicesSpaceKeyPending =>
+      'I dispositivi offline riceveranno la nuova chiave quando tornano online.';
+
+  @override
+  String get devicesSpaceWaitingForKey => 'Serve nuova chiave';
+
+  @override
+  String get devicesSpaceRemovedTitle => 'Nessuno spazio';
+
+  @override
+  String get devicesSpaceRemovedMessage =>
+      'Questo dispositivo è stato rimosso o è uscito. La sua cronologia resta qui. Unisciti a uno spazio per sincronizzare di nuovo.';
+
+  @override
+  String get devicesSpaceJoin => 'Unisciti a uno spazio';
+
+  @override
+  String get devicesRemoveFromSpace => 'Rimuovi dallo spazio';
+
+  @override
+  String devicesRemoveDialogTitle(String device) {
+    return 'Rimuovere $device?';
+  }
+
+  @override
+  String get devicesRemoveDialogMessage =>
+      'Verrà rimosso da tutti i tuoi dispositivi e non potrà leggere nulla di ciò che verrà sincronizzato d\'ora in poi.';
+
+  @override
+  String get devicesRemoveNewPassphrase =>
+      'Nuova passphrase di sincronizzazione (facoltativa)';
+
+  @override
+  String get devicesRemoveNewPassphraseHint =>
+      'Il dispositivo rimosso conosce la passphrase attuale. Senza una nuova, aggiungi dispositivi solo tramite invito.';
+
+  @override
+  String get devicesRemoveSignOutOthers =>
+      'Disconnetti gli altri dispositivi dall\'account cloud';
+
+  @override
+  String get devicesPassphraseTooShort => 'Almeno 12 caratteri.';
+
+  @override
+  String get devicesLeaveSpace => 'Esci dallo spazio';
+
+  @override
+  String get devicesLeaveDialogTitle => 'Uscire da questo spazio?';
+
+  @override
+  String get devicesLeaveDialogMessage =>
+      'Gli altri tuoi dispositivi rimuoveranno questo. La sua cronologia resta qui.';
+
+  @override
+  String get devicesLeave => 'Esci';
+
+  @override
+  String get onboardingSpaceTitle => 'I tuoi dispositivi';
+
+  @override
+  String get onboardingSpaceSubtitle =>
+      'Sincronizza gli appunti tra i tuoi dispositivi. Tutto resta cifrato.';
+
+  @override
+  String get onboardingSpaceCreateTitle => 'Crea uno spazio';
+
+  @override
+  String get onboardingSpaceCreateDescription =>
+      'È il mio primo dispositivo con CopyPaste.';
+
+  @override
+  String get onboardingSpaceJoinTitle => 'Unisciti a uno spazio';
+
+  @override
+  String get onboardingSpaceJoinDescription =>
+      'Uso già CopyPaste su un altro dispositivo.';
+
+  @override
+  String get onboardingSpaceLater => 'Più tardi';
+
+  @override
+  String get onboardingReadySpaceCreated =>
+      'Il tuo spazio è pronto. Aggiungi gli altri dispositivi ora o più tardi in Dispositivi.';
+
+  @override
+  String get onboardingReadyJoin =>
+      'Ora conferma il codice mostrato sull\'altro dispositivo.';
+
+  @override
+  String get onboardingAddDeviceNow => 'Aggiungi dispositivo';
+
+  @override
+  String get onboardingJoinNow => 'Unisciti ora';
+
+  @override
+  String get onboardingBadgeWelcome => 'Benvenuto';
+
+  @override
+  String get onboardingBadgeSetup => 'Configurazione';
+
+  @override
+  String get onboardingBadgeDevices => 'Dispositivi';
+
+  @override
+  String get onboardingBadgeReady => 'Pronto';
+
+  @override
+  String get onboardingPairJoinTitle => 'Unisciti al tuo spazio';
+
+  @override
+  String get onboardingPairJoinSubtitle =>
+      'Inserisci il codice o scansiona il codice QR dall\'altro dispositivo. Poi verifica che entrambi i dispositivi mostrino lo stesso codice di verifica.';
+
+  @override
+  String get onboardingPairAddDeviceSubtitle =>
+      'Sull\'altro dispositivo apri CopyPaste e unisciti con questo codice QR o codice. Poi verifica che entrambi i dispositivi mostrino lo stesso codice di verifica.';
+
+  @override
+  String get onboardingPairSkip => 'Salta per ora';
+
+  @override
+  String get onboardingPairInterruptedTitle =>
+      'L\'abbinamento non è stato completato';
+
+  @override
+  String get onboardingPairInterruptedMessage =>
+      'Riprova, oppure continua e abbina più tardi in Dispositivi.';
+
+  @override
+  String onboardingReadyPaired(String device) {
+    return 'Abbinato a $device. Ora gli appunti si sincronizzano tra i due.';
+  }
+
+  @override
+  String get onboardingReadyPairedUnnamed =>
+      'I tuoi dispositivi sono abbinati. Ora gli appunti si sincronizzano tra loro.';
+
+  @override
+  String get onboardingReadyPairLater =>
+      'Puoi abbinare i tuoi dispositivi in qualsiasi momento in Dispositivi.';
+
+  @override
+  String get settingsSectionShortcuts => 'Scorciatoie';
+
+  @override
+  String get settingsSectionShortcutsSummary =>
+      'Scorciatoie da tastiera globali. Disattiva quelle che non usi.';
+
+  @override
+  String get settingsShortcutEnabledLabel => 'Disattiva questa scorciatoia';
+
+  @override
+  String get settingsWelcomeTourTitle => 'Tour di benvenuto';
+
+  @override
+  String get settingsWelcomeTourDescription =>
+      'Ripeti la configurazione iniziale.';
+
+  @override
+  String get settingsWelcomeTourAction => 'Mostra di nuovo';
+
+  @override
+  String get modulesDetails => 'Dettagli';
+
+  @override
+  String get modulesDetailsFeatures => 'Cosa aggiunge';
+
+  @override
+  String get modulesDetailsSearch =>
+      'Trova i ritagli per significato con un modello locale.';
+
+  @override
+  String get modulesDetailsPermissions => 'Autorizzazioni';
+
+  @override
+  String get modulesDetailsPermissionsPending =>
+      'Elencate dopo l’installazione. Le confermi quando attivi il modulo.';
+
+  @override
+  String get modulesDetailsNoPermissions => 'Non usa servizi di CopyPaste.';
+
+  @override
+  String get modulesDetailsInformation => 'Informazioni';
+
+  @override
+  String get modulesDetailsVersion => 'Versione';
+
+  @override
+  String get modulesDetailsSize => 'Dimensione';
+
+  @override
+  String get modulesDetailsRequirements => 'Requisiti';
+
+  @override
+  String get modulesDetailsStatus => 'Stato';
+
+  @override
+  String get errorUnexpected => 'Si è verificato un problema. Riprova.';
+
+  @override
+  String get errorRuntimeUnavailable =>
+      'CopyPaste non è in esecuzione in background. Riavvia l\'app.';
+
+  @override
+  String get errorRuntimeStartFailed =>
+      'CopyPaste non è riuscito ad avviare il servizio in background. Riavvia l\'app.';
+
+  @override
+  String get errorRuntimeStarting =>
+      'CopyPaste si sta ancora avviando. Riprova tra un momento.';
+
+  @override
+  String get errorRuntimeTimeout =>
+      'CopyPaste non ha risposto in tempo. Riprova.';
+
+  @override
+  String get errorRuntimeMismatch =>
+      'CopyPaste è stato aggiornato. Riavvia l\'app per completare.';
+
+  @override
+  String get errorPeerUnreachable =>
+      'Impossibile raggiungere l\'altro dispositivo. Verifica che sia online.';
+
+  @override
+  String get errorPeerVersion =>
+      'L\'altro dispositivo usa una versione incompatibile di CopyPaste. Aggiorna entrambi i dispositivi.';
+
+  @override
+  String get errorRateLimited =>
+      'Troppi tentativi. Attendi un momento e riprova.';
+
+  @override
+  String devicesSyncFailedWith(String devices) {
+    return 'Impossibile sincronizzare con $devices.';
+  }
+
+  @override
+  String get transfersUnavailableTitle =>
+      'Impossibile caricare i trasferimenti';
+
+  @override
+  String get historyTagsLoadFailedTitle => 'Impossibile caricare i tag';
+}

@@ -1,0 +1,1546 @@
+import 'package:flutter/foundation.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import 'app_icon_frame.dart';
+import 'app_motion.dart';
+import 'app_overlays.dart';
+import 'app_appearance.dart';
+import 'app_tokens.dart';
+import 'app_window_material.dart';
+import '../../shared/adaptive_breakpoints.dart';
+
+enum AppSelectVariant {
+  field,
+  toolbar,
+  compactToolbar,
+  primaryAction,
+  inlineAction,
+}
+
+abstract final class AppTheme {
+  static const mode = ThemeMode.system;
+
+  /// Builds an application root with the preferred theme mode and accent,
+  /// rebuilding when either changes; the defaults without [appearance].
+  static Widget withAppearance(
+    AppAppearance? appearance,
+    Widget Function(ThemeMode mode, ThemeData light, ThemeData dark) builder,
+  ) => appearance == null
+      ? builder(mode, light, dark)
+      : ListenableBuilder(
+          listenable: appearance,
+          builder: (context, _) => builder(
+            appearance.themeMode.value,
+            appearance.light,
+            appearance.dark,
+          ),
+        );
+
+  /// The accent the user chose, carried by the color scheme.
+  static Color accent(BuildContext context) =>
+      Theme.of(context).colorScheme.chart5;
+
+  static Color popupBorder(BuildContext context) =>
+      Theme.of(context).colorScheme.foreground.withValues(alpha: 0.18);
+
+  static ThemeData popupTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () =>
+          theme.colorScheme.copyWith(border: () => popupBorder(context)),
+      // Menu items size their icon slot as twice the base gap; the app-wide
+      // gap is too tight for a small icon, so popups use the menu's own.
+      density: () => _popupDensity,
+    );
+  }
+
+  static const _popupDensity = Density(
+    baseContainerPadding: AppSpacing.lg,
+    baseGap: AppIconSize.sm / 2,
+    baseContentPadding: AppSpacing.md,
+  );
+
+  static Widget popupSurface(BuildContext context, {required Widget child}) =>
+      Theme(
+        data: popupTheme(context),
+        child: ComponentTheme<OutlinedContainerTheme>(
+          data: popupSurfaceTheme(context),
+          child: child,
+        ),
+      );
+
+  /// [Command] has no component theme and fixes its own container theme, so
+  /// palettes get the shared popup border and elevation from this wrapper.
+  static Widget commandSurface(BuildContext context, {required Widget child}) =>
+      Theme(
+        data: popupTheme(context),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Theme.of(context).radiusXl),
+            boxShadow: popupSurfaceTheme(context).boxShadow,
+          ),
+          child: child,
+        ),
+      );
+
+  /// A count badge on an icon control, such as a queue length.
+  static final AbstractButtonStyle countBadgeStyle =
+      const ButtonStyle.primary(density: ButtonDensity.dense).copyWith(
+        padding: (context, states, value) =>
+            const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        margin: (context, states, value) => EdgeInsets.zero,
+        textStyle: (context, states, value) => value.copyWith(
+          color: Colors.white,
+          fontSize: AppTypographySize.navigationCompact,
+          fontWeight: FontWeight.w600,
+          height: AppIconSize.sm / AppTypographySize.navigationCompact,
+        ),
+        decoration: (context, states, value) => BoxDecoration(
+          color: accent(context),
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+        ),
+      );
+
+  static const chipInputTheme = ChipInputTheme(
+    spacing: AppSpacing.xs,
+    useChips: true,
+  );
+
+  static const stepperTheme = StepperTheme(
+    size: StepSize.small,
+    variant: StepVariant.circle,
+  );
+
+  static CodeSnippetTheme codeSnippetTheme(BuildContext context) =>
+      CodeSnippetTheme(
+        backgroundColor: Theme.of(context).colorScheme.muted,
+        borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+        // The end inset keeps text clear of the overlaid copy action.
+        padding: const EdgeInsetsDirectional.fromSTEB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.huge,
+          AppSpacing.md,
+        ),
+      );
+
+  static OutlinedContainerTheme popupSurfaceTheme(BuildContext context) =>
+      OutlinedContainerTheme(
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x66000000),
+            blurRadius: AppSpacing.xxl,
+            offset: const Offset(0, AppSpacing.sm),
+          ),
+        ],
+      );
+
+  static double historyToolbarScale(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < AdaptiveBreakpoints.compactOverlay
+      ? AppControlSize.compact / AppControlSize.large
+      : 1;
+
+  static ThemeData calendarTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () => theme.colorScheme.copyWith(
+        secondary: () => theme.colorScheme.primary.withValues(alpha: 0.22),
+        secondaryForeground: () => theme.colorScheme.foreground,
+      ),
+    );
+  }
+
+  /// The leading icon of an [Alert] about a persistent condition the user
+  /// must act on, such as a missing permission. It uses the warning tone:
+  /// destructive red is reserved for failures.
+  static Widget attentionAlertIcon(BuildContext context) => AppIconFrame(
+    child: Icon(
+      LucideIcons.triangleAlert,
+      color: statusColor(context, AppStatusTone.warning),
+    ),
+  );
+
+  static Color statusColor(BuildContext context, AppStatusTone tone) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return switch (tone) {
+      AppStatusTone.muted => theme.colorScheme.mutedForeground,
+      AppStatusTone.error => theme.colorScheme.destructive,
+      AppStatusTone.info =>
+        dark ? AppStatusColor.infoDark : AppStatusColor.infoLight,
+      AppStatusTone.warning =>
+        dark ? AppStatusColor.warningDark : AppStatusColor.warningLight,
+      AppStatusTone.success =>
+        dark ? AppStatusColor.successDark : AppStatusColor.successLight,
+    };
+  }
+
+  static const navigationAccent = Color(0xFF0285FF);
+  static const lightShellSurface = Color(0xFFEDEDED);
+  static const darkShellSurface = Color(0xFF212121);
+  static const lightSidebarSurface = Color(0xFFF9F9F9);
+  static const darkSidebarSurface = Color(0xFF1B1B1B);
+
+  // Window glass: the system material shows through these surfaces only
+  // while [AppWindowMaterial] reports it; otherwise each is the opaque
+  // surface it replaces. Chrome stays clear, while content keeps most of its
+  // fill so body text holds contrast over a bright or busy desktop.
+  static const _glassChromeOpacity = 0.4;
+  static const _glassContentOpacity = 0.72;
+
+  /// The window background under the header and every destination.
+  static Color windowSurface(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AppWindowMaterial.translucentOf(context)
+        ? colors.muted.withValues(alpha: _glassChromeOpacity)
+        : colors.background;
+  }
+
+  /// The application header; null keeps the bar's own surface.
+  static Color? headerSurface(
+    BuildContext context, {
+    required bool unifiedTitleBar,
+  }) {
+    if (AppWindowMaterial.translucentOf(context)) return Colors.transparent;
+    return unifiedTitleBar ? Theme.of(context).colorScheme.muted : null;
+  }
+
+  /// The destination area below the header; null keeps the scaffold's own.
+  static Color? contentSurface(BuildContext context) =>
+      AppWindowMaterial.translucentOf(context)
+      ? Theme.of(
+          context,
+        ).colorScheme.background.withValues(alpha: _glassContentOpacity)
+      : null;
+
+  /// A navigation pane beside content.
+  static Color sidebarSurface(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AppWindowMaterial.translucentOf(context)
+        ? colors.secondary.withValues(alpha: _glassChromeOpacity)
+        : colors.secondary;
+  }
+
+  /// The Quick Paste window.
+  static Color quickPasteSurface(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AppWindowMaterial.translucentOf(context)
+        ? colors.popover.withValues(alpha: _glassContentOpacity)
+        : colors.popover;
+  }
+
+  static const mobileNavigationMargin = EdgeInsets.symmetric(
+    horizontal: AppSpacing.sm,
+    vertical: AppSpacing.sm,
+  );
+
+  static const mobileNavigationPadding = EdgeInsets.all(
+    AppSpacing.xs - mobileNavigationBorderWidth,
+  );
+
+  static final mobileNavigationLabelStyle = _typography.xSmall.copyWith(
+    fontSize: AppTypographySize.navigation,
+    fontWeight: FontWeight.w700,
+    height: AppControlSize.navigationLabelHeight / AppTypographySize.navigation,
+  );
+
+  static TextStyle mobileNavigationTextStyle({
+    required bool selected,
+    double fontSize = AppTypographySize.navigation,
+  }) => mobileNavigationLabelStyle.copyWith(
+    fontSize: fontSize,
+    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+    height: AppControlSize.navigationLabelHeight / fontSize,
+  );
+
+  static ThemeData mobileNavigationTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      scaling: () => 1,
+      typography: () => theme.typography.scale(1 / theme.scaling),
+      enableFeedback: () => false,
+    );
+  }
+
+  static const mobileNavigationSelectionOpacity = 0.09;
+  static const mobileNavigationBorderWidth = 0.4;
+
+  static OutlinedContainerTheme mobileNavigationSurfaceTheme(
+    BuildContext context,
+  ) {
+    final theme = Theme.of(context);
+    return OutlinedContainerTheme(
+      backgroundColor: theme.colorScheme.secondary,
+      surfaceOpacity: 0.76,
+      surfaceBlur: AppSpacing.lg,
+      borderColor: theme.brightness == Brightness.dark
+          ? const Color(0x11FFFFFF)
+          : const Color(0x20000000),
+      borderWidth: mobileNavigationBorderWidth,
+      borderRadius: const BorderRadius.all(
+        Radius.circular(AppRadius.navigation),
+      ),
+      padding: EdgeInsets.zero,
+      boxShadow: [
+        BoxShadow(
+          color: theme.brightness == Brightness.dark
+              ? const Color(0x04FFFFFF)
+              : const Color(0x20000000),
+          blurRadius: AppSpacing.navigationShadowBlur,
+          offset: const Offset(0, AppSpacing.navigationShadowOffset),
+        ),
+      ],
+    );
+  }
+
+  static AbstractButtonStyle mobileNavigationButtonStyle({
+    required bool selected,
+    double? selectionFactor,
+    double horizontalPadding = AppSpacing.lg,
+  }) {
+    final factor = selectionFactor ?? (selected ? 1.0 : 0.0);
+    final padding = EdgeInsets.symmetric(
+      horizontal: horizontalPadding,
+      vertical: AppSpacing.xs,
+    );
+    return (selected
+            ? const ButtonStyle.secondary()
+            : const ButtonStyle.ghost())
+        .withPadding(padding: padding)
+        .withBorderRadius(
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+        )
+        .copyWith(
+          decoration: (context, states, value) {
+            value = _navigationButtonDecoration(context, states, value);
+            if (value is! BoxDecoration) return value;
+            return value.copyWith(color: Colors.transparent);
+          },
+          textStyle: (context, states, value) => value.copyWith(
+            color: Color.lerp(
+              Theme.of(context).colorScheme.foreground,
+              accent(context),
+              factor,
+            ),
+          ),
+          iconTheme: (context, states, value) => value.copyWith(
+            size: AppIconSize.lg,
+            color: Color.lerp(
+              Theme.of(context).colorScheme.foreground,
+              accent(context),
+              factor,
+            ),
+          ),
+        );
+  }
+
+  static BoxDecoration mobileNavigationSelectionDecoration(
+    BuildContext context,
+    double factor,
+  ) => BoxDecoration(
+    color: accent(context).withValues(
+      alpha:
+          mobileNavigationSelectionOpacity *
+          AppMotion.navigationCurve.transform(factor),
+    ),
+    borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+  );
+
+  /// Preserve room for ascenders and descenders inside navigation clipping.
+  static TextStyle navigationTextStyle(BuildContext context) {
+    final typography = Theme.of(context).typography;
+    return typography.large.merge(typography.medium);
+  }
+
+  static final navigationIconButtonStyle = const ButtonStyle.ghostIcon()
+      .copyWith(decoration: _navigationButtonDecoration);
+
+  /// Media that opens a larger view when pressed; the media is its own face.
+  static final mediaButtonStyle = const ButtonStyle.ghost().withPadding(
+    padding: EdgeInsets.zero,
+  );
+
+  static final brandButtonStyle = const ButtonStyle.ghost().withPadding(
+    padding: EdgeInsets.zero,
+  );
+
+  /// One header height on every platform; it grows with the text scale.
+  static double headerHeight(BuildContext context) {
+    final height = controlHeight(context) + AppSpacing.xs * 2;
+    return height < AppControlSize.touch ? AppControlSize.touch : height;
+  }
+
+  /// The header's bottom border; a side drawer's top border hides under it
+  /// instead of doubling it.
+  static const double headerDividerWidth = 1;
+
+  static BoxDecoration headerDecoration(BuildContext context) => BoxDecoration(
+    border: Border(
+      bottom: BorderSide(
+        color: Theme.of(context).colorScheme.border,
+        width: headerDividerWidth,
+      ),
+    ),
+  );
+
+  /// Recolours the header border under the current destination.
+  static BoxDecoration headerNavigationSelectionDecoration(
+    BuildContext context,
+  ) => BoxDecoration(
+    border: Border(bottom: BorderSide(color: accent(context))),
+  );
+
+  static const headerNavigationSelectedWeight = FontWeight.w600;
+
+  /// Header destinations are text; the button only answers hover and focus.
+  static AbstractButtonStyle headerNavigationButtonStyle({
+    required bool selected,
+  }) => const ButtonStyle.ghost().copyWith(
+    decoration: (context, states, value) => _headerControlDecoration(
+      context,
+      states,
+      const BorderRadius.all(Radius.circular(AppRadius.md)),
+    ),
+    textStyle: (context, states, value) {
+      final colors = Theme.of(context).colorScheme;
+      final emphasized =
+          selected ||
+          states.contains(WidgetState.hovered) ||
+          states.contains(WidgetState.focused);
+      return value.copyWith(
+        color: emphasized ? colors.foreground : colors.mutedForeground,
+        fontWeight: selected ? headerNavigationSelectedWeight : null,
+      );
+    },
+  );
+
+  /// Lets an icon control carry text without leaving the shared height.
+  static AbstractButtonStyle headerActionButtonStyle(ButtonStyle style) =>
+      style.copyWith(
+        padding: (context, states, _) => EdgeInsets.symmetric(
+          horizontal: _iconInset(context, style, states),
+        ),
+      );
+
+  /// A cell of the status group: no surface of its own, the group's corners,
+  /// and the header's hover and focus treatment.
+  static final AbstractButtonStyle headerStatusCellStyle =
+      headerActionButtonStyle(const ButtonStyle.ghostIcon()).copyWith(
+        decoration: (context, states, value) =>
+            _headerControlDecoration(context, states, BorderRadius.zero),
+      );
+
+  /// Hover fills a header control; keyboard focus outlines it.
+  static BoxDecoration _headerControlDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    BorderRadius radius,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color:
+          states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.pressed)
+          ? colors.border
+          : null,
+      border: Border.all(
+        color: states.contains(WidgetState.focused)
+            ? colors.primary
+            : Colors.transparent,
+      ),
+      borderRadius: radius,
+    );
+  }
+
+  /// One surface for the status cells, matching the header's icon controls.
+  static BoxDecoration headerStatusGroupDecoration(BuildContext context) {
+    final theme = Theme.of(context);
+    return BoxDecoration(
+      color: theme.colorScheme.secondary,
+      borderRadius: BorderRadius.circular(theme.radiusMd),
+    );
+  }
+
+  static BoxDecoration headerStatusDividerDecoration(BuildContext context) =>
+      BoxDecoration(
+        border: BorderDirectional(
+          start: BorderSide(color: Theme.of(context).colorScheme.border),
+        ),
+      );
+
+  static BoxDecoration historyPinnedDropDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: colors.primary.withValues(alpha: 0.12),
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
+  static final AbstractButtonStyle historyToolbarIconStyle =
+      const ButtonStyle.secondaryIcon().copyWith(
+        padding: _historyToolbarIconPadding,
+        decoration: softSelectDecoration,
+      );
+
+  static final AbstractButtonStyle historyToolbarDestructiveIconStyle =
+      const ButtonStyle.destructiveIcon().copyWith(
+        padding: _historyToolbarIconPadding,
+      );
+
+  static final AbstractButtonStyle inlineIconButtonStyle =
+      const ButtonStyle.ghostIcon(
+        density: ButtonDensity.iconDense,
+      ).withPadding(padding: const EdgeInsets.all(AppSpacing.xs));
+
+  static final AbstractButtonStyle inputFeatureButtonStyle =
+      const ButtonStyle.ghostIcon().withPadding(padding: EdgeInsets.zero);
+
+  static EdgeInsetsGeometry _historyToolbarIconPadding(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) => EdgeInsets.all(
+    (controlHeight(context, minimum: AppControlSize.large) - AppIconSize.md) /
+        2,
+  );
+
+  static double controlHeight(
+    BuildContext context, {
+    double minimum = AppControlSize.regular,
+  }) {
+    final lineHeight = _controlLineHeight(context);
+    final height = lineHeight.ceilToDouble() + AppSpacing.sm * 2;
+    return height < minimum ? minimum : height;
+  }
+
+  /// Where a text field's content starts inside its box.
+  static const fieldContentInset = AppSpacing.md;
+
+  static EdgeInsets controlFieldPadding(
+    BuildContext context, {
+    double horizontal = fieldContentInset,
+    double minimum = AppControlSize.regular,
+  }) {
+    final lineHeight = _controlLineHeight(context).ceilToDouble();
+    return EdgeInsets.symmetric(
+      horizontal: horizontal,
+      vertical: (controlHeight(context, minimum: minimum) - lineHeight) / 2,
+    );
+  }
+
+  static AbstractButtonStyle controlButtonStyle(ButtonStyle style) {
+    if (style.density != ButtonDensity.icon) return style;
+    return style.copyWith(
+      padding: (context, states, _) =>
+          EdgeInsets.all(_iconInset(context, style, states)),
+    );
+  }
+
+  static double _iconInset(
+    BuildContext context,
+    ButtonStyle style,
+    Set<WidgetState> states,
+  ) {
+    final iconSize =
+        style.iconTheme(context, states).size ??
+        Theme.of(context).iconTheme.small.size ??
+        AppIconSize.sm;
+    return (controlHeight(context) - iconSize) / 2;
+  }
+
+  static double _controlLineHeight(BuildContext context) {
+    final textStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(const ButtonStyle.primary().textStyle(context, const {}));
+    return MediaQuery.textScalerOf(context).scale(textStyle.fontSize!) *
+        (textStyle.height ?? 1);
+  }
+
+  static BoxDecoration historyFileDropDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
+  static BoxDecoration historyPinnedDragDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: colors.popover,
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
+  static final historySectionButtonStyle = const ButtonStyle.ghost()
+      .withPadding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+      )
+      .copyWith(
+        decoration: _historySectionDecoration,
+        iconTheme: (context, states, value) => value.copyWith(
+          color: Theme.of(context).colorScheme.mutedForeground,
+        ),
+      );
+
+  /// The toolbar's soft surface with the shared border; keyboard focus is
+  /// shown by the shared focus ring.
+  static Decoration _historySectionDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    final decoration = softSelectDecoration(context, states, value);
+    if (decoration is! BoxDecoration) return decoration;
+    return decoration.copyWith(
+      border: Border.all(color: Theme.of(context).colorScheme.border),
+    );
+  }
+
+  /// Uppercase caption of a History group band; the label is [emphasized].
+  static TextStyle historySectionTextStyle(
+    BuildContext context, {
+    required bool emphasized,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return historyMetadataTextStyle(context).copyWith(
+      letterSpacing: AppTypographySize.captionLetterSpacing,
+      fontWeight: emphasized ? FontWeight.w600 : FontWeight.normal,
+      color: emphasized ? colors.foreground : colors.mutedForeground,
+    );
+  }
+
+  static AbstractButtonStyle historyClipButtonStyle({required bool selected}) =>
+      (selected ? const ButtonStyle.secondary() : const ButtonStyle.ghost())
+          .copyWith(
+            padding: (context, states, value) => value.subtract(
+              const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+            ),
+          );
+
+  static AbstractButtonStyle historyDragHandleStyle({
+    required bool dragging,
+    required bool touch,
+  }) => const ButtonStyle.secondaryIcon(density: ButtonDensity.iconDense)
+      .copyWith(
+        padding: (context, states, value) => touch
+            ? const EdgeInsets.all((AppControlSize.touch - AppIconSize.sm) / 2)
+            : value,
+        mouseCursor: (context, states, value) =>
+            states.contains(WidgetState.disabled)
+            ? value
+            : dragging
+            ? SystemMouseCursors.grabbing
+            : SystemMouseCursors.grab,
+      );
+
+  static TextStyle clipboardMenuTextStyle(BuildContext context) =>
+      Theme.of(context).typography.small.copyWith(
+        fontSize: AppTypographySize.menu,
+        fontWeight: FontWeight.normal,
+        leadingDistribution: TextLeadingDistribution.even,
+      );
+
+  static TextStyle clipboardMetadataTextStyle(BuildContext context) =>
+      clipboardMenuTextStyle(
+        context,
+      ).copyWith(fontSize: AppTypographySize.menuMetadata);
+
+  static TextStyle deviceCardTextStyle(
+    BuildContext context, {
+    bool muted = false,
+  }) {
+    final theme = Theme.of(context);
+    return theme.typography.xSmall.copyWith(
+      color: muted ? theme.colorScheme.mutedForeground : null,
+    );
+  }
+
+  static TextStyle deviceMetadataTextStyle(BuildContext context) =>
+      deviceCardTextStyle(
+        context,
+        muted: true,
+      ).copyWith(fontSize: AppTypographySize.menuMetadata);
+
+  /// A small badge tinted with [tone]'s status color, for levels and states.
+  static AbstractButtonStyle statusBadgeStyle(
+    BuildContext context,
+    AppStatusTone tone,
+  ) {
+    final color = statusColor(context, tone);
+    final background = Color.alphaBlend(
+      color.withValues(alpha: 0.14),
+      Theme.of(context).colorScheme.background,
+    );
+    return const ButtonStyle.secondary(
+      size: ButtonSize.small,
+      density: ButtonDensity.dense,
+      shape: ButtonShape.rectangle,
+    ).copyWith(
+      textStyle: (context, states, value) =>
+          value.copyWith(color: color, fontWeight: FontWeight.w500),
+      decoration: (context, states, value) =>
+          value is BoxDecoration ? value.copyWith(color: background) : value,
+    );
+  }
+
+  static AlertTheme statusAlertTheme(BuildContext context, AppStatusTone tone) {
+    final theme = Theme.of(context);
+    return AlertTheme(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      backgroundColor: Color.alphaBlend(
+        statusColor(context, tone).withValues(alpha: 0.06),
+        theme.colorScheme.background,
+      ),
+    );
+  }
+
+  static TextStyle inspectorTextStyle(
+    BuildContext context, {
+    bool compact = false,
+  }) => DefaultTextStyle.of(context).style.merge(
+    compact
+        ? clipboardMetadataTextStyle(
+            context,
+          ).copyWith(fontSize: AppTypographySize.inspectorCompactMetadata)
+        : Theme.of(context).typography.xSmall.copyWith(
+            fontSize: AppTypographySize.inspectorMetadata,
+          ),
+  );
+
+  static const inspectorCellPadding = EdgeInsets.all(AppSpacing.sm);
+
+  static const inspectorCellAlignment = Alignment.centerLeft;
+
+  static TextStyle historyMetadataTextStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    return DefaultTextStyle.of(context).style
+        .merge(theme.typography.xSmall)
+        .copyWith(
+          fontSize: AppTypographySize.historyMetadata,
+          leadingDistribution: TextLeadingDistribution.even,
+          color: theme.colorScheme.mutedForeground,
+        );
+  }
+
+  static StrutStyle historyMetadataStrutStyle(BuildContext context) =>
+      StrutStyle.fromTextStyle(historyMetadataTextStyle(context));
+
+  static const clipboardSearchFieldTheme = TextFieldTheme(
+    filled: true,
+    border: Border.fromBorderSide(BorderSide.none),
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.sm)),
+    padding: EdgeInsets.symmetric(
+      horizontal: AppSpacing.xs,
+      vertical: AppSpacing.xs,
+    ),
+  );
+
+  static const tabsTheme = TabsTheme(
+    containerPadding: EdgeInsets.all(AppSpacing.xs),
+    tabPadding: EdgeInsets.symmetric(
+      horizontal: AppSpacing.md,
+      vertical: AppSpacing.sm,
+    ),
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.md)),
+  );
+
+  static const clipboardInspectorCardTheme = CardTheme(
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.lg)),
+  );
+
+  static const deviceListRowTheme = BasicTheme(
+    leadingAlignment: Alignment.center,
+    trailingAlignment: Alignment.center,
+    contentSpacing: AppSpacing.md,
+    padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+  );
+
+  static const moduleSettingsRowTheme = BasicTheme(
+    leadingAlignment: Alignment.center,
+    trailingAlignment: Alignment.center,
+    titleAlignment: Alignment.centerLeft,
+    contentSpacing: AppSpacing.md,
+    padding: EdgeInsets.zero,
+  );
+
+  static const moduleSettingsActionAlignment = Alignment.center;
+
+  /// Scopes out the shared focus ring where controls outline themselves on
+  /// focus, so keyboard focus keeps one cue.
+  static ThemeData ownFocusCueTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () =>
+          theme.colorScheme.copyWith(ring: () => Colors.transparent),
+    );
+  }
+
+  /// The field keeps typing focus while the list selection is the focus cue,
+  /// so it draws no ring of its own.
+  static ThemeData clipboardSearchTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () => theme.colorScheme.copyWith(
+        input: () => theme.colorScheme.accent,
+        ring: () => Colors.transparent,
+      ),
+    );
+  }
+
+  static final spoilerButtonStyle = const ButtonStyle.ghost().copyWith(
+    padding: (context, states, value) => EdgeInsets.zero,
+    margin: (context, states, value) => EdgeInsets.zero,
+    decoration: _navigationButtonDecoration,
+    textStyle: (context, states, value) => DefaultTextStyle.of(context).style,
+  );
+
+  static AbstractButtonStyle clipboardMenuButtonStyle({bool selected = false}) {
+    return const ButtonStyle.ghost().copyWith(
+      padding: (context, states, value) => const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: AppSpacing.xs,
+      ),
+      textStyle: (context, states, value) =>
+          clipboardMenuTextStyle(context).copyWith(
+            color: value.color,
+            leadingDistribution: TextLeadingDistribution.even,
+          ),
+      decoration: (context, states, value) {
+        if (value is! BoxDecoration) return value;
+        return value.copyWith(
+          border: const Border.fromBorderSide(BorderSide.none),
+          color: selected ? Theme.of(context).colorScheme.accent : value.color,
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.sm)),
+        );
+      },
+    );
+  }
+
+  static const selectChipStyle = ButtonStyle.secondary();
+
+  /// Defines field and action variants without changing popup row styling.
+  static SelectTheme selectTheme(
+    BuildContext context, {
+    AppSelectVariant variant = AppSelectVariant.field,
+    Iterable<String> labels = const [],
+    Anchor? anchor,
+  }) {
+    final toolbar =
+        variant == AppSelectVariant.toolbar ||
+        variant == AppSelectVariant.compactToolbar;
+    final compact = variant == AppSelectVariant.compactToolbar;
+    final action = variant == AppSelectVariant.primaryAction;
+    final inline = variant == AppSelectVariant.inlineAction;
+    double? popupWidth;
+    if (toolbar || inline) {
+      final theme = Theme.of(context);
+      final textStyle = DefaultTextStyle.of(context).style
+          .merge(theme.typography.sans)
+          .merge(theme.typography.small)
+          .merge(theme.typography.normal);
+      var widestLabel = 0.0;
+      for (final label in labels) {
+        final painter = TextPainter(
+          text: TextSpan(text: label, style: textStyle),
+          maxLines: 1,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+        if (painter.width > widestLabel) widestLabel = painter.width;
+        painter.dispose();
+      }
+      // Reserve space for a leading icon, selection mark and menu padding.
+      popupWidth =
+          widestLabel.ceilToDouble() +
+          AppSpacing.xxxl +
+          AppSpacing.massive * theme.scaling;
+    }
+    final actionStyle = inline
+        ? inlineIconButtonStyle
+        : actionButtonStyle(const ButtonStyle.primaryIcon());
+    return SelectTheme(
+      adaptiveOverlay: false,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+      popupConstraints: BoxConstraints(
+        minWidth: popupWidth ?? 0,
+        maxWidth: popupWidth ?? double.infinity,
+        maxHeight: AppOverlaySize.selectMaxHeight,
+      ),
+      overlayConfiguration: AppOverlays.selectPopoverConfiguration(
+        context,
+        anchor: anchor,
+        // Options never wrap: the popup is at least as wide as its anchor
+        // and grows to the widest option.
+        widthConstraint: action || inline
+            ? PopoverConstraint.intrinsic
+            : PopoverConstraint.anchorMinSize,
+      ),
+      padding: action || inline
+          ? actionStyle.padding(context, const {})
+          : controlFieldPadding(
+              context,
+              horizontal: compact
+                  ? AppSpacing.xs
+                  : toolbar
+                  ? AppSpacing.sm
+                  : AppSpacing.md,
+              minimum: toolbar ? AppControlSize.large : AppControlSize.regular,
+            ),
+      decoration: action || inline
+          ? (context, states, value) => actionStyle.decoration(context, states)
+          : softSelectDecoration,
+    );
+  }
+
+  static const settingsGroupCardTheme = CardTheme(
+    padding: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+  );
+
+  static const settingsRowPadding = EdgeInsets.all(AppSpacing.lg);
+
+  /// Space between blocks inside a settings row or group slot: a row's copy
+  /// and its control, or notices that follow each other.
+  static const settingsBlockSpacing = AppSpacing.md;
+
+  /// Space between settings navigation rows, and between the search field
+  /// and the first row; it is also the room for that row's focus ring.
+  static const settingsNavigationSpacing = focusRingInset;
+
+  /// Space between a settings navigation row's icon and its label.
+  static const settingsNavigationIconSpacing = AppSpacing.md;
+
+  /// The settings search field above the navigation rows.
+  static const settingsSearchPadding = EdgeInsets.fromLTRB(
+    AppSpacing.lg,
+    AppSpacing.lg,
+    AppSpacing.lg,
+    AppSpacing.zero,
+  );
+
+  /// Settings navigation starts its rows and their content where the search
+  /// field starts its box and its content.
+  static const settingsNavigationPadding = EdgeInsets.fromLTRB(
+    AppSpacing.lg,
+    settingsNavigationSpacing,
+    AppSpacing.lg,
+    AppSpacing.lg,
+  );
+
+  /// Separates the compact navigation rows by the same space as the gap
+  /// under the search field, with the rule centered in it.
+  static const settingsNavigationDividerTheme = DividerTheme(
+    height: settingsNavigationSpacing,
+  );
+
+  static final settingsNavigationButtonStyle = const ButtonStyle.ghost()
+      .copyWith(
+        decoration: _navigationButtonDecoration,
+        padding: _settingsNavigationButtonPadding,
+      );
+
+  // The navigation accent reads on every surface below it, window glass
+  // included; a pane row needs more of it than the floating mobile pill.
+  static const _sidebarSelectionOpacity = 0.2;
+
+  static final settingsNavigationSelectedButtonStyle = const ButtonStyle.ghost()
+      .copyWith(
+        decoration: (context, states, value) {
+          final decoration = _navigationButtonDecoration(
+            context,
+            states,
+            value,
+          );
+          if (decoration is! BoxDecoration) return decoration;
+          return decoration.copyWith(
+            color: accent(context).withValues(alpha: _sidebarSelectionOpacity),
+          );
+        },
+        padding: _settingsNavigationButtonPadding,
+      );
+
+  static EdgeInsetsGeometry _settingsNavigationButtonPadding(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) => EdgeInsets.symmetric(
+    horizontal: fieldContentInset,
+    vertical: value.vertical / 2,
+  );
+
+  static final settingsCategoryButtonStyle = const ButtonStyle.ghost().copyWith(
+    decoration: _navigationButtonDecoration,
+    padding: (context, states, value) => EdgeInsets.symmetric(
+      horizontal: fieldContentInset,
+      vertical: settingsRowPadding.top,
+    ),
+  );
+
+  static OutlinedContainerTheme settingsRowTheme(
+    BuildContext context, {
+    required bool highlighted,
+  }) => OutlinedContainerTheme(
+    backgroundColor: highlighted
+        ? Theme.of(context).colorScheme.accent
+        : Colors.transparent,
+    borderStyle: BorderStyle.none,
+    borderWidth: 0,
+    borderRadius: BorderRadius.zero,
+    padding: settingsRowPadding,
+  );
+
+  static const switchTrackRadius = AppRadius.xs;
+  static const _switchThumbRadius = AppRadius.xs / 2;
+  static const _switchWellOpacity = 0.18;
+  static const _switchOutlineOpacity = 0.5;
+
+  /// Squares the track and keeps the off well visible on every row surface.
+  /// Checkboxes match the application's icon and control scale rather than
+  /// the library's smaller default.
+  static const checkboxTheme = CheckboxTheme(
+    size: AppIconSize.md,
+    gap: AppSpacing.sm,
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.sm)),
+  );
+
+  static SwitchTheme switchTheme(BuildContext context) => SwitchTheme(
+    borderRadius: const BorderRadius.all(Radius.circular(switchTrackRadius)),
+    inactiveColor: Theme.of(
+      context,
+    ).colorScheme.foreground.withValues(alpha: _switchWellOpacity),
+  );
+
+  /// The stock switch takes its thumb radius and its disabled track fill from
+  /// the ambient theme only, so both are scoped to the control here; the
+  /// disabled track is outlined by the switch marks instead of filled.
+  static ThemeData switchControlTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      radius: () => theme.radius * _switchThumbRadius / theme.radiusLg,
+      colorScheme: () =>
+          theme.colorScheme.copyWith(muted: () => Colors.transparent),
+    );
+  }
+
+  /// Marks drawn over the track: on bar, off ring, off outline, disabled dash.
+  static ({Color on, Color off, Color outline, Color disabled})
+  switchMarkColors(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return (
+      on: colors.primaryForeground,
+      off: colors.mutedForeground,
+      outline: colors.foreground.withValues(alpha: _switchOutlineOpacity),
+      disabled: colors.mutedForeground,
+    );
+  }
+
+  static TextStyle switchStateTextStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.typography.xSmall.copyWith(
+      color: theme.colorScheme.mutedForeground,
+    );
+  }
+
+  /// The height a scale accepts touches in. The stock slider keeps its
+  /// compact look; touch screens get a finger-sized band around it.
+  static double? stopScaleHitHeight() =>
+      defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS
+      ? AppControlSize.touch
+      : null;
+
+  /// A code people read on one device and type on another.
+  static TextStyle pairingCodeTextStyle(BuildContext context) {
+    final typography = Theme.of(context).typography;
+    return typography.h2
+        .merge(typography.mono)
+        .copyWith(letterSpacing: AppTypographySize.codeLetterSpacing);
+  }
+
+  /// A network address people may type on another device.
+  static TextStyle pairingAddressTextStyle(BuildContext context) {
+    final typography = Theme.of(context).typography;
+    return typography.large.merge(typography.mono);
+  }
+
+  static TextStyle stopScaleLabelStyle(BuildContext context) =>
+      switchStateTextStyle(context);
+
+  // The library draws every keyboard focus ring from `ring` at half opacity,
+  // 3 px wide, outside the control. Each value is the calmest foreground that
+  // still keeps 3:1 on every surface; light has no room below full strength.
+  static const _lightFocusRing = Color(0xFF1A1C1F);
+  static const _darkFocusRing = Color(0xD4DFDFDF);
+
+  /// Room a scroll view leaves around controls at its edge for that ring.
+  static const focusRingInset = AppSpacing.xs;
+
+  static const _lightColors = ColorScheme(
+    brightness: Brightness.light,
+    background: Color(0xFFFFFFFF),
+    foreground: Color(0xFF1A1C1F),
+    card: Color(0xFFFFFFFF),
+    cardForeground: Color(0xFF1A1C1F),
+    popover: Color(0xFFFFFFFF),
+    popoverForeground: Color(0xFF1A1C1F),
+    primary: Color(0xFF1A1C1F),
+    primaryForeground: Color(0xFFFFFFFF),
+    secondary: lightSidebarSurface,
+    secondaryForeground: Color(0xFF1A1C1F),
+    muted: lightShellSurface,
+    mutedForeground: Color(0xFF5D5D5D),
+    accent: Color(0xFFEDEDED),
+    accentForeground: Color(0xFF1A1C1F),
+    destructive: Color(0xFFE02E2A),
+    border: Color(0x141A1C1F),
+    input: Color(0xFFEDEDED),
+    ring: _lightFocusRing,
+    chart1: Color(0xFFFA423E),
+    chart2: Color(0xFF04B84C),
+    chart3: Color(0xFFFB6A22),
+    chart4: Color(0xFF924FF7),
+    chart5: navigationAccent,
+  );
+
+  static const _darkColors = ColorScheme(
+    brightness: Brightness.dark,
+    background: Color(0xFF181818),
+    foreground: Color(0xFFDFDFDF),
+    card: Color(0xFF181818),
+    cardForeground: Color(0xFFDFDFDF),
+    popover: darkShellSurface,
+    popoverForeground: Color(0xFFDFDFDF),
+    primary: Color(0xFFDFDFDF),
+    primaryForeground: Color(0xFF181818),
+    secondary: darkSidebarSurface,
+    secondaryForeground: Color(0xFFFFFFFF),
+    muted: darkShellSurface,
+    mutedForeground: Color(0xFFAFAFAF),
+    accent: Color(0xFF282828),
+    accentForeground: Color(0xFFFFFFFF),
+    destructive: Color(0xFFE02E2A),
+    border: Color(0x14DFDFDF),
+    input: darkShellSurface,
+    ring: _darkFocusRing,
+    chart1: Color(0xFFFA423E),
+    chart2: Color(0xFF04B84C),
+    chart3: Color(0xFFFB6A22),
+    chart4: Color(0xFF924FF7),
+    chart5: navigationAccent,
+  );
+
+  static final _typography = const Typography.geist().copyWith(
+    sans: () =>
+        const TextStyle(leadingDistribution: TextLeadingDistribution.even),
+    mono: () => const TextStyle(
+      fontFamily: 'monospace',
+      leadingDistribution: TextLeadingDistribution.even,
+    ),
+    xSmall: () => const TextStyle(fontSize: 12, height: 4 / 3),
+    small: () => const TextStyle(fontSize: 14, height: 10 / 7),
+    base: () => const TextStyle(
+      fontSize: 14,
+      height: 10 / 7,
+      leadingDistribution: TextLeadingDistribution.even,
+    ),
+    large: () => const TextStyle(fontSize: 16, height: 1.5),
+    xLarge: () => const TextStyle(fontSize: 18, height: 4 / 3),
+    x2Large: () => const TextStyle(fontSize: 20, height: 1.3),
+    x3Large: () => const TextStyle(fontSize: 24, height: 4 / 3),
+    x4Large: () => const TextStyle(fontSize: 30, height: 1.2),
+    h1: () => const TextStyle(
+      fontSize: 24,
+      height: 4 / 3,
+      fontWeight: FontWeight.w600,
+    ),
+    h2: () =>
+        const TextStyle(fontSize: 20, height: 1.3, fontWeight: FontWeight.w600),
+    h3: () => const TextStyle(
+      fontSize: 18,
+      height: 4 / 3,
+      fontWeight: FontWeight.w600,
+    ),
+    h4: () =>
+        const TextStyle(fontSize: 16, height: 1.5, fontWeight: FontWeight.w600),
+    p: () => const TextStyle(fontSize: 14, height: 10 / 7),
+    lead: () => const TextStyle(fontSize: 18, height: 4 / 3),
+    textLarge: () =>
+        const TextStyle(fontSize: 16, height: 1.5, fontWeight: FontWeight.w600),
+    textSmall: () => const TextStyle(
+      fontSize: 14,
+      height: 10 / 7,
+      fontWeight: FontWeight.w500,
+    ),
+    textMuted: () => const TextStyle(fontSize: 14, height: 10 / 7),
+    inlineCode: () => const TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 12,
+      height: 4 / 3,
+      fontWeight: FontWeight.w500,
+    ),
+  );
+
+  static const _iconTheme = IconThemeProperties(
+    xSmall: IconThemeData(size: AppIconSize.xs),
+    small: IconThemeData(size: AppIconSize.sm),
+    medium: IconThemeData(size: AppIconSize.md),
+    large: IconThemeData(size: AppIconSize.lg),
+    xLarge: IconThemeData(size: AppIconSize.xl),
+    x3Large: IconThemeData(size: AppIconSize.state),
+    x4Large: IconThemeData(size: AppIconSize.hero),
+  );
+
+  static const _density = Density(
+    baseContainerPadding: AppSpacing.lg,
+    baseGap: AppSpacing.xs,
+    baseContentPadding: AppSpacing.md,
+  );
+
+  static const _primaryButtonTheme = PrimaryButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _secondaryButtonTheme = SecondaryButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _outlineButtonTheme = OutlineButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _ghostButtonTheme = GhostButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _linkButtonTheme = LinkButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _textButtonTheme = TextButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _destructiveButtonTheme = DestructiveButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _fixedButtonTheme = FixedButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _menuButtonTheme = MenuButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _menubarButtonTheme = MenubarButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _mutedButtonTheme = MutedButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static const _cardButtonTheme = CardButtonTheme(
+    padding: _buttonPadding,
+    textStyle: _buttonTextStyle,
+    iconTheme: _buttonIconTheme,
+    margin: _buttonMargin,
+  );
+
+  static final light = lightWith(navigationAccent);
+
+  static final dark = darkWith(navigationAccent);
+
+  static ThemeData lightWith(Color accent) => ThemeData(
+    colorScheme: _lightColors.copyWith(chart5: () => accent),
+    typography: _typography,
+    iconTheme: _iconTheme,
+    radius: 8 / 9,
+    density: _density,
+  );
+
+  static ThemeData darkWith(Color accent) => ThemeData.dark(
+    colorScheme: _darkColors.copyWith(chart5: () => accent),
+    typography: _typography,
+    iconTheme: _iconTheme,
+    radius: 8 / 9,
+    density: _density,
+  );
+
+  /// Installs shared stock shadcn component styling for every app surface.
+  static Widget builder(BuildContext context, Widget? child) {
+    final cardTheme = CardTheme(
+      duration: AppMotion.resolve(context, AppMotion.quick),
+    );
+    final tooltipTheme = TooltipTheme(
+      surfaceOpacity: 1,
+      surfaceBlur: 0,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      backgroundColor: Theme.of(context).colorScheme.primary,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.sm)),
+    );
+    const drawerTheme = DrawerTheme(
+      surfaceOpacity: 1,
+      surfaceBlur: 0,
+      barrierColor: AppOverlays.scrimColor,
+      showDragHandle: true,
+      dragHandleSize: Size(
+        AppOverlaySize.dragHandleWidth,
+        AppOverlaySize.dragHandleHeight,
+      ),
+    );
+    final toastTheme = ToastTheme(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      expandingCurve: AppMotion.enterCurve,
+      expandingDuration: AppMotion.resolve(context, AppMotion.standard),
+      spacing: AppSpacing.sm,
+      toastConstraints: const BoxConstraints(
+        maxWidth: AppOverlaySize.toastMaxWidth,
+      ),
+    );
+    final buttonThemedChild = ComponentTheme<PrimaryButtonTheme>(
+      data: _primaryButtonTheme,
+      child: ComponentTheme<SecondaryButtonTheme>(
+        data: _secondaryButtonTheme,
+        child: ComponentTheme<OutlineButtonTheme>(
+          data: _outlineButtonTheme,
+          child: ComponentTheme<GhostButtonTheme>(
+            data: _ghostButtonTheme,
+            child: ComponentTheme<LinkButtonTheme>(
+              data: _linkButtonTheme,
+              child: ComponentTheme<TextButtonTheme>(
+                data: _textButtonTheme,
+                child: ComponentTheme<DestructiveButtonTheme>(
+                  data: _destructiveButtonTheme,
+                  child: ComponentTheme<FixedButtonTheme>(
+                    data: _fixedButtonTheme,
+                    child: ComponentTheme<MenuButtonTheme>(
+                      data: _menuButtonTheme,
+                      child: ComponentTheme<MenubarButtonTheme>(
+                        data: _menubarButtonTheme,
+                        child: ComponentTheme<MutedButtonTheme>(
+                          data: _mutedButtonTheme,
+                          child: ComponentTheme<CardButtonTheme>(
+                            data: _cardButtonTheme,
+                            child: ComponentTheme<CardTheme>(
+                              data: cardTheme,
+                              child: ComponentTheme<DrawerTheme>(
+                                data: drawerTheme,
+                                child: ComponentTheme<ToastTheme>(
+                                  data: toastTheme,
+                                  child: child ?? const SizedBox.shrink(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return ComponentTheme<TooltipTheme>(
+      data: tooltipTheme,
+      child: ComponentTheme<TextFieldTheme>(
+        data: TextFieldTheme(
+          filled: true,
+          border: const Border.fromBorderSide(BorderSide.none),
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+          padding: controlFieldPadding(context),
+        ),
+        child: ComponentTheme<ChipTheme>(
+          data: const ChipTheme(
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          ),
+          child: ComponentTheme<SelectTheme>(
+            data: selectTheme(context),
+            child: ComponentTheme<InputOTPTheme>(
+              data: const InputOTPTheme(
+                spacing: AppSpacing.sm,
+                height: AppControlSize.regular,
+              ),
+              child: ComponentTheme<TabsTheme>(
+                data: tabsTheme,
+                child: ComponentTheme<SwitchTheme>(
+                  data: switchTheme(context),
+                  child: ComponentTheme<ChipInputTheme>(
+                    data: chipInputTheme,
+                    child: ComponentTheme<StepperTheme>(
+                      data: stepperTheme,
+                      child: ComponentTheme<CodeSnippetTheme>(
+                        data: codeSnippetTheme(context),
+                        child: ComponentTheme<CheckboxTheme>(
+                          data: checkboxTheme,
+                          child: buttonThemedChild,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static EdgeInsetsGeometry _buttonPadding(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) {
+    return const EdgeInsets.symmetric(
+      horizontal: AppSpacing.md,
+      vertical: AppSpacing.sm,
+    );
+  }
+
+  static TextStyle _buttonTextStyle(
+    BuildContext context,
+    Set<WidgetState> states,
+    TextStyle value,
+  ) {
+    final shared = Theme.of(context).typography.textSmall;
+    return value.copyWith(
+      fontFamily: shared.fontFamily,
+      fontFamilyFallback: shared.fontFamilyFallback,
+      fontSize: shared.fontSize,
+      fontWeight: shared.fontWeight,
+      height: shared.height,
+      leadingDistribution: TextLeadingDistribution.even,
+    );
+  }
+
+  static IconThemeData _buttonIconTheme(
+    BuildContext context,
+    Set<WidgetState> states,
+    IconThemeData value,
+  ) {
+    return value.copyWith(size: AppIconSize.sm);
+  }
+
+  /// Adds the shared border only to an explicitly marked action button.
+  static AbstractButtonStyle actionButtonStyle(AbstractButtonStyle style) =>
+      (style is ButtonStyle ? controlButtonStyle(style) : style).copyWith(
+        decoration: actionButtonDecoration,
+      );
+
+  /// Dialog footer actions share a touch-sized minimum on Android.
+  static AbstractButtonStyle dialogButtonStyle(ButtonStyle style) =>
+      actionButtonStyle(style).copyWith(
+        padding: (context, states, value) => controlFieldPadding(
+          context,
+          minimum: defaultTargetPlatform == TargetPlatform.android
+              ? AppControlSize.touch
+              : AppControlSize.regular,
+        ),
+      );
+
+  static Decoration actionButtonDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    if (value is! BoxDecoration) return value;
+    return value.copyWith(
+      border: Border.all(
+        color: Theme.of(context).colorScheme.border,
+        strokeAlign: BorderSide.strokeAlignCenter,
+      ),
+    );
+  }
+
+  static Decoration _navigationButtonDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    if (value is! BoxDecoration) return value;
+    return value.copyWith(border: const Border.fromBorderSide(BorderSide.none));
+  }
+
+  static EdgeInsetsGeometry _buttonMargin(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) {
+    return EdgeInsets.zero;
+  }
+
+  /// A search field among soft controls takes their surface; the stock
+  /// filled field is a step lighter than the buttons beside it.
+  static BoxDecoration searchFieldDecoration(BuildContext context) =>
+      BoxDecoration(
+        color: Theme.of(context).colorScheme.secondary,
+        borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+      );
+
+  /// Page buttons a pager shows at once.
+  static const paginationMaxPages = 5;
+
+  static Decoration softSelectDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    final surface = states.contains(WidgetState.pressed)
+        ? colors.accent
+        : states.contains(WidgetState.hovered)
+        ? colors.muted
+        : colors.secondary;
+    return BoxDecoration(
+      color: surface,
+      border: Border.fromBorderSide(BorderSide.none),
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+    );
+  }
+}

@@ -1,0 +1,83 @@
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-linux-android" },
+]
+
+[advisories]
+db-path = "~/.cargo/cargo-deny-advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+version = 2
+# zbus 5 and secret-service 5 still pull the standalone zvariant crates that
+# were merged into zbus 6. secret-service's zbus 6 migration is pending
+# (open-source-cooperative/secret-service-rs#122). Reject direct unmaintained
+# dependencies while retaining vulnerability and unsoundness checks for the
+# entire graph. Revisit this when secret-service 6 is released.
+unmaintained = "workspace"
+ignore = [
+    # Reviewed in config/reviewed-decisions/rustsec-2026-0459.md; expires 2026-12-09.
+    { id = "RUSTSEC-2026-0459", reason = "no libsqlite3-sys release bundles a fixed SQLCipher; CopyPaste never opens an untrusted -wal" },
+]
+
+[licenses]
+version = 2
+# cargo-deny 0.14+ removed `deny`, `copyleft`, `allow-osi-fsf-free`, `default`
+# (see EmbarkStudios/cargo-deny#611). Anything not in `allow` is implicitly
+# denied — including GPL-2.0 / GPL-3.0 / AGPL-3.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "BSL-1.0",                # Boost Software License — clipboard-win
+    "CC0-1.0",                # public-domain dedication used by a few transitives
+    "CDLA-Permissive-2.0",    # webpki-roots (transitive via reqwest/hyper-rustls in copypaste-supabase)
+]
+confidence-threshold = 0.8
+
+
+[bans]
+# Duplicate detection. "warn" rather than "deny": platform-targeted upstream
+# dependencies can impose multiple versions, so a hard gate would be permanently
+# red. `--show-stats` prints the count in CI.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+# Avoid a second crypto or TLS stack. Cargo.toml configures reqwest and
+# tokio-tungstenite for rustls, which prevents a future `default-features = true`
+# from quietly enabling OpenSSL.
+#
+# openssl-sys is scoped rather than banned outright. SQLCipher's only portable
+# crypto backend is OpenSSL; neither the Android NDK sysroot nor a Windows host
+# ships a libcrypto to link against, so libsqlite3-sys vendors one for those
+# targets alone — ADR-0007. `wrappers` keeps that the only way it may appear:
+# native-tls, or a reqwest that lost its rustls features, still fails this
+# check. macOS is unaffected and stays on CommonCrypto, so no darwin target in
+# [graph] resolves openssl-sys at all.
+#
+# [graph] does NOT yet list a windows triple, so the Windows dependency graph
+# is unaudited by this file. Adding one is a decision for the ADR that makes
+# Windows a shipping platform, not a side effect of getting it to compile.
+#
+# Keep this invariant machine-checked.
+deny = [
+    { name = "openssl", reason = "second TLS stack; the workspace uses rustls" },
+    { name = "openssl-sys", wrappers = ["libsqlite3-sys"], reason = "C OpenSSL build; permitted only as SQLCipher's Android crypto backend (ADR-0007)" },
+    { name = "native-tls", reason = "delegates to the platform/OpenSSL TLS stack; use rustls" },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
