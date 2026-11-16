@@ -34,7 +34,6 @@ pub(crate) static INFERENCE_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 /// The home-screen widget provider, told when what it shows changed.
 static WIDGET_PROVIDER_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
-static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Initializes the context required by `android-native-keyring-store`.
 ///
@@ -240,6 +239,29 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_releaseRuntimeMemory(
 ) {
     if let Some(Err(error)) = RUNTIME.get().map(|runtime| runtime.store.release_memory()) {
         tracing::warn!(%error, "could not release cached history pages");
+    }
+    purge_allocator();
+}
+
+/// Asks bionic to return free heap pages to the kernel. `mallopt` exists only
+/// from API 26, below the minimum SDK, so it is resolved at run time; older
+/// releases ignore the purge options and report failure.
+fn purge_allocator() {
+    // bionic <malloc.h>: M_PURGE (API 28) and M_PURGE_ALL (API 34).
+    const M_PURGE: libc::c_int = -101;
+    const M_PURGE_ALL: libc::c_int = -104;
+    type Mallopt = unsafe extern "C" fn(libc::c_int, libc::c_int) -> libc::c_int;
+    // SAFETY: the name is NUL-terminated and RTLD_DEFAULT searches the loaded
+    // libraries; a non-null result is bionic's `mallopt`, which takes two ints.
+    unsafe {
+        let symbol = libc::dlsym(libc::RTLD_DEFAULT, c"mallopt".as_ptr());
+        if symbol.is_null() {
+            return;
+        }
+        let mallopt = std::mem::transmute::<*mut libc::c_void, Mallopt>(symbol);
+        if mallopt(M_PURGE_ALL, 0) == 0 {
+            mallopt(M_PURGE, 0);
+        }
     }
 }
 
@@ -873,19 +895,8 @@ pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_ingest(
     };
     let text = text.to_string_lossy().into_owned();
     drop(read);
-    if SMS_NETWORK_RUNTIME.get().is_none() {
-        if let Ok(network) = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-        {
-            let _ = SMS_NETWORK_RUNTIME.set(network);
-        }
-    }
-    if let Some(network) = SMS_NETWORK_RUNTIME.get() {
-        // Local clipboard capture remains available while networking is down.
-        let _ = network.block_on(runtime.start_listener());
-    }
+    // Local clipboard capture remains available while networking is down.
+    let _ = crate::api::handler::async_runtime().block_on(runtime.start_listener());
     match runtime.capture_sms_operation(token as u64, &text) {
         copypaste_runtime::SmsCaptureOutcome::Captured => SMS_INGEST_CAPTURED,
         copypaste_runtime::SmsCaptureOutcome::Ignored => SMS_INGEST_IGNORED,
@@ -1259,7 +1270,19 @@ pub(crate) async fn request(
         .start_listener()
         .await
         .map_err(|_| crate::api::RuntimeError::internal())?;
-    Ok(runtime.request(0, method).await)
+    runtime.start_module_sync();
+    // Store work stays off the few async workers, as `dispatch` asks hosts.
+    let admission = match runtime.route(&method).await {
+        copypaste_runtime::Route::Reactor => return Ok(runtime.request(0, method).await),
+        copypaste_runtime::Route::Blocking(admission) => admission,
+    };
+    let runtime = Arc::clone(runtime);
+    tokio::task::spawn_blocking(move || {
+        let _admission = admission;
+        runtime.request_blocking(0, method)
+    })
+    .await
+    .map_err(|_| crate::api::RuntimeError::internal())
 }
 
 /// Serves one IPC method for the native surfaces that run without a Flutter

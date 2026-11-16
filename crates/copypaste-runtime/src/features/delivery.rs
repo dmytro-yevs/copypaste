@@ -761,4 +761,30 @@ mod tests {
         assert!(!clipboard.0.lock().unwrap()[0].1.transient);
         assert_eq!(events.try_recv().unwrap().event, EventKind::Items);
     }
+
+    #[test]
+    fn copy_and_pin_replies_carry_a_bounded_preview_of_a_large_clip() {
+        use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
+        let (runtime, clipboard, _dir) = runtime();
+        let body = "y".repeat(LIST_PREVIEW_BYTES * 64);
+        let id = capture(&runtime, &body);
+        for method in [
+            Method::Copy { id: id.clone() },
+            Method::CopyPlainText { id: id.clone() },
+            Method::Pin {
+                id: id.clone(),
+                pinned: true,
+            },
+        ] {
+            match runtime.request_blocking(1, method).data {
+                Some(ResponseData::Item(item)) => {
+                    assert_eq!(item.id, id);
+                    assert!(item.truncated);
+                    assert!(item.content.capacity() <= LIST_PREVIEW_BYTES);
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(clipboard.0.lock().unwrap()[0].0.len(), body.len());
+    }
 }

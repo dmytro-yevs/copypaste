@@ -30,6 +30,10 @@ Future<List<ClipAnnotationEntry>> clipAnnotations({
   required List<String> ids,
 }) => RustLib.instance.api.crateApiClipsClipAnnotations(ids: ids);
 
+/// One clip as a History row: a bounded preview, never the full body.
+Future<Clip> clipPreview({required String id}) =>
+    RustLib.instance.api.crateApiClipsClipPreview(id: id);
+
 /// Clear any expiry and keep the clip.
 Future<Clip> keepClip({required String id}) =>
     RustLib.instance.api.crateApiClipsKeepClip(id: id);

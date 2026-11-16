@@ -17,7 +17,7 @@ use futures_util::{SinkExt, StreamExt};
 #[cfg(not(target_os = "android"))]
 use tokio::time::timeout;
 #[cfg(not(target_os = "android"))]
-use tokio_util::codec::{Framed, LinesCodec};
+use tokio_util::codec::{AnyDelimiterCodec, Framed};
 
 use crate::api::RuntimeError;
 use crate::{api::RuntimeEvent, frb_generated::StreamSink};
@@ -77,7 +77,7 @@ async fn request_once_at(path: &std::path::Path, method: Method) -> Result<Respo
     let stream = transport::connect(path)
         .await
         .map_err(|_| RuntimeError::daemon_unreachable())?;
-    let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let mut framed = line_framed(stream);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let request = Request {
         id,
@@ -94,7 +94,10 @@ async fn request_once_at(path: &std::path::Path, method: Method) -> Result<Respo
         .await
         .ok_or_else(RuntimeError::daemon_unreachable)?
         .map_err(|_| RuntimeError::daemon_unreachable())?;
-    let response: Response = serde_json::from_str(&reply).map_err(|_| RuntimeError::internal())?;
+    // The read buffer and then the reply bytes go before the response is mapped.
+    drop(framed);
+    let response = parse_reply(&reply)?;
+    drop(reply);
     if response.id != id {
         return Err(RuntimeError::internal());
     }
@@ -124,7 +127,7 @@ pub(crate) async fn stream(
     let stream = transport::connect(&crate::runtime::socket_path()?)
         .await
         .map_err(|_| RuntimeError::daemon_unreachable())?;
-    let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let mut framed = line_framed(stream);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let request = Request {
         id,
@@ -189,7 +192,7 @@ pub(crate) async fn watch(
     let stream = transport::connect(&crate::runtime::socket_path()?)
         .await
         .map_err(|_| RuntimeError::daemon_unreachable())?;
-    let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let mut framed = line_framed(stream);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let request = Request {
         id,
@@ -221,8 +224,7 @@ pub(crate) async fn watch(
             return Ok(());
         };
         let line = line.map_err(|_| RuntimeError::daemon_unreachable())?;
-        let response: Response =
-            serde_json::from_str(&line).map_err(|_| RuntimeError::internal())?;
+        let response = parse_reply(&line)?;
         if response.id != id {
             return Err(RuntimeError::internal());
         }
@@ -334,7 +336,7 @@ pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> Run
 
 #[cfg(not(target_os = "android"))]
 async fn next_response(
-    framed: &mut Framed<transport::Stream, LinesCodec>,
+    framed: &mut Framed<transport::Stream, AnyDelimiterCodec>,
     expected_id: u64,
 ) -> Result<Response, RuntimeError> {
     let line = framed
@@ -342,11 +344,27 @@ async fn next_response(
         .await
         .ok_or_else(RuntimeError::daemon_unreachable)?
         .map_err(|_| RuntimeError::daemon_unreachable())?;
-    let response: Response = serde_json::from_str(&line).map_err(|_| RuntimeError::internal())?;
+    let response = parse_reply(&line)?;
     (response.id == expected_id)
         .then_some(response)
         .ok_or_else(RuntimeError::internal)
         .and_then(response_to_result)
+}
+
+/// Newline-delimited JSON frames, read as bytes so a reply is parsed in
+/// place instead of through a copied `String`.
+#[cfg(not(target_os = "android"))]
+fn line_framed(stream: transport::Stream) -> Framed<transport::Stream, AnyDelimiterCodec> {
+    let codec =
+        AnyDelimiterCodec::new_with_max_length(b"\n".to_vec(), b"\n".to_vec(), MAX_FRAME_BYTES);
+    Framed::new(stream, codec)
+}
+
+/// Invalid UTF-8 is a broken connection, as it was for a line codec.
+#[cfg(not(target_os = "android"))]
+fn parse_reply(line: &[u8]) -> Result<Response, RuntimeError> {
+    let line = std::str::from_utf8(line).map_err(|_| RuntimeError::daemon_unreachable())?;
+    serde_json::from_str(line).map_err(|_| RuntimeError::internal())
 }
 
 #[cfg(test)]
@@ -406,6 +424,48 @@ mod tests {
             let sync_status = mapped.sync_status.unwrap();
             assert_eq!(sync_status.revision, 7);
             assert!(matches!(sync_status.phase, crate::api::SyncPhase::Syncing));
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "android")))]
+    #[tokio::test]
+    async fn a_large_reply_is_parsed_from_its_frame() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().unwrap();
+        let endpoint = directory.path().join("runtime.sock");
+        let listener = tokio::net::UnixListener::bind(&endpoint).unwrap();
+        let png_base64 = "A".repeat(8 * 1024 * 1024);
+        let sent = png_base64.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut line = String::new();
+            BufReader::new(reader).read_line(&mut line).await.unwrap();
+            let request: Request = serde_json::from_str(&line).unwrap();
+            let preview = copypaste_ipc::ImagePreview {
+                png_base64: sent,
+                width: 2,
+                height: 1,
+            };
+            let reply = Response::ok(request.id, ResponseData::ImagePreview(preview));
+            let mut reply = serde_json::to_vec(&reply).unwrap();
+            reply.extend_from_slice(b"\r\n");
+            writer.write_all(&reply).await.unwrap();
+        });
+        let method = Method::ImagePreview {
+            id: "clip".into(),
+            max_edge: None,
+            bounds: None,
+        };
+        let response = request_once_at(&endpoint, method).await.unwrap();
+        server.await.unwrap();
+        match response.data {
+            Some(ResponseData::ImagePreview(preview)) => {
+                assert_eq!(preview.png_base64, png_base64);
+                assert_eq!((preview.width, preview.height), (2, 1));
+            }
+            other => panic!("unexpected {other:?}"),
         }
     }
 }

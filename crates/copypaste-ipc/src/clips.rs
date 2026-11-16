@@ -64,6 +64,10 @@ pub enum ClipOp {
     Trace {
         id: String,
     },
+    /// One clip in its History row form: a bounded preview, never the body.
+    Preview {
+        id: String,
+    },
     /// The newest clip that arrived from another device, optionally copied.
     LatestFromOtherDevice {
         copy: bool,

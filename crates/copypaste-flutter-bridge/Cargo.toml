@@ -18,6 +18,7 @@ copypaste-modules = { path = "../copypaste-modules" }
 copypaste-p2p = { path = "../copypaste-p2p" }
 copypaste-runtime-log = { path = "../copypaste-runtime-log" }
 flutter_rust_bridge = "=2.13.0-beta.5"
+threadpool.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -38,6 +39,7 @@ copypaste-source-app = { path = "../copypaste-source-app" }
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
 ndk-context = "0.1.1"
+libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

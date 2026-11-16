@@ -973,6 +973,41 @@ impl Runtime {
         }
     }
 
+    /// One clip in its History row form. An image also reports its pixel size,
+    /// read from the payload this call opens anyway.
+    pub(crate) fn clip_preview(&self, id: u64, item_id: &str) -> Response {
+        let row = match self.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+            Err(error) => return storage_error(id, "preview", &error),
+        };
+        let origin = self.meta.origin_of(&row);
+        match copypaste_core::history_item::open_item(
+            row,
+            &origin,
+            self.meta.device_id(),
+            &self.keyring.item_key(),
+            true,
+        ) {
+            Ok((mut item, payload)) => {
+                if let ClipboardPayload::Image { bytes, .. } = &payload {
+                    if !item.privacy.secret {
+                        item.image_details =
+                            copypaste_core::image_metadata(bytes).ok().map(|metadata| {
+                                copypaste_ipc::ImageDetails {
+                                    width: metadata.width,
+                                    height: metadata.height,
+                                    size_bytes: metadata.size_bytes,
+                                }
+                            });
+                    }
+                }
+                Response::ok(id, ResponseData::Item(item))
+            }
+            Err(error) => decrypt_error(id, &error),
+        }
+    }
+
     /// Annotations of one clip; a failed read shows the clip without them.
     fn annotations_of(&self, item_id: &str) -> Option<copypaste_ipc::ItemAnnotations> {
         self.store
@@ -1055,7 +1090,7 @@ impl Runtime {
             self.keep_pinned_clip(item_id);
         }
         self.note_local_change_since(started);
-        self.mutated_item(id, item_id)
+        row_preview_reply(self.mutated_item(id, item_id))
     }
 
     /// The whole ordering in one transaction. Ids the caller no longer owns
@@ -1110,7 +1145,7 @@ impl Runtime {
     pub(crate) fn copy(&self, id: u64, item_id: &str, plain_text: bool) -> Response {
         match self.deliver_item(item_id, plain_text, true) {
             Ok(delivered) => match delivered.item {
-                Some(item) => Response::ok(id, ResponseData::Item(item)),
+                Some(item) => row_preview_reply(Response::ok(id, ResponseData::Item(item))),
                 None => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
             },
             Err(error) => error.response(id),
@@ -1552,6 +1587,19 @@ impl Runtime {
         }
         page
     }
+}
+
+/// The history-row form of a reply whose callers only confirm the action: a
+/// bounded preview, and no body for a secret clip.
+fn row_preview_reply(mut response: Response) -> Response {
+    if let Some(ResponseData::Item(item)) = &mut response.data {
+        if item.privacy.secret {
+            item.content = String::new();
+        } else {
+            item.truncated |= copypaste_ipc::limits::bound_preview(&mut item.content);
+        }
+    }
+    response
 }
 
 fn sync_disabled(id: u64) -> Response {

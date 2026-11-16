@@ -13,6 +13,7 @@ pub mod applications;
 pub mod clips;
 pub mod device_sync;
 pub mod diagnostics;
+pub mod handler;
 pub mod paste_queue;
 pub mod rules;
 pub mod space;

@@ -4,6 +4,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/generated/api/clips.dart'
+    as runtime
+    show clipPreview;
 import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import '../../../platform/notifications/capture_notification_preview.dart';
@@ -69,7 +72,7 @@ class RuntimeSettingsRepository
 
   @override
   Future<CaptureNotificationPreview?> capturePreview(String id) async {
-    final clip = await runtime.getClip(id: id);
+    final clip = await runtime.clipPreview(id: id);
     if (clip.secret) return null;
     switch (clip.contentClass) {
       case runtime.ClipContentClass.image:
