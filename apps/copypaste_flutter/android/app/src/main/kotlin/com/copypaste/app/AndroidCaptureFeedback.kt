@@ -80,14 +80,15 @@ internal object AndroidCaptureFeedback {
         }
     }
 
-    fun binaryPreview(bytes: ByteArray, filename: String, mimeType: String): CaptureFeedbackPreview {
+    /** Only the first [length] bytes of [bytes] are the image. */
+    fun binaryPreview(bytes: ByteArray, filename: String, mimeType: String, length: Int = bytes.size): CaptureFeedbackPreview {
         if (!mimeType.startsWith("image/")) return CaptureFeedbackPreview(textPreview(filename))
         // Avoid decoding received image content unless its preview is enabled.
         if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
             return CaptureFeedbackPreview("", image = true)
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        BitmapFactory.decodeByteArray(bytes, 0, length, bounds)
         val width = bounds.outWidth
         val height = bounds.outHeight
         if (width <= 0 || height <= 0 ||
@@ -96,7 +97,7 @@ internal object AndroidCaptureFeedback {
             return CaptureFeedbackPreview("", image = true)
         }
         val options = BitmapFactory.Options().apply { inSampleSize = thumbnailSampleSize(width, height) }
-        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        val image = BitmapFactory.decodeByteArray(bytes, 0, length, options)
             ?: return CaptureFeedbackPreview("", image = true)
         return try {
             imagePreview(image, width, height)

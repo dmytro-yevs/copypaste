@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -20,7 +21,10 @@ internal object AndroidClipboardReader {
     private const val maximumFilesPerClip = 64
     internal const val maximumDecodedImageBytes = 50 * 1024 * 1024L
     private val mimeType = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$")
-    private val ingestion = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue(32))
+    private val ingestion = java.util.concurrent.ThreadPoolExecutor(1, 1, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.ArrayBlockingQueue(32))
+        .apply { allowCoreThreadTimeOut(true) }
+    private val pngSignature = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
+    private val pngEnd = byteArrayOf(0, 0, 0, 0, 73, 69, 78, 68, -82, 66, 96, -126)
 
     private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     // Native admission also limits hosts to 32. Every accepted host/input owns
@@ -424,11 +428,15 @@ internal object AndroidClipboardReader {
         return try { binaryImage(context, pending, uri, declaredType, mediaAccess, sourceDisplayName) } finally { heavy.release() }
     }
 
-    private fun openInput(context: Context, uri: Uri, pending: Pending): CaptureInput? {
+    /** The input and the provider's reported length, or [AssetFileDescriptor.UNKNOWN_LENGTH]. */
+    private fun openInput(context: Context, uri: Uri, pending: Pending): Pair<CaptureInput, Long>? {
         val slot = inputSlots.await(pending::reading) ?: return null
         return try {
-            val input = context.contentResolver.openInputStream(uri)
-            if (input == null) { slot.close(); null } else CaptureInput(input, slot)
+            val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r")
+            if (descriptor == null) { slot.close(); null } else {
+                val input = try { descriptor.createInputStream() } catch (error: Exception) { descriptor.close(); throw error }
+                CaptureInput(input, slot) to descriptor.length
+            }
         } catch (error: Exception) { slot.close(); throw error }
     }
 
@@ -444,12 +452,13 @@ internal object AndroidClipboardReader {
             val resolvedType = resolver.getType(uri)?.lowercase()
             if (resolvedType != null && resolvedType != declaredType) return@read
             val cap = minOf(maximumBinaryBytes.toLong(), limit).toInt()
-            val source = openInput(context, uri, pending)?.use { input ->
+            val (opened, length) = openInput(context, uri, pending) ?: return@read
+            val source = opened.use { input ->
                 pending.input(input)
-                try { readBounded(input, cap, pending) } finally { pending.releaseInput(input) }
+                try { readBounded(input, cap, pending, length) } finally { pending.releaseInput(input) }
             } ?: return@read
             if (!pending.reading()) return@read
-            bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap, pending) else BinaryPayload(source, source.size)
+            bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap, pending) else source
             if (mediaAccess) sourceApp = ScreenshotSourceApps.resolve(context, sourceDisplayName)
         }
         val payload = bytes ?: return false
@@ -508,32 +517,64 @@ internal object AndroidClipboardReader {
             ?.takeIf { it.isNotBlank() && it.length <= 255 }
             ?: "attachment"
 
-    internal fun readBounded(input: java.io.InputStream, maximum: Int, pending: Pending): ByteArray? {
-        val output = ByteArrayOutputStream()
+    /** A known [expectedLength] sizes the buffer once; the result owns it without a copy. */
+    internal fun readBounded(input: java.io.InputStream, maximum: Int, pending: Pending, expectedLength: Long = -1): BinaryPayload? {
+        val output = BoundedOutputStream(maximum, expectedLength.takeIf { it in 1..maximum.toLong() }?.toInt() ?: 32)
         val buffer = ByteArray(8 * 1024)
-        while (true) {
-            if (!pending.reading()) return null
-            val read = input.read(buffer)
-            if (read < 0) break
-            if (output.size() > maximum - read) return null
-            output.write(buffer, 0, read)
+        try {
+            while (true) {
+                if (!pending.reading()) return null
+                val read = input.read(buffer)
+                if (read < 0) break
+                output.write(buffer, 0, read)
+            }
+        } catch (_: SizeLimitExceeded) {
+            return null
         }
-        return output.toByteArray().takeIf(ByteArray::isNotEmpty)
+        return output.bytes().takeIf { it.length > 0 }
     }
 
-    private fun normaliseImage(source: ByteArray, maximum: Int, pending: Pending): BinaryPayload? {
+    /** A complete, static, non-interlaced PNG of at most 8 bits per sample. */
+    internal fun ordinaryPng(source: BinaryPayload): Boolean {
+        val bytes = source.bytes
+        if (source.length < pngSignature.size + 25 + pngEnd.size) return false
+        val end = source.length - pngEnd.size
+        if (!pngSignature.indices.all { bytes[it] == pngSignature[it] } ||
+            !pngEnd.indices.all { bytes[end + it] == pngEnd[it] }) return false
+        fun int(at: Int) = java.nio.ByteBuffer.wrap(bytes, at, 4).int
+        fun type(at: Int) = String(bytes, at + 4, 4, Charsets.ISO_8859_1)
+        if (int(8) != 13 || type(8) != "IHDR" || bytes[24] > 8 || bytes[28].toInt() != 0) return false
+        var at = 8
+        while (at <= end - 8) {
+            when (type(at)) { "IDAT" -> return true; "acTL" -> return false }
+            val length = int(at)
+            if (length < 0 || length > end - at - 12) return false
+            at += 12 + length
+        }
+        return false
+    }
+
+    private fun normaliseImage(source: BinaryPayload, maximum: Int, pending: Pending): BinaryPayload? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        runCatching { BitmapFactory.decodeByteArray(source, 0, source.size, bounds) }
+        runCatching { BitmapFactory.decodeByteArray(source.bytes, 0, source.length, bounds) }
             .getOrNull()
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        if (bounds.outWidth.toLong() > maximumDecodedImageBytes / 4 / bounds.outHeight.toLong()) {
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return null
+        if (width.toLong() > maximumDecodedImageBytes / 4 / height.toLong()) {
             return null
+        }
+        // Stored as-is, like desktop PNG capture; only other formats are transcoded.
+        if (bounds.outMimeType == "image/png" && ordinaryPng(source)) {
+            runCatching { AndroidCaptureFeedback.binaryPreview(source.bytes, "", "image/png", source.length) }
+                .getOrNull()?.let(pending::feedbackPreview)
+            return source
         }
         val bitmap = runCatching {
             BitmapFactory.decodeByteArray(
-                source,
+                source.bytes,
                 0,
-                source.size,
+                source.length,
                 BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
             )
         }.getOrNull() ?: return null
@@ -555,11 +596,11 @@ internal object AndroidClipboardReader {
 
     internal class SizeLimitExceeded : IOException()
 
-    internal class BoundedOutputStream(private val maximum: Int) : OutputStream() {
-        private class OwnedOutput : ByteArrayOutputStream() {
+    internal class BoundedOutputStream(private val maximum: Int, capacity: Int = 32) : OutputStream() {
+        private class OwnedOutput(capacity: Int) : ByteArrayOutputStream(capacity) {
             fun payload(): BinaryPayload = BinaryPayload(buf, count)
         }
-        private val output = OwnedOutput()
+        private val output = OwnedOutput(capacity)
 
         override fun write(value: Int) = write(byteArrayOf(value.toByte()), 0, 1)
 
