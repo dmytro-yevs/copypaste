@@ -1213,7 +1213,13 @@ class ModulesScreen:
                 run(["xdotool", "key", "--clearmodifiers", value], env=self.environment)
                 acknowledgements.append(hashlib.sha256(value.encode("utf-8")).hexdigest())
             else:
-                acknowledgements.append(atspi_action(self.actor, kind, self.gui_pid(), value, self.environment))
+                try:
+                    acknowledgements.append(atspi_action(self.actor, kind, self.gui_pid(), value, self.environment))
+                except Exception:
+                    for index in range(5):
+                        debug_window_probe(f"fail-{operation}-{kind}-{index}", self.gui_pid(), self.environment, self.debug_dir)
+                        time.sleep(2)
+                    raise
         request = json.dumps([[kind, str(value)] for kind, value in steps], separators=(",", ":"))
         return {
             "operation": operation,
@@ -1883,36 +1889,19 @@ def main():
                 )
                 cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                 wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
+                for label in ("now", "1s", "3s"):
+                    debug_window_probe(f"restart-{label}", app.pid, environment, args.evidence_dir)
+                    time.sleep(1 if label == "now" else 2)
                 restarted_data = gui_owned_daemon(app, data_home).data_dir
                 if restarted_data != daemon_data:
                     raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
                 return runtime_socket
 
             require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
-            debug_actor = require_helper(args.wayland_actor, "debug actor")
-            debug_window_probe("before-loop", app.pid, environment, args.evidence_dir)
-            failures = 0
-            for cycle in range(6):
-                restart_gui_for_modules()
-                debug_window_probe(f"c{cycle}-restarted", app.pid, environment, args.evidence_dir)
-                try:
-                    atspi_action(debug_actor, "click", app.pid, "Settings", environment)
-                    debug_window_probe(f"c{cycle}-clicked", app.pid, environment, args.evidence_dir)
-                    atspi_action(debug_actor, "click", app.pid, "History", environment)
-                except Exception as error:
-                    failures += 1
-                    with (Path(args.evidence_dir) / "debug-window.log").open("a", encoding="utf-8") as handle:
-                        handle.write(f"!!! cycle {cycle} click failed: {error}\n")
-                    for step in range(6):
-                        time.sleep(2)
-                        debug_window_probe(f"c{cycle}-fail-{step}", app.pid, environment, args.evidence_dir)
-                    log = gui_log_path(environment)
-                    if log.is_file():
-                        (Path(args.evidence_dir) / f"debug-c{cycle}-gui.log").write_bytes(log.read_bytes()[-262144:])
-            raise RuntimeError(f"debug loop finished with {failures} failures")
             modules_screen = ModulesScreen(
                 require_helper(args.wayland_actor, "Modules screen AT-SPI actor"), lambda: app.pid, environment,
             )
+            modules_screen.debug_dir = args.evidence_dir
             runtime_socket = require_modules(
                 runtime_socket, args.module_artifacts, args.module_fixtures,
                 daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
