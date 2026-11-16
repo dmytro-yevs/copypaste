@@ -376,6 +376,9 @@ def require_linux_onboarding(args, *, gui_pid, environment):
         atspi_action(actor, "observe", gui_pid, "Keyboard control is allowed for Quick Paste.", environment)
     atspi_action(actor, "observe", gui_pid, "Quick Paste is ready.", environment)
     atspi_action(actor, "click", gui_pid, "Continue", environment)
+    # A desktop runtime offers to join a space before the ready step.
+    atspi_action(actor, "observe", gui_pid, "Your devices", environment)
+    atspi_action(actor, "click", gui_pid, "Later", environment)
     atspi_action(actor, "observe", gui_pid, "Get started", environment)
     atspi_action(actor, "click", gui_pid, "Get started", environment)
     atspi_action(actor, "observe", gui_pid, "History", environment)
