@@ -64,20 +64,6 @@ jobs:
           run-id: 43883290035
           github-token: ${{ github.token }}
       - uses: ./.github/actions/download-verified-artifact
-        if: 'first_install_baseline' == 'prior_release'
-        with:
-          name: production-linux-x86_64
-          path: previous-artifacts/x86_64
-          run-id: 
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        if: 'first_install_baseline' == 'prior_release'
-        with:
-          name: production-linux-${{ matrix.architecture }}
-          path: previous
-          run-id: 
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
         with:
           name: provider-supabase-linux-${{ matrix.architecture }}
           path: module-downloads/supabase
