@@ -26,6 +26,10 @@ import com.copypaste.app.quickaccess.QuickAccessTiles
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -198,18 +202,34 @@ class MainActivity : FlutterActivity() {
         @JvmStatic
         private external fun releaseRuntimeMemory()
 
-        /** For surfaces without an activity, such as the keyboard panel after it hides. */
-        internal fun trimRuntimeMemory() = releaseRuntimeMemory()
+        // Trim callbacks outlive the activity, so its executor cannot run them.
+        // The worker thread exits when idle; a request made during a pass
+        // queues one more pass.
+        private val memoryReleaseExecutor = ThreadPoolExecutor(
+            0, 1, 10, TimeUnit.SECONDS, LinkedBlockingQueue(),
+        )
+        private val memoryReleaseQueued = AtomicBoolean(false)
+
+        /** Releases runtime and allocator memory off the calling thread. */
+        internal fun trimRuntimeMemory() {
+            if (!memoryReleaseQueued.compareAndSet(false, true)) return
+            runCatching {
+                memoryReleaseExecutor.execute {
+                    memoryReleaseQueued.set(false)
+                    releaseRuntimeMemory()
+                }
+            }.onFailure { memoryReleaseQueued.set(false) }
+        }
 
         // Registered on the application context: capture services keep the
         // process-wide runtime open after this activity is gone.
         private val runtimeMemoryTrim = object : ComponentCallbacks2 {
-            override fun onTrimMemory(level: Int) = releaseRuntimeMemory()
+            override fun onTrimMemory(level: Int) = trimRuntimeMemory()
 
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
 
             @Deprecated("Deprecated in Java")
-            override fun onLowMemory() = releaseRuntimeMemory()
+            override fun onLowMemory() = trimRuntimeMemory()
         }
         private var runtimeMemoryTrimRegistered = false
 
@@ -410,6 +430,15 @@ class MainActivity : FlutterActivity() {
                     )
                     else -> result.notImplemented()
                 }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/memory")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "releaseFreedMemory") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                trimRuntimeMemory()
+                result.success(null)
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, settingsFilesChannelName)
             .setMethodCallHandler { call, result ->

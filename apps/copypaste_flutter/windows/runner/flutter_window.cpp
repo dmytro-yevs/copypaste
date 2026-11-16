@@ -330,6 +330,8 @@ bool FlutterWindow::OnCreate() {
     memory_pressure_monitor_ =
         std::make_unique<MemoryPressureMonitor>(GetHandle(), kMemoryPressure);
   }
+  memory_relief_channel_ = std::make_unique<MemoryReliefChannel>(
+      flutter_controller_->engine()->messenger());
   if (is_quick_paste_context_) {
     quick_paste_channel_ =
         std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -607,6 +609,7 @@ void FlutterWindow::OnDestroy() {
   for (auto& waiter : secure_field_waiters_) waiter->Success(flutter::EncodableValue());
   secure_field_waiters_.clear();
   memory_pressure_monitor_.reset();
+  memory_relief_channel_.reset();
   quick_paste_session_.Invalidate();
   CloseProtectedPairingContext(pairing_context_id_);
   CloseQuickPasteContext();
