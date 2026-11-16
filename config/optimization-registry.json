@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-13",
+  "date": "2026-11-17",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -4276,9 +4276,14 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart"
+        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart",
+        "crates/copypaste-ipc/src/clips.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/features/clips/mod.rs",
+        "crates/copypaste-flutter-bridge/src/api/clips.rs",
+        "apps/copypaste_flutter/lib/features/settings/repository/runtime_settings_repository.dart"
       ],
-      "invariant": "Normalization reads at most 2001 runes and yields the same output as full-length normalization; the bridge still reads the full clip.",
+      "invariant": "The capture notification reads a clip only through the bounded preview request, whose reply holds at most the list preview bytes and never a secret body; normalization reads at most 2001 runes and yields the same output as full-length normalization.",
       "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6026,6 +6031,723 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-154",
+      "title": "Passive overlays do not block hidden presentation suspension",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "CopyPasteRoot",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/main.dart",
+        "apps/copypaste_flutter/lib/app/ui_memory_controller.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_controller.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_host.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_page_route.dart",
+        "apps/copypaste_flutter/lib/app/theme/app_overlays.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
+        "apps/copypaste_flutter/lib/features/settings/view/settings_screen.dart"
+      ],
+      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance, defers suspension.",
+      "next_step": "On an Android phone and a narrow desktop window, leave the History detail drawer or a Settings section open, hide the app for more than 60 s and record app footprint and Dart heap before and after, plus timer wakeups over 10 minutes.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-155",
+      "title": "Bounded bridge executor",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-flutter-bridge",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/api/handler.rs",
+        "crates/copypaste-flutter-bridge/src/frb_generated.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
+      ],
+      "invariant": "Generated bridge calls run on a fixed 4-thread synchronous pool and a 2-worker runtime with at most 16 blocking threads, whatever the core count; Android store requests take the runtime blocking route under their admission, never an async worker.",
+      "next_step": "Thread sample and footprint of the release UI process at idle on macOS and Windows; on Android scroll History while searching and record stream latency and thread count.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Bridge tests and Clippy passed on macOS and the Android arm64 bridge check compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-156",
+      "title": "Native pairing and SMS capture reuse the bridge runtime",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/native_pairing_abi.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
+      ],
+      "invariant": "Protected pairing and Android SMS ingest block on the bridge runtime from native threads and never build a runtime of their own.",
+      "next_step": "Thread count after a full pairing ceremony and after an SMS ingest returns to the idle baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Bridge tests passed on macOS and the Android arm64 bridge check compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-157",
+      "title": "Allocator relief on Android and Windows",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Native memory relief",
+      "platforms": [
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt",
+        "apps/copypaste_flutter/windows/runner/memory_relief_channel.cpp",
+        "apps/copypaste_flutter/windows/runner/memory_relief_channel.h",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/lib/platform/lifecycle/native_memory_relief.dart"
+      ],
+      "invariant": "Suspension, trim and low-memory requests reach a native release that returns freed heap pages: a bionic purge where mallopt exists, resolved at run time, and Windows heap optimization and compaction; both run off the UI thread and coalesce.",
+      "next_step": "PSS and native heap before and after onTrimMemory on API 26, 28 and 34 with the purge timed; private bytes and working set before and after suspension on Windows.",
+      "native_resource_qualification": {
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Android arm64 bridge check compiled and Dart analysis passed; Kotlin and Windows C++ not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-158",
+      "title": "macOS relief at Quick Paste retirement and tray close",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "MacosMemoryPressure",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/macos/Runner/MacosTrayMenuChannel.swift"
+      ],
+      "invariant": "Retiring Quick Paste and closing the tray menu each lead to one relief pass, and a request during a pass triggers exactly one more; no timers.",
+      "next_step": "footprint dirty bytes about one second after each event on a release build.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS debug build compiled; not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-159",
+      "title": "Quick Paste presentation is released without a Dart reply",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Quick Paste presentation",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift"
+      ],
+      "invariant": "A closed presentation with its panel, view controller, Flutter view and surfaces is released within about a second whether or not Dart answers shutdown, and the pairing window clears its first responder on close.",
+      "next_step": "Open and close Quick Paste repeatedly, including with a delayed Dart reply, and check that live panel, Flutter view and IOSurface counts return to baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS debug build compiled; not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-160",
+      "title": "Idle in-process module unload",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/instances.rs",
+        "crates/copypaste-modules/src/manager.rs"
+      ],
+      "invariant": "An in-process instance is unloaded once it has gone 1 hour unused with no lease, no endpoint session and no sync-provider role; sync providers are never evicted by idle expiry or by the cap; the reaper does not wake while nothing can expire; a new instance of a module loads only after every earlier instance of it has finished tearing down.",
+      "next_step": "Daemon and Android app-process footprint and thread count after a snippets or AI tools command, at 5 minutes and at 61 minutes idle; latency of a command issued during an update of the same module.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-161",
+      "title": "Verified manifest cache",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/manager.rs",
+        "crates/copypaste-modules/src/package.rs"
+      ],
+      "invariant": "A module manifest is read and signature-verified once per version and package-file fingerprint; load-time verification is unchanged.",
+      "next_step": "CPU and I/O per history query and per semantic-index iteration with modules installed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-162",
+      "title": "Module worker threads exist only while needed",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/inference/client.rs",
+        "crates/copypaste-modules/src/host.rs",
+        "crates/copypaste-modules/src/cloud_request.rs"
+      ],
+      "invariant": "The inference idle thread starts with the first inference request, the semantic index worker runs only while a search configuration exists, and cloud provider checks and teardown run off the reactor.",
+      "next_step": "Thread sample of the daemon with no OCR or semantic module in use and after disabling semantic search.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-163",
+      "title": "Sized daemon runtime",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-daemon",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/runtime.rs"
+      ],
+      "invariant": "The daemon runs 2 reactor workers and at most 128 blocking threads, above its 64-connection admission bound.",
+      "next_step": "Thread sample and footprint of the installed build at idle and under concurrent IPC load on a 10-core Mac and on Windows.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-164",
+      "title": "Oversized clip opens read-only without a full-text editor",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "History edit drawer",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/view/clip_edit_drawer.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_clip_menu.dart"
+      ],
+      "invariant": "A clip above the editable limit is rendered only through the sliced selectable text with no text controller or editable field, its size is decided once per drawer, and selection copies go through History transfers.",
+      "next_step": "UI footprint and Dart heap, peak and steady, while opening and scrolling a 4 MiB text clip in the edit drawer, before and after, on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-165",
+      "title": "Large code highlight memoized by identity",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "History inspector presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/history_code_highlighter.dart"
+      ],
+      "invariant": "The highlight memo returns the same result for a repeated source of any size, matches a large source only by identity and references the caller string rather than copying it.",
+      "next_step": "CPU time and allocations per inspector rebuild for a code or JSON clip above 200 k code units.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-166",
+      "title": "History rebuild stops once its anchors are provably gone",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "History controller",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart"
+      ],
+      "invariant": "A History rebuild stops reading once a row ranked after every captured anchor in the old ledger, unmoved since then, has been read, or at the old ledger length when no anchor was in it; while any anchor exists rebuild behaviour is unchanged.",
+      "next_step": "Count IPC page reads and peak resident pages per rebuild on a 10,000-row history with the anchor deleted remotely and with a 300-row insertion above it.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-167",
+      "title": "Streamed, size-limited document picking on Android",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Platform file adapters",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/HistoryFilesChannel.kt",
+        "apps/copypaste_flutter/lib/platform/files/history_file_picker.dart",
+        "apps/copypaste_flutter/lib/features/settings/repository/file_selector_settings_file_picker.dart",
+        "apps/copypaste_flutter/lib/features/modules/repository/file_selector_module_input_picker.dart"
+      ],
+      "invariant": "A picked restore or module file is streamed in 64 KiB chunks to a staged file under a transient grant and is never held whole in Java or Dart memory; it is refused before copying, or stopped during it, once it passes its size limit.",
+      "next_step": "Java heap and app peak while restoring a backup of at least 500 MB and installing a large module on an emulator, against the previous build.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Dart tests and analysis passed; Kotlin not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-168",
+      "title": "Android ordinary-PNG capture pass-through and single-buffer read",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AndroidClipboardReader",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt"
+      ],
+      "invariant": "A complete, static, non-interlaced PNG of at most 8 bits per sample that passes the byte and dimension caps is stored without a full-size bitmap or re-encode buffer, while every other image keeps the 8-bit transcode; the source is held in one buffer sized from the reported length when known, and the capture thread exits after 30 s idle.",
+      "next_step": "App peak heap and native memory while capturing a 1080p and a 1440p PNG screenshot on an emulator, before and after; thread count after 30 s idle.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "kotlin_not_compiled_unit_test_pending_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-169",
+      "title": "Windows paste-back borrows stored bytes and sizes the bitmap once",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "Windows clipboard",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows/transcode.rs",
+        "crates/copypaste-daemon/src/clipboard/windows.rs"
+      ],
+      "invariant": "PNG and TIFF paste-back never copies the stored bytes, and the BMP buffer is allocated once at its final size.",
+      "next_step": "Daemon peak working set while pasting a 3840x2160 RGBA PNG on Windows, before and after.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Transcoding functions compared byte for byte with the previous implementation in a portable harness; Windows-only call sites not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-170",
+      "title": "Row-streamed PNG capture validation and early DIB release",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Windows clipboard",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows/transcode.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/read.rs",
+        "crates/copypaste-daemon/Cargo.toml"
+      ],
+      "invariant": "A registered PNG is accepted or refused exactly as a full default-image decode would decide while holding one reused row and fixed decoder state, and a raw DIB is freed before PNG encoding starts; TIFF is still fully decoded.",
+      "next_step": "Daemon transient peak working set and CPU time while copying 1080p and 4K PNGs and during a 4K Print Screen capture on Windows, before and after.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Classification compared with the previous implementation on 660 corrupted and 336 valid cases in a portable harness; Windows-only call sites not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-171",
+      "title": "Byte-bounded upload scan before payload load",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-sync StoreView",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-sync/src/store.rs",
+        "crates/copypaste-core/src/storage/versions.rs"
+      ],
+      "invariant": "Each scan path reads at most 500 headers without payloads, opens one row at a time and holds plaintext only for rows it offers plus the one being decided; uploads within a round stay in ascending order.",
+      "next_step": "Daemon and Android process footprint, peak and steady, while draining a cloud backlog of about 500 one-megabyte images, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-172",
+      "title": "Size-grouped peer serving fetch",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p sync transfer",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/sync/transfer.rs",
+        "crates/copypaste-p2p/src/sync/source.rs",
+        "crates/copypaste-p2p/src/node/mod.rs",
+        "crates/copypaste-core/src/sync/source.rs",
+        "crates/copypaste-core/src/storage/versions.rs"
+      ],
+      "invariant": "Each serving fetch covers at most 8 items and at most one message of stored size, or a single item, so a session holds about one pending message plus one fetch.",
+      "next_step": "Daemon peak with 4 concurrent serving sessions of 4 MiB items, and serve time for an initial pairing with thousands of short text clips, against the 8-item baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-173",
+      "title": "Streamed, byte-capped cloud pull page",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/body.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "crates/copypaste-cloud/src/sync/pull.rs"
+      ],
+      "invariant": "A pull page holds less than two maximal rows with oversized strings dropped and their rows refused, at most two items of plaintext wait to be merged, and one pull makes at most 50 requests.",
+      "next_step": "Daemon and Android app peak, steady state and growth while catching up on 100 one-megabyte and 100 four-megabyte images, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-174",
+      "title": "Content-free realtime events",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud realtime",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/realtime/frame.rs",
+        "crates/copypaste-cloud/src/realtime/event.rs",
+        "crates/copypaste-cloud/src/realtime/channel.rs"
+      ],
+      "invariant": "A change event allocates only its item id, and no websocket message over 2 MiB is buffered.",
+      "next_step": "Peak footprint during bursts of one-megabyte realtime records.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-175",
+      "title": "Capped REST bodies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/body.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "crates/copypaste-cloud/src/rest/group.rs",
+        "crates/copypaste-cloud/src/rest/space.rs",
+        "crates/copypaste-cloud/src/rest/error.rs"
+      ],
+      "invariant": "Every REST body is refused at its cap while streaming, and error and write replies are read to at most 1 KiB.",
+      "next_step": "Peak during a full group page and a full space-envelope page.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-176",
+      "title": "Bounded copy and pin replies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime dispatch",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/features/delivery.rs"
+      ],
+      "invariant": "Copy, plain-text copy and pin replies never carry more than the list preview bytes of content, or any secret body.",
+      "next_step": "Daemon and app peak footprint and Dart heap while copying a 4 MiB text clip, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-177",
+      "title": "Byte-parsed IPC replies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge client",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/client.rs"
+      ],
+      "invariant": "A reply frame is parsed from its framed bytes with no string copy, and the read buffer is released before the response is mapped.",
+      "next_step": "App-process peak footprint on a large image preview or clip reply, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-178",
+      "title": "Duplicate capture without payload copies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core ingest",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/ingest.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/storage/retention.rs"
+      ],
+      "invariant": "A duplicate capture is probed and restamped from metadata only, never sealed, and its payload is loaded only when an entry point that returns content asks for it.",
+      "next_step": "Daemon and Android process peak while re-copying a 4 MiB image 20 times, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-179",
+      "title": "Bounded legacy auto_vacuum conversion",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage space",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/space.rs"
+      ],
+      "invariant": "The one-time VACUUM runs only when its live data is at most 32 MiB, and only a process that died mid-conversion stops it from being tried again.",
+      "next_step": "Startup peak while opening legacy files of 30 MiB and 300 MiB on Android and macOS.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }
