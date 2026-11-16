@@ -86,6 +86,22 @@ class ReleasePipelineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing release"):
                 require({}, build=build, publish=publish)
 
+    def test_preflight_selects_complete_external_windows_signing_instead_of_pfx(self):
+        require = load("preflight-sources.py")["require_secrets"]
+        base = {name: "value" for name in ("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD",
+                                           "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD",
+                                           "TAURI_SIGNING_PRIVATE_KEY")}
+        external = {"SIGNPATH_API_TOKEN": "token", "SIGNPATH_ORGANIZATION_ID": "org",
+                    "SIGNPATH_PROJECT_SLUG": "copypaste", "SIGNPATH_SIGNING_POLICY_SLUG": "release",
+                    "SIGNPATH_CERTIFICATE_THUMBPRINT": "ab:" + "cd" * 19}
+        self.assertEqual(require({**base, **external}, build=True, publish=False), "external")
+        with self.assertRaisesRegex(ValueError, "WINDOWS_SIGNING_CERTIFICATE_BASE64"):
+            require(base, build=True, publish=False)
+        with self.assertRaisesRegex(ValueError, "Incomplete external Windows signing"):
+            require({**base, "SIGNPATH_API_TOKEN": "token"}, build=True, publish=False)
+        with self.assertRaisesRegex(ValueError, "SHA-1"):
+            require({**base, **external, "SIGNPATH_CERTIFICATE_THUMBPRINT": "x"}, build=True, publish=False)
+
     def test_external_compositor_source_is_rejected_during_preflight(self):
         main = load("preflight-sources.py")["main"]
         with tempfile.TemporaryDirectory() as directory:

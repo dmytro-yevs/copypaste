@@ -9,9 +9,10 @@ function Normalize-CertificateThumbprint([string]$Thumbprint) {
     return $normalized
 }
 
-function Assert-AuthenticodeSigner(
+function Assert-AuthenticodeSignerThumbprint(
     [object]$Signature,
-    [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate
+    [string]$ExpectedThumbprint,
+    [string]$ExpectedSigner
 ) {
     if ($Signature.Status -ne "Valid") {
         throw "Authenticode signature status is not valid"
@@ -20,13 +21,20 @@ function Assert-AuthenticodeSigner(
         throw "Signed file did not expose an embedded Authenticode signature"
     }
     if ($null -eq $Signature.SignerCertificate) {
-        throw "Authenticode signer does not match the prepared PFX"
+        throw "Authenticode signer does not match the $ExpectedSigner"
     }
     $actualThumbprint = Normalize-CertificateThumbprint $Signature.SignerCertificate.Thumbprint
-    $expectedThumbprint = Normalize-CertificateThumbprint $ExpectedCertificate.Thumbprint
-    if ($actualThumbprint -cne $expectedThumbprint) {
-        throw "Authenticode signer does not match the prepared PFX"
+    $expected = Normalize-CertificateThumbprint $ExpectedThumbprint
+    if ($actualThumbprint -cne $expected) {
+        throw "Authenticode signer does not match the $ExpectedSigner"
     }
+}
+
+function Assert-AuthenticodeSigner(
+    [object]$Signature,
+    [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate
+) {
+    Assert-AuthenticodeSignerThumbprint $Signature $ExpectedCertificate.Thumbprint "prepared PFX"
 }
 
 function Test-SelfSignedCertificate(
@@ -185,10 +193,17 @@ function Assert-WindowsSignaturePolicy(
     [scriptblock]$ProcessRunner,
     [scriptblock]$SignatureReader
 ) {
-    # /pa proves Windows policy trust only for CA-backed release certificates.
-    $requireTrustedChain = -not (Test-SelfSignedCertificate $State.Certificate)
-    $signature = & $SignatureReader $Target $SignTool $ProcessRunner $requireTrustedChain
-    Assert-AuthenticodeSigner $signature $State.Certificate
+    if ($null -ne $State.Certificate) {
+        # /pa proves Windows policy trust only for CA-backed release certificates.
+        $requireTrustedChain = -not (Test-SelfSignedCertificate $State.Certificate)
+        $signature = & $SignatureReader $Target $SignTool $ProcessRunner $requireTrustedChain
+        Assert-AuthenticodeSigner $signature $State.Certificate
+    } else {
+        # External signing services always issue CA-backed signatures.
+        $signature = & $SignatureReader $Target $SignTool $ProcessRunner $true
+        Assert-AuthenticodeSignerThumbprint $signature $State.ExpectedThumbprint `
+            "expected external signer"
+    }
     if ($null -eq $signature.TimeStamperCertificate) {
         throw "Authenticode signature is missing its RFC 3161 timestamp"
     }

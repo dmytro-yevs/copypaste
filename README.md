@@ -35,6 +35,17 @@ identity on your Mac, and it opens without a Gatekeeper prompt. If you download
 the DMG in a browser instead, macOS blocks the first launch: open
 **System Settings → Privacy & Security** and choose **Open Anyway**.
 
+## Install on Windows
+
+Once CopyPaste is published to winget, install it on Windows (x64) with:
+
+```powershell
+winget install CopyPaste.CopyPaste
+```
+
+`winget upgrade CopyPaste.CopyPaste` updates it. Maintainers: see the
+[Windows release setup](packaging/windows/README.md) for signing and winget publication.
+
 ## History organization
 
 History supports local-calendar date ranges, quick periods, and combined server-side

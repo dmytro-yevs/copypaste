@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Prepare", "Validate", "Sign", "Verify", "Cleanup", "SelfTest")]
+    [ValidateSet("Prepare", "PrepareExternal", "Validate", "Sign", "Verify", "Cleanup", "SelfTest")]
     [string]$Operation = "Sign",
     [string]$File,
     [string]$OutputPfxPath,
@@ -77,6 +77,17 @@ function Read-SigningCertificate([string]$PfxPath, [string]$Password) {
 }
 
 function Get-PreparedSigningState {
+    $expectedThumbprint = [Environment]::GetEnvironmentVariable("WINDOWS_SIGNING_EXPECTED_THUMBPRINT")
+    if (-not [string]::IsNullOrWhiteSpace($expectedThumbprint)) {
+        if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_PATH)) {
+            throw "Windows signing cannot use both a PFX and an external signer"
+        }
+        return [pscustomobject]@{
+            Pfx = $null
+            Certificate = $null
+            ExpectedThumbprint = Normalize-CertificateThumbprint $expectedThumbprint
+        }
+    }
     $pfx = Require-Environment "WINDOWS_CERTIFICATE_PFX_PATH"
     $password = Require-Environment "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
     $timestampUrl = Require-Environment "WINDOWS_SIGNING_TIMESTAMP_URL"
@@ -280,6 +291,9 @@ function Invoke-WindowsSign(
     $state = $null
     try {
         $state = & $SigningStateReader
+        if ($null -eq $state.Certificate) {
+            throw "Externally signed releases cannot be signed locally"
+        }
         $signtool = & $SignToolFinder
         $arguments = Get-SignToolArguments $state $Target
         $result = & $ProcessRunner $signtool $arguments 120000 "SignTool signing" $Target
@@ -374,6 +388,110 @@ function Prepare-WindowsSigning {
     }
 }
 
+function Prepare-ExternalSigning {
+    $thumbprint = Normalize-CertificateThumbprint (Require-Environment "WINDOWS_SIGNING_EXPECTED_THUMBPRINT")
+    if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_PATH)) {
+        throw "Windows signing cannot use both a PFX and an external signer"
+    }
+    $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT = $thumbprint
+    if ($PersistEnvironment) {
+        Write-GitHubEnvironment "WINDOWS_SIGNING_EXPECTED_THUMBPRINT" $thumbprint
+    }
+}
+
+function Invoke-ExternalSignerSelfTest {
+    Write-Host "PHASE: external signer verification"
+    $old = @{}
+    foreach ($name in @("WINDOWS_SIGNING_EXPECTED_THUMBPRINT", "WINDOWS_CERTIFICATE_PFX_PATH", "OS")) {
+        $old[$name] = [Environment]::GetEnvironmentVariable($name)
+    }
+    $target = Join-Path ([IO.Path]::GetTempPath()) "external-signer-$PID.exe"
+    try {
+        [IO.File]::WriteAllBytes($target, [byte[]]@(0))
+        $env:WINDOWS_CERTIFICATE_PFX_PATH = $null
+        $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT = " ab:" + ("cd" * 19) + " "
+        Prepare-ExternalSigning
+        $expected = "AB" + ("CD" * 19)
+        $state = Get-PreparedSigningState
+        if ($env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT -cne $expected -or
+            $state.ExpectedThumbprint -cne $expected -or $null -ne $state.Certificate) {
+            throw "external signer preparation self-test failed"
+        }
+        foreach ($case in @(
+                @{ Thumbprint = "not-a-thumbprint"; Pfx = $null
+                   Error = "Certificate thumbprint is not a SHA-1 hexadecimal value" },
+                @{ Thumbprint = $expected; Pfx = "release.pfx"
+                   Error = "Windows signing cannot use both a PFX and an external signer" }
+            )) {
+            $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT = $case.Thumbprint
+            $env:WINDOWS_CERTIFICATE_PFX_PATH = $case.Pfx
+            $rejected = $false
+            try { Prepare-ExternalSigning } catch {
+                if ($_.Exception.Message -cne $case.Error) { throw }
+                $rejected = $true
+            }
+            if (-not $rejected) { throw "external signer rejection self-test failed" }
+        }
+        $env:WINDOWS_CERTIFICATE_PFX_PATH = $null
+        $env:OS = "Windows_NT"
+
+        $stateReader = { [pscustomobject]@{ Pfx = $null; Certificate = $null; ExpectedThumbprint = $expected } }.GetNewClosure()
+        $chainChecks = [Collections.Generic.List[bool]]::new()
+        $signatureFor = {
+            param([string]$Thumbprint, [object]$TimeStamper)
+            $signature = [pscustomobject]@{
+                Status = "Valid"
+                SignatureType = "Authenticode"
+                SignerCertificate = [pscustomobject]@{ Thumbprint = $Thumbprint }
+                TimeStamperCertificate = $TimeStamper
+            }
+            $checks = $chainChecks
+            {
+                param($Path, $Tool, $Runner, $RequireTrustedChain)
+                $checks.Add($RequireTrustedChain)
+                $signature
+            }.GetNewClosure()
+        }.GetNewClosure()
+        $runner = { throw "external verification must not start processes" }
+
+        Invoke-WindowsVerify $target $runner $stateReader { "fake-signtool.exe" } `
+            (& $signatureFor $expected "timestamp")
+        if ($chainChecks.Count -ne 1 -or -not $chainChecks[0]) {
+            throw "external signer trusted-chain self-test failed"
+        }
+        foreach ($case in @(
+                @{ Thumbprint = "EF" * 20; TimeStamper = "timestamp"
+                   Error = "Authenticode signer does not match the expected external signer" },
+                @{ Thumbprint = $expected; TimeStamper = $null
+                   Error = "Authenticode signature is missing its RFC 3161 timestamp" }
+            )) {
+            $rejected = $false
+            try {
+                Invoke-WindowsVerify $target $runner $stateReader { "fake-signtool.exe" } `
+                    (& $signatureFor $case.Thumbprint $case.TimeStamper)
+            } catch {
+                if ($_.Exception.Message -cne $case.Error) { throw }
+                $rejected = $true
+            }
+            if (-not $rejected) { throw "external signer rejection self-test failed" }
+        }
+        $rejected = $false
+        try {
+            Invoke-WindowsSign $target $runner $stateReader { "fake-signtool.exe" } `
+                (& $signatureFor $expected "timestamp")
+        } catch {
+            if ($_.Exception.Message -cne "Externally signed releases cannot be signed locally") { throw }
+            $rejected = $true
+        }
+        if (-not $rejected) { throw "external signer local-signing self-test failed" }
+    } finally {
+        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        foreach ($name in $old.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $old[$name])
+        }
+    }
+}
+
 function Invoke-SelfTest {
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs
     Add-Type -AssemblyName System.Formats.Asn1
@@ -402,6 +520,8 @@ function Invoke-SelfTest {
     if ([string]::Join("`n", $arguments) -cne [string]::Join("`n", $expectedArguments)) {
         throw "SignTool argument contract self-test failed"
     }
+
+    Invoke-ExternalSignerSelfTest
 
     Write-Host "PHASE: bounded external processes"
     $pwsh = (Get-Process -Id $PID).Path
@@ -1010,6 +1130,7 @@ function Invoke-SelfTest {
 
 switch ($Operation) {
     "Prepare" { Prepare-WindowsSigning }
+    "PrepareExternal" { Prepare-ExternalSigning }
     "Validate" {
         $state = Get-PreparedSigningState
         $state.Certificate.Dispose()
@@ -1023,6 +1144,7 @@ switch ($Operation) {
         }
         $env:WINDOWS_CERTIFICATE_PFX_PATH = $null
         $env:WINDOWS_SIGNING_TIMESTAMP_URL = $null
+        $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT = $null
     }
     "SelfTest" { Invoke-SelfTest }
 }
