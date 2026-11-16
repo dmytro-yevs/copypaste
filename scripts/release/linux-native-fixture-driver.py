@@ -710,15 +710,29 @@ def runtime_socket_dirs(environment):
 
 
 def runtime_sockets(socket_dirs):
-    return {path for directory in socket_dirs for path in directory.glob("cp-*.sock")}
+    """Maps each runtime socket to its file identity.
+
+    The endpoint name is stable per data directory, so a restarted runtime
+    reuses the path; only a new inode marks a new listener.
+    """
+    sockets = {}
+    for directory in socket_dirs:
+        for path in directory.glob("cp-*.sock"):
+            try:
+                info = path.stat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISSOCK(info.st_mode):
+                sockets[path] = (info.st_dev, info.st_ino, info.st_ctime_ns)
+    return sockets
 
 
 def wait_for_gui_socket(socket_dirs, previous):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         candidates = [
-            path for path in runtime_sockets(socket_dirs)
-            if path not in previous and path.exists() and stat.S_ISSOCK(path.stat().st_mode)
+            path for path, identity in runtime_sockets(socket_dirs).items()
+            if previous.get(path) != identity
         ]
         if len(candidates) == 1:
             return candidates[0]
@@ -728,8 +742,13 @@ def wait_for_gui_socket(socket_dirs, previous):
     raise RuntimeError("packaged GUI did not expose its app-owned runtime socket")
 
 
+def gui_log_path(environment):
+    return Path(environment["TMPDIR"]) / "copypaste-gui.log"
+
+
 def start_gui_runtime(executable, environment, socket_dirs, previous_sockets):
-    app = subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+    with gui_log_path(environment).open("ab") as log:
+        app = subprocess.Popen([str(executable)], stdout=log, stderr=subprocess.STDOUT, env=environment)
     try:
         socket_path = wait_for_gui_socket(socket_dirs, previous_sockets)
         if app.poll() is not None:
@@ -743,6 +762,41 @@ def start_gui_runtime(executable, environment, socket_dirs, previous_sockets):
             app.kill()
             app.wait(timeout=5)
         raise
+
+
+def stop_gui(app, environment, evidence_dir):
+    """Stops the packaged GUI and records why it missed the exit deadline."""
+    app.terminate()
+    try:
+        app.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    lines = [f"pid {app.pid} did not exit within 5 seconds of SIGTERM"]
+    for task in sorted(Path(f"/proc/{app.pid}/task").glob("*")):
+        def read(name):
+            try:
+                return (task / name).read_text(errors="replace").strip()
+            except OSError as error:
+                return f"<{error.strerror}>"
+        state = read("stat").rsplit(")", 1)[-1].split()[:1]
+        lines.append(f"thread {task.name} {read('comm')} state={state} wchan={read('wchan')}")
+        kernel = subprocess.run(["sudo", "-n", "cat", str(task / "stack")], capture_output=True, text=True)
+        lines.extend(f"    {line}" for line in kernel.stdout.splitlines())
+    started = time.monotonic()
+    try:
+        app.wait(timeout=30)
+        lines.append(f"exited {time.monotonic() - started + 5:.1f} seconds after SIGTERM")
+    except subprocess.TimeoutExpired:
+        lines.append("still running 35 seconds after SIGTERM")
+        app.kill()
+        app.wait(timeout=5)
+    report = Path(evidence_dir) / "gui-exit-diagnostics.txt"
+    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log = gui_log_path(environment)
+    if log.is_file():
+        (Path(evidence_dir) / "gui-exit-output.log").write_bytes(log.read_bytes()[-262144:])
+    raise RuntimeError(f"packaged GUI did not exit within 5 seconds of SIGTERM; see {report}")
 
 
 @contextmanager
@@ -1770,8 +1824,7 @@ def main():
             persisted = "copypaste-restart-fixture"
             run([str(cli), "add", persisted], env=cli_environment)
             prior_sockets = runtime_sockets(socket_dirs)
-            app.terminate()
-            app.wait(timeout=5)
+            stop_gui(app, environment, args.evidence_dir)
             app, runtime_socket = start_gui_runtime(
                 gui_entrypoint, environment, socket_dirs, prior_sockets,
             )
@@ -1792,8 +1845,7 @@ def main():
             def restart_gui_for_modules():
                 nonlocal app, runtime_socket, cli_environment, daemon_data
                 prior_sockets = runtime_sockets(socket_dirs)
-                app.terminate()
-                app.wait(timeout=5)
+                stop_gui(app, environment, args.evidence_dir)
                 app, runtime_socket = start_gui_runtime(
                     gui_entrypoint, environment, socket_dirs, prior_sockets,
                 )
