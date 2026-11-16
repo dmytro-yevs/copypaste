@@ -280,6 +280,9 @@ class FlutterDesktopWindowHost
     var changed = restructure;
     if (restructure) {
       target.menu.clear();
+      // GTK destroys a removed row and its submenu, so a removed native item
+      // cannot be shown again; rebuild every row of a restructured menu.
+      _releaseTrayItems(target.keys);
       restructured.add(target.menu);
     }
     for (final entry in entries) {
@@ -298,6 +301,18 @@ class FlutterDesktopWindowHost
     }
     target.keys = keys;
     return changed;
+  }
+
+  void _releaseTrayItems(List<String> keys) {
+    for (final key in keys) {
+      final native = _trayItems.remove(key);
+      if (native == null) continue;
+      native.item.removeListener(native.listener);
+      final submenu = native.submenu;
+      if (submenu != null) _releaseTrayItems(submenu.keys);
+      native.item.dispose();
+      submenu?.menu.dispose();
+    }
   }
 
   _NativeItem _createTrayItem(TrayMenuEntry entry) {

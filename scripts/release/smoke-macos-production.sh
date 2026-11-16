@@ -64,14 +64,28 @@ daemon_path="$(ps -p "$daemon_pid" -o command=)"
 cli="$installed/Contents/MacOS/copypaste-cli"
 [[ -x "$cli" ]]
 status_file="$root/status.json"
+# The app names the endpoint after its data directory inside its temp directory.
+socket_dirs=("${TMPDIR:-/tmp}")
+user_temp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+if [[ -n "$user_temp" ]]; then socket_dirs+=("$user_temp"); fi
+ready=""
 for _ in $(seq 1 20); do
-    # The app names the endpoint after its data directory; read it from the daemon.
-    socket="$(lsof -a -p "$daemon_pid" -U -Fn 2>/dev/null | sed -n 's|^n\(/.*/cp-[0-9a-f]*\.sock\)$|\1|p' | head -n 1)"
-    if [[ -n "$socket" ]] && COPYPASTE_SOCKET="$socket" "$cli" --json status >"$status_file" 2>/dev/null; then
-        break
-    fi
+    for dir in "${socket_dirs[@]}"; do
+        for socket in "${dir%/}"/cp-*.sock; do
+            [[ -S "$socket" ]] || continue
+            if COPYPASTE_SOCKET="$socket" "$cli" --json status >"$status_file" 2>/dev/null; then
+                ready="$socket"
+                break 3
+            fi
+        done
+    done
     sleep 0.25
 done
+if [[ -z "$ready" ]]; then
+    echo "ERROR: no ready daemon endpoint in ${socket_dirs[*]}" >&2
+    for dir in "${socket_dirs[@]}"; do ls -l "${dir%/}"/cp-*.sock >&2 2>/dev/null || true; done
+    exit 1
+fi
 python3 - "$status_file" "$VERSION" <<'PY'
 import json
 import sys
