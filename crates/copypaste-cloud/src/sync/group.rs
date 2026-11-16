@@ -201,7 +201,7 @@ mod tests {
             _: i64,
             _: Option<&str>,
             _: u32,
-        ) -> Result<Vec<crate::rest::CloudItem>, TransportFault> {
+        ) -> Result<crate::rest::RowPage, TransportFault> {
             panic!("membership must not read clipboard rows")
         }
         async fn upsert(

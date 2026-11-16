@@ -189,6 +189,16 @@ pub trait SyncSource {
     /// than erroring.
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError>;
 
+    /// An upper bound on each item's plaintext among `ids`, from local
+    /// metadata, so a server can group fetches by size. Ids without a known
+    /// size are absent and are fetched one at a time.
+    fn stored_sizes(
+        &self,
+        _ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SyncError> {
+        Ok(std::collections::HashMap::new())
+    }
+
     /// Applies a remote item. Returns whether it was stored.
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError>;
 

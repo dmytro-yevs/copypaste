@@ -5,11 +5,14 @@
 //! that is not exactly the envelope, and never log the bytes — hold because
 //! this is the only door.
 
+use std::fmt;
+
+use serde::de::{self, IgnoredAny, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::event::{RealtimeError, RealtimeEvent};
 use super::TABLE;
-use crate::rest::CloudItem;
 
 /// The Phoenix envelope.
 #[derive(Debug, PartialEq)]
@@ -64,16 +67,16 @@ pub(super) enum Dispatch {
 }
 
 pub(super) fn dispatch(text: &str) -> Dispatch {
-    let frame = match parse_frame(text) {
-        Ok(f) => f,
-        Err(e) => {
+    let inbound: Inbound = match serde_json::from_str(text) {
+        Ok(inbound) => inbound,
+        Err(_) => {
             log_unparseable(text);
-            return Dispatch::Failed(e);
+            return Dispatch::Failed(RealtimeError::Protocol("frame is not a known envelope"));
         }
     };
 
-    match frame.event.as_str() {
-        "postgres_changes" => match change_event(&frame.payload) {
+    match inbound.event.as_str() {
+        "postgres_changes" => match change_event(inbound.change) {
             Ok(Some(event)) => Dispatch::Event(Box::new(event)),
             Ok(None) => Dispatch::Nothing,
             Err(e) => {
@@ -94,24 +97,85 @@ pub(super) fn dispatch(text: &str) -> Dispatch {
     }
 }
 
+/// An inbound frame as dispatch reads it: the event name and, for a change,
+/// only what identifies it. Every other value, the row's ciphertext included,
+/// is skipped without being allocated.
+struct Inbound {
+    event: String,
+    change: Option<ChangeData>,
+}
+
+impl<'de> Deserialize<'de> for Inbound {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_seq(InboundVisitor)
+    }
+}
+
+struct InboundVisitor;
+
+impl<'de> Visitor<'de> for InboundVisitor {
+    type Value = Inbound;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a five-element Phoenix frame")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Inbound, A::Error> {
+        let short = |len| de::Error::invalid_length(len, &"five elements");
+        seq.next_element::<IgnoredAny>()?.ok_or_else(|| short(0))?;
+        seq.next_element::<IgnoredAny>()?.ok_or_else(|| short(1))?;
+        seq.next_element::<String>()?.ok_or_else(|| short(2))?;
+        let event: String = seq.next_element()?.ok_or_else(|| short(3))?;
+        let change = if event == "postgres_changes" {
+            seq.next_element::<ChangePayload>()?
+                .ok_or_else(|| short(4))?
+                .data
+        } else {
+            seq.next_element::<IgnoredAny>()?.ok_or_else(|| short(4))?;
+            None
+        };
+        if seq.next_element::<IgnoredAny>()?.is_some() {
+            return Err(de::Error::invalid_length(6, &"five elements"));
+        }
+        Ok(Inbound { event, change })
+    }
+}
+
+#[derive(Deserialize)]
+struct ChangePayload {
+    data: Option<ChangeData>,
+}
+
+/// `record`/`new` and `old_record`/`old` are both accepted spellings.
+#[derive(Deserialize)]
+struct ChangeData {
+    table: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    record: Option<RowId>,
+    new: Option<RowId>,
+    old_record: Option<RowId>,
+    old: Option<RowId>,
+}
+
+#[derive(Deserialize)]
+struct RowId {
+    item_id: Option<String>,
+}
+
 /// Turn a `postgres_changes` payload into an event.
 ///
 /// `Ok(None)` means "a change we do not model" — a change to another table, or
-/// an event type we do not handle — which is not an error.
-///
-/// The payload shape is defensively read (manifest 05 §4.7): the change lives
-/// under `payload.data`, `record`/`new` and `old_record`/`old` are both
-/// accepted spellings, and the type is compared case-insensitively.
-fn change_event(payload: &Value) -> Result<Option<RealtimeEvent>, RealtimeError> {
-    let data = payload
-        .get("data")
-        .ok_or(RealtimeError::Protocol("change payload has no data"))?;
+/// an event type we do not handle — which is not an error. The type is
+/// compared case-insensitively (manifest 05 §4.7).
+fn change_event(data: Option<ChangeData>) -> Result<Option<RealtimeEvent>, RealtimeError> {
+    let data = data.ok_or(RealtimeError::Protocol("change payload has no data"))?;
 
-    if let Some(table) = data.get("table").and_then(Value::as_str) {
+    if let Some(table) = data.table.as_deref() {
         if table == crate::rest::group::GROUP_TABLE {
             return Ok(data
-                .get("type")
-                .and_then(Value::as_str)
+                .kind
+                .as_deref()
                 .is_some_and(|kind| {
                     kind.eq_ignore_ascii_case("INSERT") || kind.eq_ignore_ascii_case("UPDATE")
                 })
@@ -123,31 +187,30 @@ fn change_event(payload: &Value) -> Result<Option<RealtimeEvent>, RealtimeError>
     }
 
     let kind = data
-        .get("type")
-        .and_then(Value::as_str)
+        .kind
         .ok_or(RealtimeError::Protocol("change payload has no type"))?
         .to_ascii_uppercase();
 
-    let record = || data.get("record").or_else(|| data.get("new"));
-    let old = || data.get("old_record").or_else(|| data.get("old"));
-
     match kind.as_str() {
         "INSERT" | "UPDATE" => {
-            let row = record().ok_or(RealtimeError::Protocol("change payload has no record"))?;
-            let item: CloudItem = serde_json::from_value(row.clone())
-                .map_err(|_| RealtimeError::Protocol("record is not a clipboard row"))?;
+            let item_id = data
+                .record
+                .or(data.new)
+                .ok_or(RealtimeError::Protocol("change payload has no record"))?
+                .item_id
+                .ok_or(RealtimeError::Protocol("record is not a clipboard row"))?;
             Ok(Some(if kind == "INSERT" {
-                RealtimeEvent::Insert(item)
+                RealtimeEvent::Insert { item_id }
             } else {
-                RealtimeEvent::Update(item)
+                RealtimeEvent::Update { item_id }
             }))
         }
         "DELETE" => {
-            let item_id = old()
-                .and_then(|o| o.get("item_id"))
-                .and_then(Value::as_str)
-                .ok_or(RealtimeError::Protocol("delete payload carries no item id"))?
-                .to_owned();
+            let item_id = data
+                .old_record
+                .or(data.old)
+                .and_then(|old| old.item_id)
+                .ok_or(RealtimeError::Protocol("delete payload carries no item id"))?;
             Ok(Some(RealtimeEvent::Delete { item_id }))
         }
         _ => Ok(None),
@@ -231,85 +294,92 @@ mod tests {
         )
     }
 
-    #[test]
-    fn an_insert_becomes_an_insert_event() {
-        let payload: Value = serde_json::from_str(&format!(
-            r#"{{"data":{{"type":"INSERT","table":"clipboard_items","record":{}}}}}"#,
-            row_json("item-1", false)
-        ))
-        .unwrap();
-
-        match change_event(&payload).unwrap().unwrap() {
-            RealtimeEvent::Insert(item) => assert_eq!(item.item_id, "item-1"),
-            other => panic!("expected an insert, got {other:?}"),
+    fn change(payload: &str) -> Result<Option<RealtimeEvent>, RealtimeError> {
+        match dispatch(&format!(
+            r#"["1","1","realtime:clipboard_items","postgres_changes",{payload}]"#
+        )) {
+            Dispatch::Event(event) => Ok(Some(*event)),
+            Dispatch::Nothing => Ok(None),
+            Dispatch::Failed(error) => Err(error),
+            Dispatch::Closed => panic!("a change closed the channel"),
         }
+    }
+
+    #[test]
+    fn a_change_carries_only_the_id_of_a_large_record() {
+        let record = format!(
+            r#"{{"item_id":"item-1","ciphertext":"{}","nonce":"bm9uY2U=","created_at":1}}"#,
+            "A".repeat(1024 * 1024)
+        );
+        let insert = change(&format!(
+            r#"{{"data":{{"type":"INSERT","table":"clipboard_items","record":{record}}}}}"#
+        ));
+        assert_eq!(
+            insert,
+            Ok(Some(RealtimeEvent::Insert {
+                item_id: "item-1".into()
+            }))
+        );
+        assert!(std::mem::size_of::<RealtimeEvent>() <= 4 * std::mem::size_of::<usize>());
     }
 
     #[test]
     fn an_update_carrying_a_tombstone_becomes_an_update_event() {
         // A delete is a tombstone — an UPDATE with `deleted = true`. This is the
         // path a real delete travels; the DELETE event type is the exception.
-        let payload: Value = serde_json::from_str(&format!(
+        let update = change(&format!(
             r#"{{"data":{{"type":"UPDATE","table":"clipboard_items","new":{}}}}}"#,
             row_json("item-2", true)
-        ))
-        .unwrap();
-
-        match change_event(&payload).unwrap().unwrap() {
-            RealtimeEvent::Update(item) => {
-                assert_eq!(item.item_id, "item-2");
-                assert!(item.deleted);
-            }
-            other => panic!("expected an update, got {other:?}"),
-        }
+        ));
+        assert_eq!(
+            update,
+            Ok(Some(RealtimeEvent::Update {
+                item_id: "item-2".into()
+            }))
+        );
     }
 
     #[test]
     fn the_new_and_old_spellings_are_both_accepted() {
-        let with_new: Value = serde_json::from_str(&format!(
-            r#"{{"data":{{"type":"insert","new":{}}}}}"#,
-            row_json("item-3", false)
-        ))
-        .unwrap();
         assert!(matches!(
-            change_event(&with_new).unwrap().unwrap(),
-            RealtimeEvent::Insert(_)
+            change(&format!(
+                r#"{{"data":{{"type":"insert","new":{}}}}}"#,
+                row_json("item-3", false)
+            )),
+            Ok(Some(RealtimeEvent::Insert { .. }))
         ));
-
-        let with_old: Value =
-            serde_json::from_str(r#"{"data":{"type":"delete","old":{"item_id":"item-4"}}}"#)
-                .unwrap();
-        match change_event(&with_old).unwrap().unwrap() {
-            RealtimeEvent::Delete { item_id } => assert_eq!(item_id, "item-4"),
-            other => panic!("expected a delete, got {other:?}"),
-        }
+        assert_eq!(
+            change(r#"{"data":{"type":"delete","old":{"item_id":"item-4"}}}"#),
+            Ok(Some(RealtimeEvent::Delete {
+                item_id: "item-4".into()
+            }))
+        );
     }
 
     #[test]
     fn a_delete_without_an_item_id_is_a_protocol_error_not_a_guess() {
         // Guessing an id here would delete the wrong row. The correct response
         // is to report and let the poll loop reconcile.
-        let payload: Value =
-            serde_json::from_str(r#"{"data":{"type":"DELETE","old_record":{"id":"row-pk"}}}"#)
-                .unwrap();
-        assert!(change_event(&payload).is_err());
+        assert!(change(r#"{"data":{"type":"DELETE","old_record":{"id":"row-pk"}}}"#).is_err());
     }
 
     #[test]
     fn a_change_to_another_table_is_ignored_not_an_error() {
-        let payload: Value = serde_json::from_str(
-            r#"{"data":{"type":"INSERT","table":"other","record":{"item_id":"x"}}}"#,
-        )
-        .unwrap();
-        assert!(change_event(&payload).unwrap().is_none());
+        assert_eq!(
+            change(r#"{"data":{"type":"INSERT","table":"other","record":{"item_id":"x"}}}"#),
+            Ok(None)
+        );
+        assert_eq!(
+            change(r#"{"data":{"type":"UPDATE","table":"device_group_states","record":{}}}"#),
+            Ok(Some(RealtimeEvent::GroupChanged))
+        );
     }
 
     #[test]
-    fn a_malformed_record_is_an_error_not_a_partial_item() {
-        // INV-N3 in miniature: never manufacture a half-filled row.
-        let payload: Value =
-            serde_json::from_str(r#"{"data":{"type":"INSERT","record":{"item_id":"x"}}}"#).unwrap();
-        assert!(change_event(&payload).is_err());
+    fn a_record_without_an_id_is_an_error_not_a_guess() {
+        assert!(change(r#"{"data":{"type":"INSERT","record":{"ciphertext":"x"}}}"#).is_err());
+        assert!(change(r#"{"data":{"type":"INSERT"}}"#).is_err());
+        assert!(change(r#"{"nodata":{}}"#).is_err());
     }
 
     #[test]
@@ -332,7 +402,7 @@ mod tests {
                 r#"["1","1","realtime:clipboard_items","postgres_changes",{{"data":{{"type":"INSERT","record":{}}}}}]"#,
                 row_json("item-5", false)
             )),
-            Dispatch::Event(event) if matches!(*event, RealtimeEvent::Insert(_))
+            Dispatch::Event(event) if matches!(*event, RealtimeEvent::Insert { .. })
         ));
     }
 }

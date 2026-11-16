@@ -285,7 +285,7 @@ mod tests {
             since: i64,
             after: Option<&str>,
             limit: u32,
-        ) -> Result<Vec<CloudItem>, TransportFault> {
+        ) -> Result<crate::rest::RowPage, TransportFault> {
             self.items.fetch_since(token, since, after, limit).await
         }
         async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {

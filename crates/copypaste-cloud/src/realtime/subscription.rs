@@ -14,8 +14,8 @@ use crate::{auth::transient_backoff, CloudConfig};
 ///
 /// Bounded on purpose. If the consumer stalls, backpressure reaches the socket
 /// and the server stops being told we are healthy, which is the correct signal;
-/// an unbounded queue would instead grow without limit holding decrypted-row
-/// metadata in memory. Missing an event is safe — the poll loop is the backstop.
+/// an unbounded queue would instead grow without limit. Events carry only an
+/// item id. Missing an event is safe — the poll loop is the backstop.
 const EVENT_QUEUE: usize = 64;
 
 /// A live subscription to `clipboard_items`.

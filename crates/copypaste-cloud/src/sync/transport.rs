@@ -11,7 +11,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::auth::Session;
-use crate::rest::CloudItem;
+use crate::rest::{CloudItem, RowPage};
 
 /// What the driver needs to know about a failed request.
 ///
@@ -132,13 +132,15 @@ pub trait RestApi: Send + Sync {
     /// [`CloudSync::pull`](super::CloudSync::pull) sorts each page defensively
     /// and warns if one arrives out of order, so a violation is loud rather
     /// than silent — but it cannot repair it.
+    ///
+    /// A page may also end early at a byte budget; [`RowPage::cut`] says so.
     fn fetch_since(
         &self,
         token: &str,
         since_ms: i64,
         after_item_id: Option<&str>,
         limit: u32,
-    ) -> impl Future<Output = Result<Vec<CloudItem>, TransportFault>> + Send;
+    ) -> impl Future<Output = Result<RowPage, TransportFault>> + Send;
 
     /// Upsert on `item_id`, so re-sending a row is a no-op rather than a
     /// conflict. Every column that has a server-side default must be sent

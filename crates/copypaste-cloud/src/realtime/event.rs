@@ -4,27 +4,28 @@
 //! which is what makes the log-hygiene rule in the module docs structural
 //! rather than remembered.
 
-use crate::rest::CloudItem;
-
-/// One Postgres change on `clipboard_items`.
+/// One Postgres change on `clipboard_items`, identified and nothing more.
 ///
-/// `Delete` carries only an `item_id` because a Postgres delete event carries
-/// only the replica-identity columns. In practice it should be rare: manifest
-/// 05 §3.5 makes a delete a *tombstone*, an ordinary row version with
-/// `deleted = true`, which arrives here as [`RealtimeEvent::Update`]. A real
-/// `Delete` means a row was removed out of band — a retention job, or a manual
-/// operation — and the sync driver treats it as a hint to re-poll, never as an
-/// instruction to remove a local row.
+/// A change carries only the `item_id` it names: the row itself, ciphertext
+/// included, is skipped unread on arrival. Every change is a hint to pull, and
+/// the pull is what downloads, verifies and opens the row.
 ///
-/// Only `Debug` is derived. `Clone` and `PartialEq` would impose those bounds
-/// on `CloudItem`, which belongs to `rest.rs`; this enum should not constrain a
-/// sibling's DTO for the convenience of a test.
-#[derive(Debug)]
+/// A delete event carries only the replica-identity columns. In practice it
+/// should be rare: manifest 05 §3.5 makes a delete a *tombstone*, an ordinary
+/// row version with `deleted = true`, which arrives here as
+/// [`RealtimeEvent::Update`]. A real `Delete` means a row was removed out of
+/// band — a retention job, or a manual operation — and the sync driver treats
+/// it as a hint to re-poll, never as an instruction to remove a local row.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeEvent {
     /// A membership write is a content-free hint to run group anti-entropy.
     GroupChanged,
-    Insert(CloudItem),
-    Update(CloudItem),
+    Insert {
+        item_id: String,
+    },
+    Update {
+        item_id: String,
+    },
     Delete {
         item_id: String,
     },

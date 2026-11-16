@@ -153,6 +153,7 @@
 
 use std::time::Duration;
 
+pub mod body;
 pub mod client;
 pub mod error;
 pub mod group;
@@ -163,6 +164,7 @@ pub use group::GroupRow;
 #[cfg(test)]
 mod testkit;
 
+pub use body::RowPage;
 pub use client::SupabaseRest;
 pub use error::RestError;
 pub use item::CloudItem;

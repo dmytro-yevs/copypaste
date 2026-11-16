@@ -115,7 +115,7 @@ impl RestApi for crate::rest::SupabaseRest {
         since_ms: i64,
         after_item_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<CloudItem>, TransportFault> {
+    ) -> Result<crate::rest::RowPage, TransportFault> {
         crate::rest::SupabaseRest::fetch_since(self, token, since_ms, after_item_id, limit)
             .await
             .map_err(classify_rest)

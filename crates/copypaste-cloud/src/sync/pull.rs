@@ -33,9 +33,9 @@ use super::transport::{AuthApi, RestApi};
 // `SystemTime` read that every expiry and every stamp comparison uses, and a
 // second copy of it here would be a second thing to get wrong.
 use crate::auth::now_ms;
-use crate::crypto::{decrypt_row, TAG_LEN};
-use crate::rest::CloudItem;
-use base64::encoded_len;
+use crate::crypto::decrypt_row;
+use crate::rest::body::MAX_PAYLOAD_B64_BYTES;
+use crate::rest::{CloudItem, RowPage};
 use zeroize::Zeroizing;
 
 /// Rows requested per page.
@@ -46,14 +46,21 @@ use zeroize::Zeroizing;
 /// clamps this to its own `MAX_PAGE_LIMIT`, so asking for more is harmless.
 const PULL_PAGE_LIMIT: u32 = 100;
 
-/// Pages one [`CloudSync::pull`] will drain before returning.
+/// Requests one [`CloudSync::pull`] makes before returning.
 ///
 /// A device that has been offline for a month has thousands of rows waiting.
 /// Draining them in one call would make a single `pull` unbounded in time and
-/// memory; stopping after this many pages returns control to the caller, which
-/// simply polls again — the watermark has advanced, so the next call resumes
-/// exactly where this one stopped.
+/// traffic; stopping after this many pages returns control to the caller,
+/// which simply polls again — the watermark has advanced, so the next call
+/// resumes exactly where this one stopped, and a pull that applied anything
+/// resets the poll interval to its floor. Each page is cut at
+/// [`PAGE_BYTES`](crate::rest::body::PAGE_BYTES), so one pull reads at most
+/// this many times two maximal rows.
 const MAX_PAGES_PER_PULL: usize = 50;
+
+/// Decrypted content held before it is merged. One maximal item fills a batch,
+/// so a batch holds less than two.
+const APPLY_BATCH_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 const MSG_BATCH_ARITY: &str = "the history database did not answer for every row of a page";
 
@@ -79,9 +86,9 @@ pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// Fetch, open and apply everything since the watermark.
     ///
-    /// Drains up to [`MAX_PAGES_PER_PULL`] pages: when a page comes back full
-    /// there is more waiting, and waiting a whole poll interval per page makes
-    /// a multi-device burst drain at one page per tick.
+    /// Drains up to [`MAX_PAGES_PER_PULL`] pages: when a page comes back full or
+    /// cut there is more waiting, and waiting a whole poll interval per page
+    /// makes a multi-device burst drain at one page per tick.
     ///
     /// Idempotent. Applying the same page twice is absorbed by the store's
     /// ordering (INV-I1), and the watermark only moves forward.
@@ -118,7 +125,11 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         let mut waiting_for_key = false;
 
         for _ in 0..MAX_PAGES_PER_PULL {
-            let mut rows = self
+            let RowPage {
+                mut rows,
+                oversized,
+                cut,
+            } = self
                 .execute(|token| {
                     let after = cursor.item_id.clone();
                     async move {
@@ -147,6 +158,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             let now = now_ms();
             let mut advanced = cursor.clone();
             let mut batch: Vec<LocalItem> = Vec::new();
+            let mut batch_bytes = 0usize;
 
             for row in rows {
                 let created_at = row.created_at;
@@ -162,6 +174,19 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                         item_id = %row.item_id,
                         "skipping a row stamped implausibly far in the future"
                     );
+                    continue;
+                }
+
+                // The transport dropped a string longer than any accepted
+                // payload unread, so neither signature nor size can be checked
+                // on it. Only a client ignoring the cap writes such a row.
+                if oversized.contains(&row.item_id) {
+                    stats.skipped_too_large += 1;
+                    tracing::warn!(
+                        item_id = %row.item_id,
+                        "skipping a row whose payload exceeds the content cap"
+                    );
+                    advanced.advance_after_refusal(created_at, &row.item_id, now);
                     continue;
                 }
 
@@ -240,6 +265,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     continue;
                 }
 
+                batch_bytes += content.len();
                 batch.push(LocalItem {
                     item_id: row.item_id,
                     content,
@@ -251,29 +277,17 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     deleted: row.deleted,
                     origin_device_id: row.origin_device_id,
                 });
-            }
-
-            let reached = batch
-                .last()
-                .map(|item| (item.created_at, item.item_id.clone()));
-            let offered = batch.len();
-            if offered > 0 {
-                let outcomes = source.apply_remote_batch(batch)?;
-                if outcomes.len() != offered {
-                    return Err(SyncError::Source(MSG_BATCH_ARITY));
-                }
-                for outcome in outcomes {
-                    match outcome {
-                        Applied::Merged => stats.applied += 1,
-                        Applied::Declined(declined) => {
-                            republish |= source.requeue_local_winner(&declined)?;
-                        }
-                    }
-                }
-                if let Some((created_at, item_id)) = reached {
-                    advanced.advance_past(created_at, &item_id);
+                if batch_bytes >= APPLY_BATCH_BYTES {
+                    republish |= apply_batch(
+                        source,
+                        std::mem::take(&mut batch),
+                        &mut advanced,
+                        &mut stats,
+                    )?;
+                    batch_bytes = 0;
                 }
             }
+            republish |= apply_batch(source, batch, &mut advanced, &mut stats)?;
 
             // Persist per page, so an interrupted drain resumes from the last
             // completed page rather than from the start. Monotonic by
@@ -286,7 +300,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             }
 
             // Short page: caught up.
-            if waiting_for_key || page_len < PULL_PAGE_LIMIT as usize {
+            if waiting_for_key || (!cut && page_len < PULL_PAGE_LIMIT as usize) {
                 break;
             }
             // Full page that produced no progress: every row in it was
@@ -305,12 +319,40 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     }
 }
 
+/// Merge decrypted rows and move the cursor past the last of them. Returns
+/// whether a declined row's local winner was queued for upload.
+fn apply_batch(
+    source: &dyn CloudSource,
+    batch: Vec<LocalItem>,
+    advanced: &mut Cursor,
+    stats: &mut SyncStats,
+) -> Result<bool, SyncError> {
+    let Some((created_at, item_id)) = batch
+        .last()
+        .map(|item| (item.created_at, item.item_id.clone()))
+    else {
+        return Ok(false);
+    };
+    let offered = batch.len();
+    let outcomes = source.apply_remote_batch(batch)?;
+    if outcomes.len() != offered {
+        return Err(SyncError::Source(MSG_BATCH_ARITY));
+    }
+    let mut republish = false;
+    for outcome in outcomes {
+        match outcome {
+            Applied::Merged => stats.applied += 1,
+            Applied::Declined(declined) => {
+                republish |= source.requeue_local_winner(&declined)?;
+            }
+        }
+    }
+    advanced.advance_past(created_at, &item_id);
+    Ok(republish)
+}
+
 fn ciphertext_exceeds_content_limit(ciphertext: &str) -> bool {
-    encoded_len(
-        copypaste_ipc::MAX_CONTENT_BYTES.saturating_add(TAG_LEN),
-        true,
-    )
-    .is_none_or(|max_encoded_len| ciphertext.len() > max_encoded_len)
+    ciphertext.len() > MAX_PAYLOAD_B64_BYTES
 }
 
 /// Where the download has reached, as a keyset over `(created_at, item_id)`.
@@ -1006,6 +1048,73 @@ mod tests {
         let second = sync.pull(&source).await.unwrap();
         assert_eq!(second.downloaded, 0);
         assert_eq!(source.watermark_item_id().unwrap().as_deref(), Some("b"));
+    }
+
+    #[tokio::test]
+    async fn large_rows_are_merged_in_bounded_batches_from_cut_pages() {
+        let half = "x".repeat(APPLY_BATCH_BYTES / 2);
+        let rows: Vec<CloudItem> = (0..6)
+            .map(|i| cloud_row(&format!("item-{i}"), 1_000 + i, &half))
+            .collect();
+
+        let source = FakeSource::default();
+        let sync = driver(FakeRest::seeded(rows.clone()), FakeAuth::default());
+        let stats = sync.pull(&source).await.unwrap();
+        assert_eq!(stats.applied, 6);
+        assert_eq!(
+            source.batches.load(Ordering::SeqCst),
+            3,
+            "two rows fill a batch"
+        );
+        assert_eq!(source.watermark().unwrap(), 1_005);
+
+        let source = FakeSource::default();
+        let mut rest = FakeRest::seeded(rows);
+        rest.cut_after = Some(2);
+        let sync = driver(rest, FakeAuth::default());
+        let stats = sync.pull(&source).await.unwrap();
+        assert_eq!(stats.applied, 6, "a cut page is not the end of the backlog");
+        assert_eq!(sync.rest.fetches.load(Ordering::SeqCst), 3);
+        assert_eq!(source.watermark().unwrap(), 1_005);
+    }
+
+    #[tokio::test]
+    async fn a_pull_stops_after_its_request_budget_and_the_next_one_resumes() {
+        let rows: Vec<CloudItem> = (0..MAX_PAGES_PER_PULL as i64 + 10)
+            .map(|i| cloud_row(&format!("item-{i:03}"), 1_000 + i, "x"))
+            .collect();
+        let source = FakeSource::default();
+        let mut rest = FakeRest::seeded(rows);
+        rest.cut_after = Some(1);
+        let sync = driver(rest, FakeAuth::default());
+
+        assert_eq!(
+            sync.pull(&source).await.unwrap().applied,
+            MAX_PAGES_PER_PULL
+        );
+        assert_eq!(sync.rest.fetches.load(Ordering::SeqCst), MAX_PAGES_PER_PULL);
+        assert_eq!(sync.pull(&source).await.unwrap().applied, 10);
+        assert_eq!(
+            source.watermark().unwrap(),
+            1_000 + MAX_PAGES_PER_PULL as i64 + 9
+        );
+    }
+
+    #[tokio::test]
+    async fn an_oversized_row_is_refused_without_stalling_the_cursor() {
+        let source = FakeSource::default();
+        let mut rest = FakeRest::seeded(vec![
+            cloud_row("huge", 1_000, "dropped by the transport"),
+            cloud_row("real", 2_000, "genuine"),
+        ]);
+        rest.oversized = vec!["huge".into()];
+        let sync = driver(rest, FakeAuth::default());
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!((stats.skipped_too_large, stats.applied), (1, 1));
+        assert!(source.get("huge").is_none());
+        assert_eq!(source.watermark().unwrap(), 2_000);
     }
 
     #[tokio::test]

@@ -15,7 +15,6 @@ crates/copypaste-cloud/src/crypto/row.rs
 crates/copypaste-cloud/src/crypto/sign.rs
 crates/copypaste-cloud/src/lib.rs
 crates/copypaste-cloud/src/realtime/channel.rs
-crates/copypaste-cloud/src/realtime/event.rs
 crates/copypaste-cloud/src/realtime/mod.rs
 crates/copypaste-cloud/src/realtime/socket.rs
 crates/copypaste-cloud/src/realtime/subscription.rs

@@ -47,8 +47,13 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
     let mut batch_bytes = 0usize;
     let mut unavailable: HashSet<&str> = allowed.iter().map(String::as_str).collect();
 
-    // Bound each fetch so plaintext for an entire history is never resident.
-    for chunk in allowed.chunks(MAX_ITEMS_PER_MESSAGE) {
+    // Each fetch holds at most one message's worth of stored bytes, so the
+    // pending message plus one fetch is all that is ever resident.
+    let sizes = source.stored_sizes(&allowed)?;
+    let mut rest = allowed.as_slice();
+    while !rest.is_empty() {
+        let (chunk, tail) = rest.split_at(fetch_len(rest, &sizes));
+        rest = tail;
         for mut item in source.fetch(chunk)? {
             if !chunk.contains(&item.item_id) || !unavailable.contains(item.item_id.as_str()) {
                 // The source returned something it was not asked for.
@@ -111,6 +116,22 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
     }
 
     chan.send(SyncMessage::Done).await
+}
+
+/// How many leading `ids` one fetch takes: as many as one message can carry
+/// by stored size, and a single id when its size is unknown or too large.
+fn fetch_len(ids: &[String], sizes: &HashMap<String, u64>) -> usize {
+    let mut bytes = 0u64;
+    let mut len = 0;
+    for id in ids.iter().take(MAX_ITEMS_PER_MESSAGE) {
+        let Some(size) = sizes.get(id) else { break };
+        bytes = bytes.saturating_add(*size);
+        if bytes > MAX_ITEM_BYTES_PER_MESSAGE as u64 {
+            break;
+        }
+        len += 1;
+    }
+    len.max(1)
 }
 
 #[cfg(test)]
@@ -317,6 +338,88 @@ mod tests {
                 "{name} blocked the following valid item"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn serving_large_items_never_fetches_more_than_one_message_of_content() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Measured {
+            inner: TestSource,
+            largest_fetch: AtomicUsize,
+            fetches: AtomicUsize,
+        }
+        impl SyncSource for Measured {
+            fn device_id(&self) -> String {
+                self.inner.device_id()
+            }
+            fn device_name(&self) -> String {
+                self.inner.device_name()
+            }
+            fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+                self.inner.summaries(since_ms)
+            }
+            fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                self.inner.local_summaries(ids)
+            }
+            fn stored_sizes(&self, ids: &[String]) -> Result<HashMap<String, u64>, SyncError> {
+                Ok(self
+                    .inner
+                    .fetch(ids)?
+                    .into_iter()
+                    .map(|item| (item.item_id, item.content.len() as u64))
+                    .collect())
+            }
+            fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+                self.fetches.fetch_add(1, Ordering::SeqCst);
+                let items = self.inner.fetch(ids)?;
+                let bytes = items.iter().map(|item| item.content.len()).sum();
+                self.largest_fetch.fetch_max(bytes, Ordering::SeqCst);
+                Ok(items)
+            }
+            fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+                self.inner.apply(item)
+            }
+        }
+
+        let big = "x".repeat(MAX_ITEM_BYTES_PER_MESSAGE / 2 + 1);
+        let mut items: Vec<_> = (0..4)
+            .map(|n| item(&format!("big{n}"), 100 + n, &big, "dev-a"))
+            .collect();
+        items.extend((0..9).map(|n| item(&format!("small{n}"), 200 + n, "short", "dev-a")));
+        let advertised = items
+            .iter()
+            .map(|item| (item.item_id.clone(), item.summary()))
+            .collect();
+        let requested = items.iter().map(|item| item.item_id.clone()).collect();
+        let source = Measured {
+            inner: TestSource::new("dev-a", items),
+            largest_fetch: AtomicUsize::new(0),
+            fetches: AtomicUsize::new(0),
+        };
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+
+        serve_items(&mut channel, &source, &advertised, requested, &mut stats)
+            .await
+            .unwrap();
+
+        assert_eq!(stats.sent, 13);
+        assert!(source.largest_fetch.load(Ordering::SeqCst) <= MAX_ITEM_BYTES_PER_MESSAGE);
+        // big0, big1, big2, then big3 with seven small items, then two more.
+        assert_eq!(source.fetches.load(Ordering::SeqCst), 5);
+        let sent: Vec<_> = channel
+            .sent
+            .iter()
+            .filter_map(|message| match message {
+                SyncMessage::Items { items } => {
+                    Some(items.iter().map(|item| item.item_id.as_str()).collect())
+                }
+                _ => None,
+            })
+            .collect::<Vec<Vec<_>>>();
+        assert_eq!(sent[..3], [["big0"], ["big1"], ["big2"]]);
+        assert_eq!(sent[3][0], "big3");
     }
 
     #[tokio::test]

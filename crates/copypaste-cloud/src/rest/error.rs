@@ -8,7 +8,11 @@
 
 use reqwest::{Response, StatusCode};
 
+use super::body::read_prefix;
 use crate::auth::retry_after_secs;
+
+/// Error-body bytes read for the log line; the rest is never downloaded.
+const ERROR_DETAIL_BYTES: usize = 1024;
 
 /// Why a PostgREST call failed.
 #[derive(Debug, thiserror::Error)]
@@ -66,16 +70,18 @@ impl RestError {
     }
 }
 
-/// Map a response to its body, or to the error its status means.
-pub(super) async fn classify(response: Response) -> Result<String, RestError> {
+/// Pass a successful response through, or map it to the error its status means.
+pub(super) async fn classify(response: Response) -> Result<Response, RestError> {
     let status = response.status();
     if status.is_success() {
-        return response.text().await.map_err(|_| RestError::Malformed);
+        return Ok(response);
     }
 
     let retry_after = retry_after_secs(response.headers());
     let code = status.as_u16();
-    let detail = truncate_body(&response.text().await.unwrap_or_default());
+    let detail = truncate_body(&String::from_utf8_lossy(
+        &read_prefix(response, ERROR_DETAIL_BYTES).await,
+    ));
 
     match status {
         StatusCode::UNAUTHORIZED => {
@@ -227,7 +233,7 @@ mod tests {
             .fetch_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
-        assert!(rows.is_empty());
+        assert!(rows.rows.is_empty());
         assert_eq!(stub.request_count().await, 2);
     }
 
