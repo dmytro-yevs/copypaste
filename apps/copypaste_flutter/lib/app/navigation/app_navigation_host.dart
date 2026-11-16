@@ -21,6 +21,9 @@ class AppNavigationHost extends StatefulWidget {
 
 class _AppNavigationHostState extends State<AppNavigationHost> {
   late final ValueNotifier<Widget> _child = ValueNotifier<Widget>(widget.child);
+  late final List<NavigatorObserver> _observers = [
+    widget.controller.routeObserver,
+  ];
   bool _nestedCanPop = false;
 
   @override
@@ -34,6 +37,7 @@ class _AppNavigationHostState extends State<AppNavigationHost> {
   @override
   void dispose() {
     _child.dispose();
+    widget.controller.releaseRoutes();
     super.dispose();
   }
 
@@ -68,6 +72,7 @@ class _AppNavigationHostState extends State<AppNavigationHost> {
           },
           child: Navigator(
             key: widget.controller.navigatorKey,
+            observers: _observers,
             onGenerateRoute: (RouteSettings settings) {
               // The destinations' root does not take focus from the shell,
               // so Tab starts at the header; pushed pages still take it.

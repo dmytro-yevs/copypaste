@@ -387,6 +387,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _uiMemory = UiMemoryController(
       visible: _visibility,
       canSuspend: _canSuspendPresentation,
+      beforeSuspend: _navigation.dismissPassiveOverlays,
       startHidden: _desktopWindow?.startHidden ?? false,
     )..addListener(_memoryStateChanged);
     _pairingLinksChannel.setMethodCallHandler(_handlePairingLinkCall);
@@ -456,10 +457,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       !(_devicesController?.systemScanInFlight ?? false) &&
       !(_devicesController?.actionInFlight ?? false) &&
       !(_settingsController?.busy ?? false) &&
+      !(_storage?.busy ?? false) &&
       !(_modulesController?.busy ?? false) &&
       !(_appUpdateController?.busy ?? false) &&
-      !_navigation.bottomOverlayOpen &&
-      !(_navigation.navigatorKey.currentState?.canPop() ?? false) &&
+      _navigation.overlaysPassive &&
       !(_rootNavigatorKey.currentState?.canPop() ?? false);
 
   void _presentationVisibilityChanged() {

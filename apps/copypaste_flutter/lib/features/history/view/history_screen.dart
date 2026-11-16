@@ -400,7 +400,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       var drawerCloseScheduled = false;
       await showOverlay<void>(
         context,
-        AppOverlays.drawerConfiguration(context),
+        // The detail is read-only; the selection survives its dismissal.
+        AppOverlays.drawerConfiguration(context, passive: true),
         builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('history-detail-drawer'),
           constraints: AppOverlays.drawerContentConstraints(context),

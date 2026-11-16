@@ -562,6 +562,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final route = AppPageRoute<void>(
       disableAnimations: MediaQuery.disableAnimationsOf(context),
       settings: RouteSettings(name: 'settings/${target.section.slug}'),
+      passive: () => mounted && _holdsNoInput(target.section),
       builder: (context) => AnimatedBuilder(
         animation: Listenable.merge([
           widget.controller,
@@ -603,10 +604,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     unawaited(Navigator.of(context).push<void>(route));
     unawaited(
       route.completed.then<void>((_) {
-        if (mounted) setState(() => _compactRouteOpen = false);
+        if (!mounted) return;
+        setState(() {
+          _compactRouteOpen = false;
+          // The closed page's relay field no longer shows the draft.
+          _relayDraft = null;
+        });
       }),
     );
   }
+
+  /// Whether [section] shows only built-in controls that apply immediately.
+  /// Feature, module and shortcut-recording content may hold input.
+  bool _holdsNoInput(SettingsSectionId section) =>
+      _contributions(section).isEmpty &&
+      switch (section) {
+        SettingsSectionId.sync =>
+          _relayDraft == null ||
+              _relayDraft!.trim() == widget.controller.settings?.relayUrl,
+        SettingsSectionId.modules ||
+        SettingsSectionId.module ||
+        SettingsSectionId.shortcuts => false,
+        _ => true,
+      };
 
   Widget _navigationTargetLabel(SettingsSearchTarget target) {
     if (!target.isSearchResult) return Text(target.label);

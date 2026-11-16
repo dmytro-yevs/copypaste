@@ -1373,6 +1373,48 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a hidden window may close the narrow detail drawer', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _ScreenRepository()
+      ..page = HistoryClipPage(
+        items: [
+          HistoryClip(
+            id: 'detail',
+            contentType: 'text/plain',
+            preview: 'Detail clip',
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          ),
+        ],
+      );
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    final navigation = AppNavigationController();
+    addTearDown(navigation.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: AppNavigationHost(
+          controller: navigation,
+          child: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Detail clip'));
+    await tester.pumpAndSettle();
+    final drawer = find.byKey(const ValueKey<String>('history-detail-drawer'));
+    expect(drawer, findsOneWidget);
+    expect(navigation.overlaysPassive, isTrue);
+
+    navigation.dismissPassiveOverlays();
+    await tester.pumpAndSettle();
+    expect(drawer, findsNothing);
+    expect(controller.selection.selectedId, 'detail');
+  });
+
   testWidgets('resizes the wide inspector from its border without a handle', (
     tester,
   ) async {

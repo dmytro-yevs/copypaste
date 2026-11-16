@@ -97,17 +97,21 @@ void main() {
   ) async {
     final visible = ValueNotifier(false);
     var busy = true;
+    var passiveClosed = 0;
     final controller = UiMemoryController(
       visible: visible,
       canSuspend: () => !busy,
+      beforeSuspend: () => passiveClosed++,
     );
     addTearDown(controller.dispose);
     addTearDown(visible.dispose);
     await tester.pump(const Duration(seconds: 60));
     expect(controller.suspended, isFalse);
+    expect(passiveClosed, 0, reason: 'a refused deadline keeps overlays open');
     busy = false;
     await tester.pump(const Duration(seconds: 60));
     expect(controller.suspended, isTrue);
+    expect(passiveClosed, 1);
   });
 
   testWidgets('dispose cancels the hidden deadline', (tester) async {
