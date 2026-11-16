@@ -3,6 +3,13 @@ use std::time::Duration;
 
 use anyhow::Context;
 
+/// Reactor work is light: store, crypto, module and pasteboard work takes a
+/// `spawn_blocking` hop, so the worker count does not scale with cores.
+const WORKER_THREADS: usize = 2;
+/// Above the 64 IPC connections that each run one blocking request at a time,
+/// plus background owners and `block_in_place`, so admitted work never queues.
+const MAX_BLOCKING_THREADS: usize = 128;
+
 /// Runs the daemon on an owned runtime and never spends shutdown budget twice.
 ///
 /// Tokio's `Runtime::Drop` waits for started blocking work. W6a has already
@@ -13,6 +20,8 @@ where
     F: Future<Output = anyhow::Result<()>>,
 {
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(WORKER_THREADS)
+        .max_blocking_threads(MAX_BLOCKING_THREADS)
         .enable_all()
         .build()
         .context("build the daemon runtime")?;
