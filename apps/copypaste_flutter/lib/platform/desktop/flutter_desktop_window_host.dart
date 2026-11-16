@@ -32,6 +32,7 @@ class FlutterDesktopWindowHost
   _NativeMenu? _trayMenu;
   TrayMenuEvents? _trayEvents;
   final Map<String, _NativeItem> _trayItems = {};
+  final List<_RetiredTrayMenu> _retiredTrayMenus = [];
   final Map<IconData, Image> _trayGlyphs = {};
   Future<void> _trayRender = Future<void>.value();
   bool _openingQuickPaste = false;
@@ -179,17 +180,8 @@ class FlutterDesktopWindowHost
     _trayIcon = icon;
     _trayImage = image;
     _trayEvents = events;
-    final native = _trayMenu = _NativeMenu(root);
+    final native = _trayMenu = _trayRoot(root);
     try {
-      native.listener = root.addListener((event) {
-        final events = _trayEvents;
-        if (events == null) return;
-        if (event is MenuOpenedEvent && event.menuId == root.id) {
-          events.onOpened();
-        } else if (event is MenuClosedEvent && event.menuId == root.id) {
-          events.onClosed();
-        }
-      });
       await _showTrayMenu(native, menu);
       icon
         ..icon = image
@@ -231,9 +223,20 @@ class FlutterDesktopWindowHost
   @override
   Future<void> updateTrayMenu(List<TrayMenuEntry> menu) {
     _trayRender = _trayRender.catchError((Object _) {}).then((_) async {
-      final native = _trayMenu;
+      var native = _trayMenu;
       final icon = _trayIcon;
       if (native == null || icon == null) return;
+      if (Platform.isLinux && _restructures(native, menu)) {
+        // The D-Bus menu export keeps raw pointers to the rows it last
+        // published, and GTK destroys a removed row at once. Publish a new
+        // tree instead and keep the old one alive until the host re-reads.
+        final root = Menu.create();
+        if (root == null) {
+          throw StateError('Unable to create a system tray menu.');
+        }
+        _retireTrayMenu(native);
+        native = _trayMenu = _trayRoot(root);
+      }
       final changed = await _showTrayMenu(native, menu);
       // A D-Bus menu host re-reads the layout only when it is told to.
       if (changed && Platform.isLinux && identical(native, _trayMenu)) {
@@ -266,6 +269,56 @@ class FlutterDesktopWindowHost
       }
     }
     return changed;
+  }
+
+  _NativeMenu _trayRoot(Menu root) {
+    final native = _NativeMenu(root);
+    native.listener = root.addListener((event) {
+      final events = _trayEvents;
+      if (events == null) return;
+      if (event is MenuOpenedEvent && event.menuId == root.id) {
+        events.onOpened();
+      } else if (event is MenuClosedEvent && event.menuId == root.id) {
+        events.onClosed();
+      }
+    });
+    return native;
+  }
+
+  bool _restructures(_NativeMenu target, List<TrayMenuEntry> entries) {
+    if (!listEquals([for (final entry in entries) entry.key], target.keys)) {
+      return true;
+    }
+    for (final entry in entries) {
+      if (entry is! TrayMenuSubmenu) continue;
+      final submenu = _trayItems[entry.key]?.submenu;
+      if (submenu == null || _restructures(submenu, entry.children)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Keeps a replaced Linux tree for longer than a D-Bus menu host takes to
+  /// re-read the layout, so requests it already sent reach live rows.
+  void _retireTrayMenu(_NativeMenu root) {
+    final retired = _RetiredTrayMenu(root, _trayItems.values.toList());
+    _trayItems.clear();
+    retired.timer = Timer(const Duration(seconds: 30), () {
+      _retiredTrayMenus.remove(retired);
+      _disposeTrayMenu(retired.root, retired.items);
+    });
+    _retiredTrayMenus.add(retired);
+  }
+
+  void _disposeTrayMenu(_NativeMenu root, Iterable<_NativeItem> items) {
+    for (final item in items) {
+      item.item.removeListener(item.listener);
+      item.item.dispose();
+      item.submenu?.menu.dispose();
+    }
+    if (root.listener case final listener?) root.menu.removeListener(listener);
+    root.menu.dispose();
   }
 
   /// Reuses the native item of every key that persists, so a rebuild neither
@@ -513,18 +566,13 @@ class FlutterDesktopWindowHost
       ?..setContextMenu(null)
       ..setVisible(false)
       ..dispose();
-    for (final item in _trayItems.values) {
-      item.item.removeListener(item.listener);
-      item.item.dispose();
-      item.submenu?.menu.dispose();
-    }
+    if (root != null) _disposeTrayMenu(root, _trayItems.values);
     _trayItems.clear();
-    if (root != null) {
-      if (root.listener case final listener?) {
-        root.menu.removeListener(listener);
-      }
-      root.menu.dispose();
+    for (final retired in _retiredTrayMenus) {
+      retired.timer?.cancel();
+      _disposeTrayMenu(retired.root, retired.items);
     }
+    _retiredTrayMenus.clear();
     image?.dispose();
     for (final glyph in _trayGlyphs.values) {
       glyph.dispose();
@@ -575,6 +623,14 @@ class _NativeMenu {
   final Menu menu;
   ListenerId? listener;
   List<String> keys = const [];
+}
+
+class _RetiredTrayMenu {
+  _RetiredTrayMenu(this.root, this.items);
+
+  final _NativeMenu root;
+  final List<_NativeItem> items;
+  Timer? timer;
 }
 
 class _NativeItem {

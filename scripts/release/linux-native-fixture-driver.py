@@ -1298,6 +1298,9 @@ def require_modules(socket_path, artifacts, fixtures, application_data, architec
         )
     except Exception:
         capture_display(evidence_dir / "module-ui-failure.png", ui.environment)
+        log = gui_log_path(ui.environment)
+        if log.is_file():
+            (evidence_dir / "module-ui-failure-gui.log").write_bytes(log.read_bytes()[-262144:])
         raise
 
 

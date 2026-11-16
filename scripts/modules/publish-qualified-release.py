@@ -85,7 +85,7 @@ def publish(repository: str, directory: Path, manifest: Path, commit: str, run_i
         raise ValueError("invalid qualified repository or commit")
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
         raise ValueError("invalid qualification run")
-    module = json.loads(manifest.read_text())
+    module = json.loads(manifest.read_text(encoding="utf-8"))
     tag = module_tag(manifest)
     application_version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
     if module["app_versions"] != f">={application_version}, <2.0.0":
