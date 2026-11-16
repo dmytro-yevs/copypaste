@@ -28,7 +28,9 @@ pub enum Ingested {
     /// A new row.
     Stored(StoredItem),
     /// The same clipboard representation was already stored; this is the
-    /// existing row after the forward-only recency bump.
+    /// existing row after the forward-only recency bump. Binary ingest, rule
+    /// captures and batched import leave its ciphertext empty: load it with
+    /// [`Store::get`] when it is needed.
     Duplicate(StoredItem),
 }
 
@@ -48,6 +50,14 @@ impl From<Ingest> for Ingested {
             Ingest::Bumped(item) => Self::Duplicate(item),
         }
     }
+}
+
+/// Whether a promoted duplicate comes back with its stored payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DuplicatePayload {
+    Load,
+    /// For callers that read only the row's identity, stamp or pin state.
+    Omit,
 }
 
 /// Ingest failures.
@@ -163,6 +173,7 @@ pub(crate) fn ingest_into_batched(
         batch.settings(),
         Sweep::Deferred,
         None,
+        DuplicatePayload::Omit,
     )
 }
 
@@ -273,6 +284,7 @@ pub fn ingest_into_with_capture_source_metadata_with_current_retention(
         settings,
         Sweep::Now(&current_settings),
         None,
+        DuplicatePayload::Load,
     )
     .map(|(ingested, _)| ingested)
 }
@@ -306,6 +318,7 @@ pub fn ingest_text_with_rules(
         settings,
         Sweep::Now(&current_settings),
         Some(effects),
+        DuplicatePayload::Omit,
     )
     .map(|(ingested, _)| ingested)
 }
@@ -357,6 +370,7 @@ fn ingest_text(
     settings: &copypaste_ipc::ConfigData,
     sweep: Sweep<'_>,
     effects: Option<&CaptureEffects>,
+    duplicate_payload: DuplicatePayload,
 ) -> Result<(Ingested, bool), IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
@@ -404,6 +418,7 @@ fn ingest_text(
             Ok((nonce, ciphertext))
         },
         write.as_ref().map(|write| write as _),
+        duplicate_payload,
     )?;
 
     if let Sweep::Now(current_settings) = sweep {
@@ -536,13 +551,11 @@ pub fn ingest_binary_with_rules(
     let digest = crate::binary::content_digest(bytes);
     let item_id = crate::binary::capture_item_id_from_digest(&digest, content_type);
     let key = keyring.item_key();
-    let ciphertext = crate::binary::seal_with_digest(bytes, &digest, &key, &item_id)?;
     let write = crate::rules::apply::capture_writer(&key, effects, created_at);
+    let seal_id = item_id.clone();
     let item = NewItem {
         id: item_id,
-        content_ciphertext: ciphertext,
-        // A binary envelope contains a nonce per chunk.  An empty row nonce
-        // distinguishes it from the text AEAD and is never a fallback path.
+        content_ciphertext: Vec::new(),
         nonce: Vec::new(),
         content_type: content_type.to_owned(),
         content_hash: crate::binary::content_hash(&digest),
@@ -552,7 +565,19 @@ pub fn ingest_binary_with_rules(
         app_name: app_name.map(str::to_owned),
         payload_metadata,
     };
-    let ingested = store.insert_or_bump_with(item, write.as_ref().map(|write| write as _))?;
+    // A duplicate is promoted without sealing a second copy of the payload.
+    let (ingested, _) = store.insert_or_bump_late_sealed(
+        item,
+        None,
+        || -> Result<_, IngestError> {
+            let ciphertext = crate::binary::seal_with_digest(bytes, &digest, &key, &seal_id)?;
+            // A binary envelope contains a nonce per chunk. An empty row nonce
+            // distinguishes it from the text AEAD and is never a fallback path.
+            Ok((Vec::new(), ciphertext))
+        },
+        write.as_ref().map(|write| write as _),
+        DuplicatePayload::Omit,
+    )?;
 
     enforce_retention(store, settings);
 
@@ -817,6 +842,45 @@ mod tests {
         assert_eq!(f.store.count().unwrap(), 2);
         assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
         assert!(f.store.get(&other.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_binary_recopy_restamps_the_original_without_carrying_its_payload() {
+        let f = fixture();
+        let bytes = [7u8; 4096];
+        let capture = |created_at, app| {
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &bytes,
+                copypaste_ipc::content_type::IMAGE_PNG,
+                created_at,
+                app,
+                None,
+                &f.settings,
+            )
+            .unwrap()
+        };
+        let first = capture(T0, None).into_item();
+
+        let Ingested::Duplicate(bumped) = capture(T0 + 60_000, Some("com.example.viewer")) else {
+            panic!("a recopy must promote the original row");
+        };
+        let stored = f.store.get(&first.id).unwrap().unwrap();
+        assert_eq!(stored.content_ciphertext, first.content_ciphertext);
+        assert_eq!(
+            (bumped.created_at, bumped.app_bundle_id.as_deref()),
+            (T0 + 60_000, Some("com.example.viewer"))
+        );
+        assert!(bumped.content_ciphertext.is_empty());
+        assert_eq!(
+            bumped,
+            StoredItem {
+                content_ciphertext: Vec::new(),
+                ..stored
+            }
+        );
+        assert_eq!(f.store.count().unwrap(), 1);
     }
 
     #[test]

@@ -9,7 +9,8 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::connection::write_tx;
 use super::model::{
-    is_constraint_violation, item_columns, row_to_item, ItemColumns, StoreError, StoredItem,
+    is_constraint_violation, item_columns, item_columns_preview_ci, row_to_item, ItemColumns,
+    StoreError, StoredItem,
 };
 use super::store::Store;
 
@@ -316,7 +317,7 @@ pub(super) fn newest_live_with_hash(
 ///
 /// Raw `content_hash` alone is deliberately not a dedup identity: a text clip,
 /// a file, and an image can have identical bytes while retaining distinct user
-/// actions and paste behavior.
+/// actions and paste behavior. The row comes back without its payload.
 pub(super) fn newest_live_with_representation(
     conn: &Connection,
     content_hash: &str,
@@ -328,10 +329,11 @@ pub(super) fn newest_live_with_representation(
     }
     let mut stmt = conn.prepare_cached(concat!(
         "SELECT ",
-        item_columns!(),
-        " FROM clipboard_items \
-          WHERE content_hash = ?1 AND content_type = ?2 AND created_at >= ?3 AND deleted = 0 \
-          ORDER BY created_at DESC, id DESC LIMIT 1"
+        item_columns_preview_ci!(),
+        " FROM clipboard_items ci \
+          WHERE ci.content_hash = ?1 AND ci.content_type = ?2 AND ci.created_at >= ?3 \
+            AND ci.deleted = 0 \
+          ORDER BY ci.created_at DESC, ci.id DESC LIMIT 1"
     ))?;
     let columns = ItemColumns::resolve(&stmt)?;
     stmt.query_row(params![content_hash, content_type, since_ms], |row| {
@@ -346,14 +348,14 @@ pub(super) fn newest_live_with_representation(
 /// pin keeps its slot instead of jumping to the top of the list (INV-31).
 pub(super) fn bump_in_tx(
     tx: &Transaction<'_>,
-    existing: &StoredItem,
+    existing: StoredItem,
     created_at: i64,
     app_bundle_id: &Option<String>,
     app_name: &Option<String>,
     source_icon_id: &Option<String>,
 ) -> rusqlite::Result<StoredItem> {
     if created_at <= existing.created_at {
-        return Ok(existing.clone());
+        return Ok(existing);
     }
     match tx.execute(
         "UPDATE clipboard_items \
@@ -372,17 +374,18 @@ pub(super) fn bump_in_tx(
             app_bundle_id: app_bundle_id.clone(),
             app_name: app_name.clone(),
             source_icon_id: source_icon_id.clone(),
-            ..existing.clone()
+            ..existing
         }),
         // The new stamp lands in a dedup bucket another live row already holds.
         // Leaving the row where it is costs a recency bump; failing here would
         // cost the capture, and data loss is the worse outcome.
-        Err(e) if is_constraint_violation(&e) => Ok(existing.clone()),
+        Err(e) if is_constraint_violation(&e) => Ok(existing),
         Err(e) => Err(e),
     }
 }
 
-/// Resolves the row that won a dedup race, inside the caller's transaction.
+/// Resolves the row that won a dedup race, inside the caller's transaction,
+/// without its payload.
 pub(super) fn find_in_bucket(
     tx: &Transaction<'_>,
     content_hash: &str,
@@ -394,10 +397,11 @@ pub(super) fn find_in_bucket(
     }
     let mut stmt = tx.prepare(concat!(
         "SELECT ",
-        item_columns!(),
-        " FROM clipboard_items \
-          WHERE content_hash = ?1 AND content_type = ?2 AND created_at / ?3 = ?4 AND deleted = 0 \
-          ORDER BY created_at DESC, id DESC LIMIT 1"
+        item_columns_preview_ci!(),
+        " FROM clipboard_items ci \
+          WHERE ci.content_hash = ?1 AND ci.content_type = ?2 AND ci.created_at / ?3 = ?4 \
+            AND ci.deleted = 0 \
+          ORDER BY ci.created_at DESC, ci.id DESC LIMIT 1"
     ))?;
     let columns = ItemColumns::resolve(&stmt)?;
     stmt.query_row(

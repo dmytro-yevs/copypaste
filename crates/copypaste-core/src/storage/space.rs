@@ -9,6 +9,14 @@ use rusqlite::Connection;
 use super::{connection::run_pragma, Store};
 
 const LEGACY_RECLAIM_BYTES: u64 = 8 * 1024 * 1024;
+/// Temp databases stay in memory (`temp_store = MEMORY`, compiled in on
+/// Android), so VACUUM holds every live page in RAM. Cap that at the largest
+/// buffer one IPC frame may hold; a larger file keeps its mode and only loses
+/// reclaim.
+const LEGACY_CONVERSION_LIVE_BYTES: u64 = copypaste_ipc::MAX_FRAME_BYTES as u64;
+/// Recorded before the rebuild and removed if it fails, so only a process
+/// that died mid-rebuild leaves it behind and blocks a repeat.
+const LEGACY_CONVERSION_ATTEMPT_KEY: &str = "storage:auto_vacuum_conversion_attempted";
 const PAGES_PER_BATCH: u64 = 256;
 
 /// Every published Store keeps a shared lease. Legacy conversion needs the
@@ -43,6 +51,10 @@ pub(super) fn lock_store(path: &std::path::Path) -> std::io::Result<(std::fs::Fi
 /// VACUUM may renumber implicit rowids used by pending clear-history actions.
 /// Avoid rebuilding a large, mostly occupied file merely to change its mode.
 pub(super) fn prepare(conn: &Connection) -> rusqlite::Result<()> {
+    prepare_within(conn, LEGACY_CONVERSION_LIVE_BYTES)
+}
+
+fn prepare_within(conn: &Connection, max_live_bytes: u64) -> rusqlite::Result<()> {
     let mode: u32 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     if mode == 0 {
         let free: u64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
@@ -57,11 +69,30 @@ pub(super) fn prepare(conn: &Connection) -> rusqlite::Result<()> {
                 _ => Err(rusqlite::Error::InvalidQuery),
             }
         })?;
-        if free.saturating_mul(page_size) < LEGACY_RECLAIM_BYTES || free < pages / 4 {
+        if free.saturating_mul(page_size) < LEGACY_RECLAIM_BYTES
+            || free < pages / 4
+            || pages.saturating_sub(free).saturating_mul(page_size) > max_live_bytes
+        {
             return Ok(());
         }
-        conn.pragma_update(None, "auto_vacuum", 2)?;
-        run_pragma(conn, "VACUUM")?;
+        let recorded = conn.execute(
+            "INSERT INTO sync_device_state (key, value) VALUES (?1, '1') \
+             ON CONFLICT(key) DO NOTHING",
+            [LEGACY_CONVERSION_ATTEMPT_KEY],
+        )?;
+        if recorded == 0 {
+            return Ok(());
+        }
+        let converted = conn
+            .pragma_update(None, "auto_vacuum", 2)
+            .and_then(|()| run_pragma(conn, "VACUUM"));
+        if let Err(error) = converted {
+            let _ = conn.execute(
+                "DELETE FROM sync_device_state WHERE key = ?1",
+                [LEGACY_CONVERSION_ATTEMPT_KEY],
+            );
+            return Err(error);
+        }
     }
     reclaim(conn, WalTruncation::Always)
 }
@@ -268,6 +299,34 @@ mod tests {
         assert!(reopened.version(&removed.id).unwrap().unwrap().deleted);
         assert_eq!(reopened.search("legacy", 10).unwrap().len(), 1);
         assert!(reopened.incremental_reclaim);
+    }
+
+    #[test]
+    fn legacy_conversion_skips_large_live_data_and_is_attempted_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
+        let store = Store::open(&path, &KEY).unwrap();
+        store.reclaiming.store(true, Ordering::Release);
+        let conn = store.conn().unwrap();
+        conn.pragma_update(None, "auto_vacuum", 0).unwrap();
+        run_pragma(&conn, "VACUUM").unwrap();
+        store.insert(item("legacy kept", T0)).unwrap();
+        let mut large = item("legacy removed", T0 + 1);
+        large.content_ciphertext = vec![42; 12 * 1024 * 1024];
+        let removed = store.insert(large).unwrap();
+        store.delete(&removed.id).unwrap();
+        let mode = || store_mode(&path);
+
+        prepare_within(&conn, 4096).unwrap();
+        assert_eq!(mode(), 0, "live data above the bound must not be rebuilt");
+
+        conn.execute(
+            "INSERT INTO sync_device_state (key, value) VALUES (?1, '1')",
+            [LEGACY_CONVERSION_ATTEMPT_KEY],
+        )
+        .unwrap();
+        prepare_within(&conn, LEGACY_CONVERSION_LIVE_BYTES).unwrap();
+        assert_eq!(mode(), 0, "an interrupted conversion must not be retried");
     }
 
     #[test]
