@@ -3913,6 +3913,12 @@ class AppLocalizationsTr extends AppLocalizations {
       'SMS Codes çalışırken gerekli';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => 'SMS okuyan tek ayrı uygulama';
+
+  @override
   String get modulesSmsApplyAccess => 'SMS erişimini uygula';
 
   @override

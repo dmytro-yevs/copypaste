@@ -3991,6 +3991,13 @@ class AppLocalizationsPl extends AppLocalizations {
       'Wymagane podczas działania modułu SMS Codes';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription =>
+      'Osobna aplikacja, jedyna czytająca SMS-y';
+
+  @override
   String get modulesSmsApplyAccess => 'Zastosuj dostęp do SMS-ów';
 
   @override

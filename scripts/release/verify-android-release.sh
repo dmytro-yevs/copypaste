@@ -11,7 +11,7 @@ APKSIGNER="${APKSIGNER:-}"
 APK_ANALYZER="${APK_ANALYZER:-$(dirname "$(dirname "$(dirname "$AAPT2")")")/cmdline-tools/latest/bin/apkanalyzer}"
 
 [[ -f "$APK" && "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$EXPECTED_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
-    echo "ERROR: usage: $0 <apk> <stable-version> <version-code> <certificate-sha256> [universal|arm64|armv7]" >&2
+    echo "ERROR: usage: $0 <apk> <stable-version> <version-code> <certificate-sha256> [universal|arm64|armv7|sms]" >&2
     exit 1
 }
 [[ "$EXPECTED_CERT" =~ ^[a-fA-F0-9]{64}$ ]] || {
@@ -40,8 +40,10 @@ actual_cert="$(openssl x509 -outform DER <<<"$pem" | sha256sum | cut -d' ' -f1)"
 }
 
 badging="$($AAPT2 dump badging "$APK")"
-grep -q "package: name='com.copypaste.app'" <<<"$badging" || {
-    echo "ERROR: APK application id is not com.copypaste.app" >&2
+package="com.copypaste.app"
+[[ "$ARCHITECTURE" != sms ]] || package="com.copypaste.app.sms"
+grep -q "package: name='$package'" <<<"$badging" || {
+    echo "ERROR: APK application id is not $package" >&2
     exit 1
 }
 grep -q "versionName='$VERSION'" <<<"$badging" || {
@@ -56,6 +58,24 @@ if grep -q '^application-debuggable' <<<"$badging"; then
     echo "ERROR: production APK is debuggable" >&2
     exit 1
 fi
+
+# SMS access belongs only to the separate SMS app, never to CopyPaste itself.
+sms_permissions="$(grep -cE "^uses-permission: name='android\.permission\.(READ|RECEIVE)_SMS'" <<<"$badging" || true)"
+if [[ "$ARCHITECTURE" == sms ]]; then
+    [[ "$sms_permissions" == 2 ]] || {
+        echo "ERROR: SMS app must request READ_SMS and RECEIVE_SMS" >&2
+        exit 1
+    }
+    directory="$(cd "$(dirname "$APK")" && pwd)"
+    filename="$(basename "$APK")"
+    (cd "$directory" && sha256sum "$filename" > "$filename.sha256")
+    printf 'verified Android SMS release %s (%s)\n' "$filename" "$actual_cert"
+    exit 0
+fi
+[[ "$sms_permissions" == 0 ]] || {
+    echo "ERROR: CopyPaste APK must not request SMS permissions" >&2
+    exit 1
+}
 
 python3 "$(dirname "$0")/verify-android-abis.py" "$APK" "$ARCHITECTURE"
 

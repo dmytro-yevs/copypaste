@@ -1,0 +1,32 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Declared by both apps; only packages signed with the CopyPaste key hold it. -->
+    <permission
+        android:name="com.copypaste.app.permission.SMS_BRIDGE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.copypaste.app.permission.SMS_BRIDGE" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <queries>
+        <package android:name="com.copypaste.app" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="CopyPaste SMS">
+        <provider
+            android:name=".SmsInboxProvider"
+            android:authorities="${applicationId}.inbox"
+            android:exported="true"
+            android:readPermission="com.copypaste.app.permission.SMS_BRIDGE"
+            android:writePermission="com.copypaste.app.permission.SMS_BRIDGE" />
+        <receiver
+            android:name=".SmsReceivedReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

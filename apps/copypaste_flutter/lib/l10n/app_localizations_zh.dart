@@ -3583,6 +3583,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modulesSmsNotificationDescription => 'SMS Codes 运行期间必需';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => '唯一读取短信的独立应用';
+
+  @override
   String get modulesSmsApplyAccess => '应用短信访问权限';
 
   @override

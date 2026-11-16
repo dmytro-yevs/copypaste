@@ -6663,6 +6663,18 @@ abstract class AppLocalizations {
   /// **'Required while SMS Codes runs'**
   String get modulesSmsNotificationDescription;
 
+  /// Title of the setup row for the separate Android app that alone holds SMS access. Product name; do not translate.
+  ///
+  /// In en, this message translates to:
+  /// **'CopyPaste SMS'**
+  String get modulesSmsApp;
+
+  /// Description of the CopyPaste SMS setup row: the main app has no SMS access, only this separate app reads SMS.
+  ///
+  /// In en, this message translates to:
+  /// **'Separate app that alone reads SMS'**
+  String get modulesSmsAppDescription;
+
   /// Title and button that grant the Android SMS permission through Shizuku.
   ///
   /// In en, this message translates to:

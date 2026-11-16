@@ -40,6 +40,18 @@ class AndroidModuleAccess implements ModuleAccessRepository {
 
   @override
   Future<SmsModuleAccessState> configureSms() => _state('configure');
+
+  @override
+  Future<void> installSmsApp() async {
+    try {
+      await _channel.invokeMethod<void>('installCompanion');
+    } on PlatformException catch (error) {
+      throw ModulesException(
+        error.message ?? AppStrings.current.platformSmsAccessConfigureFailed,
+      );
+    }
+  }
+
   Future<SmsModuleAccessState> _state(String method) async {
     try {
       return _decode(await _channel.invokeMapMethod<String, Object?>(method));
@@ -53,6 +65,7 @@ class AndroidModuleAccess implements ModuleAccessRepository {
   static SmsModuleAccessState _decode(Map<String, Object?>? value) {
     final shizuku = value?['shizuku'];
     if (value == null ||
+        value['smsAppInstalled'] is! bool ||
         value['smsGranted'] is! bool ||
         value['notificationGranted'] is! bool ||
         value['adbCommands'] is! String ||
@@ -66,6 +79,7 @@ class AndroidModuleAccess implements ModuleAccessRepository {
       throw ModulesException(AppStrings.current.platformSmsAccessVerifyFailed);
     }
     return SmsModuleAccessState(
+      smsAppInstalled: value['smsAppInstalled'] as bool,
       smsGranted: value['smsGranted'] as bool,
       notificationGranted: value['notificationGranted'] as bool,
       shizuku: AndroidShizukuState(

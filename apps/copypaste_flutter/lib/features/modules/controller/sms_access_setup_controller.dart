@@ -105,6 +105,8 @@ class SmsAccessSetupController extends ChangeNotifier {
     }
   });
 
+  Future<void> installSmsApp() => _run(_access.installSmsApp);
+
   Future<void> applyAccess() => _run(() async {
     _automaticGrantsAttempted = true;
     _acceptState(await _access.configureSms());
@@ -147,6 +149,7 @@ class SmsAccessSetupController extends ChangeNotifier {
         _automaticGrantsAttempted ||
         state == null ||
         state.smsGranted ||
+        !state.smsAppInstalled ||
         !state.notificationGranted ||
         !state.shizuku.supported ||
         !state.shizuku.installed ||

@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "新しい SMS メッセージからコードをコピーするには、アクセスを許可してください。",
   "modulesSmsNotification": "SMS の通知",
   "modulesSmsNotificationDescription": "SMS Codes の実行中に必要です",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "SMSを読み取る唯一の別アプリ",
   "modulesSmsApplyAccess": "SMS へのアクセスを適用",
   "modulesSmsApplyAccessDescription": "1 回限りの SMS アクセスを適用します。",
   "modulesSmsSetupFailed": "SMS のセットアップに失敗しました",

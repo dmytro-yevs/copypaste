@@ -505,9 +505,12 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk"
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk"
+          # The separate SMS app alone holds SMS access for the SMS Codes module.
+          (cd android && ./gradlew --no-daemon :sms:assembleRelease)
+          cp build/sms/outputs/apk/release/sms-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-sms.apk"
           cd ../..
           chmod +x scripts/release/*.sh
-          for architecture in universal arm64 armv7; do
+          for architecture in universal arm64 armv7 sms; do
             suffix="-$architecture"
             [[ "$architecture" != universal ]] || suffix=""
             artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android$suffix.apk"
@@ -523,6 +526,7 @@ jobs:
             --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" \
             --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk" \
             --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk" \
+            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-sms.apk" \
             --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

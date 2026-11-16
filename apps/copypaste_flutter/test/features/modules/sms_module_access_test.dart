@@ -33,6 +33,8 @@ const sms = InstalledModule(
 
 class Access implements ModuleAccessRepository {
   bool granted = false;
+  bool smsAppInstalled = true;
+  int smsAppInstalls = 0;
   bool starts = true;
   bool notifications = true;
   bool supported = true;
@@ -60,6 +62,7 @@ class Access implements ModuleAccessRepository {
       return pending.future;
     }
     return SmsModuleAccessState(
+      smsAppInstalled: smsAppInstalled,
       smsGranted: granted,
       notificationGranted: notifications,
       shizuku: AndroidShizukuState(
@@ -71,6 +74,9 @@ class Access implements ModuleAccessRepository {
       adbCommands: 'adb shell test\nadb shell otp',
     );
   }
+
+  @override
+  Future<void> installSmsApp() async => smsAppInstalls++;
 
   @override
   Future<bool> openShizuku() async {
@@ -406,6 +412,32 @@ void main() {
     await modules.initialize();
     await modules.setEnabled(sms.id, true);
     expect(repository.calls, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 10));
+  });
+
+  testWidgets('SMS access setup starts by installing the separate SMS app', (
+    tester,
+  ) async {
+    final access = Access()
+      ..permission = true
+      ..smsAppInstalled = false;
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: SmsAccessSetupDrawer(controller: setup),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('CopyPaste SMS'), findsOneWidget);
+    expect(find.byType(AndroidAccessSetup), findsNothing);
+    expect(access.grants, 0);
+    await tester.tap(find.widgetWithText(Button, 'Install'));
+    await tester.pumpAndSettle();
+    expect(access.smsAppInstalls, 1);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 10));
   });

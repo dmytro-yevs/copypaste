@@ -100,10 +100,10 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
         if platform == "android" and schema == 2:
             expected = {
                 f"CopyPaste-v{version}-android{suffix}.apk"
-                for suffix in ("", "-arm64", "-armv7")
+                for suffix in ("", "-arm64", "-armv7", "-sms")
             }
             if set(names) != expected:
-                raise ValueError("Android receipt must cover universal, arm64, and armv7 APKs")
+                raise ValueError("Android receipt must cover universal, arm64, armv7, and SMS APKs")
         if receipt.get("inventory_complete") is True:
             inventory = set(names) | {"production-receipt.json"}
             for companion in receipt.get("companions", []):

@@ -14,6 +14,7 @@ void main() {
   var notifications = false;
 
   Map<String, Object> state() => {
+    'smsAppInstalled': true,
     'smsGranted': true,
     'notificationGranted': notifications,
     'adbCommands': 'adb shell sms',

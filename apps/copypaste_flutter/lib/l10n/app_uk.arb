@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "Надайте доступ, щоб копіювати коди з нових SMS.",
   "modulesSmsNotification": "Сповіщення SMS",
   "modulesSmsNotificationDescription": "Потрібне під час роботи SMS Codes",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "Окремий застосунок, що єдиний читає SMS",
   "modulesSmsApplyAccess": "Надати доступ до SMS",
   "modulesSmsApplyAccessDescription": "Надати одноразовий доступ до SMS.",
   "modulesSmsSetupFailed": "Не вдалося налаштувати SMS",

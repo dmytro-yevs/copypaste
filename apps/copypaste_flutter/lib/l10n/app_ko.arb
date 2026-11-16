@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "새 SMS 메시지의 코드를 복사하려면 접근을 허용하십시오.",
   "modulesSmsNotification": "SMS 알림",
   "modulesSmsNotificationDescription": "SMS Codes 실행 중 필요",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "SMS를 읽는 유일한 별도 앱",
   "modulesSmsApplyAccess": "SMS 접근 권한 적용",
   "modulesSmsApplyAccessDescription": "일회성 SMS 접근 권한을 적용합니다.",
   "modulesSmsSetupFailed": "SMS 설정 실패",

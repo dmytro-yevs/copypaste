@@ -142,6 +142,29 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                         const Gap(AppSpacing.lg),
                         Card(
                           child: SetupSettingRow(
+                            key: const ValueKey('sms-access-setup-app'),
+                            icon: LucideIcons.package,
+                            title: context.l10n.modulesSmsApp,
+                            description: context.l10n.modulesSmsAppDescription,
+                            statusIcon: state.smsAppInstalled
+                                ? LucideIcons.circleCheck
+                                : null,
+                            action: state.smsAppInstalled
+                                ? null
+                                : Button.ghost(
+                                    style: AppTheme.actionButtonStyle(
+                                      const ButtonStyle.ghost(),
+                                    ),
+                                    onPressed: controller.busy
+                                        ? null
+                                        : controller.installSmsApp,
+                                    child: Text(context.l10n.modulesInstall),
+                                  ),
+                          ),
+                        ),
+                        const Gap(AppSpacing.lg),
+                        Card(
+                          child: SetupSettingRow(
                             icon: LucideIcons.bell,
                             title: context.l10n.modulesSmsNotification,
                             description:
@@ -162,21 +185,24 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                                   ),
                           ),
                         ),
-                        const Gap(AppSpacing.lg),
-                        AndroidAccessSetup(
-                          methodIndex: controller.methodIndex,
-                          onMethodChanged: controller.selectMethod,
-                          shizuku: state.shizuku,
-                          granted: state.smsGranted,
-                          busy: controller.busy,
-                          adbCommands: state.adbCommands,
-                          applyAccessLabel: context.l10n.modulesSmsApplyAccess,
-                          applyAccessDescription:
-                              context.l10n.modulesSmsApplyAccessDescription,
-                          onOpenShizuku: controller.openShizuku,
-                          onApplyAccess: controller.applyAccess,
-                          onCopyCommands: controller.copyAdbCommands,
-                        ),
+                        if (state.smsAppInstalled) ...[
+                          const Gap(AppSpacing.lg),
+                          AndroidAccessSetup(
+                            methodIndex: controller.methodIndex,
+                            onMethodChanged: controller.selectMethod,
+                            shizuku: state.shizuku,
+                            granted: state.smsGranted,
+                            busy: controller.busy,
+                            adbCommands: state.adbCommands,
+                            applyAccessLabel:
+                                context.l10n.modulesSmsApplyAccess,
+                            applyAccessDescription:
+                                context.l10n.modulesSmsApplyAccessDescription,
+                            onOpenShizuku: controller.openShizuku,
+                            onApplyAccess: controller.applyAccess,
+                            onCopyCommands: controller.copyAdbCommands,
+                          ),
+                        ],
                       ],
                       if (state == null && !controller.loading)
                         if (controller.errorMessage case final error?)

@@ -1,6 +1,8 @@
 package com.copypaste.app
 
 import android.app.AppOpsManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
@@ -19,7 +21,9 @@ internal class AndroidSmsModuleChannel(private val activity: MainActivity, messe
     private val publisher = AndroidCaptureStatePublisher(::state)
     private val dispatcher = AndroidCaptureSignalDispatcher(main::post, main::removeCallbacks, ::publishState)
     private val stateChanged: () -> Unit = dispatcher::changed
-    private val observer = AndroidCaptureStateObserver(activity.applicationContext, smsAppOps, stateChanged)
+    private val observer = AndroidCaptureStateObserver(
+        activity.applicationContext, smsAppOps, AndroidSmsAccess.companionPackage(activity), stateChanged,
+    )
     // ADB permission grants have no public listener; sample only while visible setup waits.
     private val sampler = AndroidSetupSampler(main, ::needsSampling, stateChanged)
     private var listening = false
@@ -63,6 +67,7 @@ internal class AndroidSmsModuleChannel(private val activity: MainActivity, messe
         listening && activity.hasWindowFocus() && !AndroidSmsAccess.granted(activity)
 
     private fun state(): Map<String, Any> = mapOf(
+        "smsAppInstalled" to AndroidSmsAccess.companionInstalled(activity),
         "smsGranted" to AndroidSmsAccess.granted(activity),
         "notificationGranted" to AndroidCaptureState.notificationGranted(activity),
         "adbCommands" to AndroidSmsAccess.commands(activity).joinToString("\n") { "adb shell " + it.joinToString(" ") },
@@ -75,12 +80,25 @@ internal class AndroidSmsModuleChannel(private val activity: MainActivity, messe
             "configure" -> activity.requestCaptureNotificationPermission { notifications ->
                 if (!notifications) result.error("notifications_required", "Allow notifications to keep SMS Codes active in the background.", null)
                 else if (AndroidSmsAccess.granted(activity)) result.success(state())
+                else if (!AndroidSmsAccess.companionInstalled(activity)) result.error("sms_app_missing", "Install CopyPaste SMS first.", null)
                 else if (!shizuku.facts().running) result.error("shizuku_unavailable", "Start Shizuku, or use the ADB setup commands.", null)
                 else shizuku.requestAndApply {
                     activity.runOnUiThread {
                         if (AndroidSmsAccess.granted(activity)) result.success(state())
                         else result.error("sms_access_denied", "SMS access was not granted. Check the installer permissions or use ADB setup.", null)
                     }
+                }
+            }
+            "installCompanion" -> {
+                // The SMS app is published with each release under the same version.
+                @Suppress("DEPRECATION")
+                val version = activity.packageManager.getPackageInfo(activity.packageName, 0).versionName
+                val url = "https://github.com/dmytro-yevs/copypaste/releases/download/v$version/CopyPaste-v$version-android-sms.apk"
+                try {
+                    activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    result.success(null)
+                } catch (_: Exception) {
+                    result.error("sms_app_download_failed", "Could not open the CopyPaste SMS download.", null)
                 }
             }
             "synchronize" -> worker.execute {

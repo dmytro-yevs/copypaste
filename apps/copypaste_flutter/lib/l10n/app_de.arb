@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "Zugriff erlauben, um Codes aus neuen SMS zu kopieren.",
   "modulesSmsNotification": "SMS-Benachrichtigung",
   "modulesSmsNotificationDescription": "Erforderlich, solange SMS Codes läuft",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "Separate App, die als einzige SMS liest",
   "modulesSmsApplyAccess": "SMS-Zugriff erteilen",
   "modulesSmsApplyAccessDescription": "Einmaligen SMS-Zugriff erteilen.",
   "modulesSmsSetupFailed": "SMS-Einrichtung fehlgeschlagen",

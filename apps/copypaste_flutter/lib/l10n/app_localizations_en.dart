@@ -3890,6 +3890,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Required while SMS Codes runs';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => 'Separate app that alone reads SMS';
+
+  @override
   String get modulesSmsApplyAccess => 'Apply SMS access';
 
   @override

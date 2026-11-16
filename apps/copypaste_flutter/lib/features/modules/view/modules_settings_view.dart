@@ -103,44 +103,40 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 onChanged: (index) =>
                     controller.selectSection(ModulesSection.values[index]),
                 children: [
-                  TabItem(child: Text(context.l10n.modulesMarketplaceTab)),
-                  TabItem(child: Text(context.l10n.modulesInstalledTab)),
+                  for (final label in [
+                    context.l10n.modulesMarketplaceTab,
+                    context.l10n.modulesInstalledTab,
+                  ])
+                    TabItem(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
               ),
             ),
             const Gap(AppSpacing.sm),
-            Button.ghost(
+            _iconButton(
+              key: const ValueKey('modules-refresh'),
+              label: context.l10n.modulesRefresh,
+              icon: LucideIcons.refreshCw,
+              style: const ButtonStyle.ghostIcon(),
               onPressed:
                   controller.busy ||
                       controller.catalogState == ModulesLoadState.loading
                   ? null
                   : controller.loadMarketplace,
-              leading: const AppIconFrame(
-                size: AppIconSize.sm,
-                child: Icon(LucideIcons.refreshCw, size: AppIconSize.sm),
-              ),
-              child: Text(context.l10n.modulesRefresh),
             ),
             if (controller.canInstallFromFile) ...[
               const Gap(AppSpacing.sm),
-              Tooltip(
-                tooltip: (_) => TooltipContainer(
-                  child: Text(context.l10n.modulesInstallFromFile),
-                ),
-                child: Semantics(
-                  label: context.l10n.modulesInstallFromFile,
-                  button: true,
-                  child: Button.ghost(
-                    key: const ValueKey('modules-install-from-file'),
-                    style: AppTheme.controlButtonStyle(
-                      const ButtonStyle.ghostIcon(),
-                    ),
-                    onPressed: controller.busy
-                        ? null
-                        : controller.installFromFile,
-                    child: const AppIconFrame(child: Icon(LucideIcons.fileUp)),
-                  ),
-                ),
+              _iconButton(
+                key: const ValueKey('modules-install-from-file'),
+                label: context.l10n.modulesInstallFromFile,
+                icon: LucideIcons.fileUp,
+                style: const ButtonStyle.ghostIcon(),
+                onPressed: controller.busy ? null : controller.installFromFile,
               ),
             ],
           ],
@@ -224,6 +220,27 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
 
   Widget _cards(List<Widget> rows) => SettingsGroup(children: rows);
 
+  /// An icon-only action; its label is the tooltip and the accessible name.
+  Widget _iconButton({
+    required Key key,
+    required String label,
+    required IconData icon,
+    required ButtonStyle style,
+    required VoidCallback? onPressed,
+  }) => Tooltip(
+    tooltip: (_) => TooltipContainer(child: Text(label)),
+    child: Semantics(
+      label: label,
+      button: true,
+      child: Button(
+        key: key,
+        style: AppTheme.controlButtonStyle(style),
+        onPressed: onPressed,
+        child: AppIconFrame(child: Icon(icon)),
+      ),
+    ),
+  );
+
   /// One compact table row: what the module is, then its actions; Details
   /// explains it in full.
   Widget _moduleCard(
@@ -254,22 +271,14 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       required IconData icon,
       required VoidCallback? onPressed,
       bool ghost = false,
-    }) => Tooltip(
-      tooltip: (_) => TooltipContainer(child: Text(label)),
-      child: Semantics(
-        label: label,
-        button: true,
-        child: Button(
-          key: key,
-          style: AppTheme.controlButtonStyle(
-            ghost
-                ? const ButtonStyle.ghostIcon()
-                : const ButtonStyle.secondaryIcon(),
-          ),
-          onPressed: onPressed,
-          child: AppIconFrame(child: Icon(icon)),
-        ),
-      ),
+    }) => _iconButton(
+      key: key,
+      label: label,
+      icon: icon,
+      style: ghost
+          ? const ButtonStyle.ghostIcon()
+          : const ButtonStyle.secondaryIcon(),
+      onPressed: onPressed,
     );
     final info = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -306,17 +315,14 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     final Widget? primary = running
         ? _operationButton(context, operation!, title)
         : installed == null && marketplace!.canInstall
-        ? Button.primary(
+        ? _iconButton(
             key: ValueKey('module-install-$id'),
-            style: AppTheme.controlButtonStyle(const ButtonStyle.primary()),
+            label: context.l10n.modulesInstall,
+            icon: LucideIcons.download,
+            style: const ButtonStyle.primaryIcon(),
             onPressed: controller.busy
                 ? null
                 : () => controller.install(marketplace),
-            child: Text(
-              context.l10n.modulesInstall,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
           )
         : null;
     final managed = <Widget>[
@@ -365,14 +371,14 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       spacing: AppSpacing.sm,
       children: [details, ?primary, ...managed],
     );
-    // A narrow row lets the primary action take the free width and wraps
-    // management controls instead of overflowing the row.
-    final narrowActions = primary != null
+    // A narrow row lets a running operation take the free width and wraps
+    // icon actions instead of overflowing the row.
+    final narrowActions = running
         ? Row(
             spacing: AppSpacing.sm,
             children: [
               details,
-              Expanded(child: primary),
+              Expanded(child: primary!),
             ],
           )
         : Wrap(
@@ -380,7 +386,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
-            children: [details, ...managed],
+            children: [details, ?primary, ...managed],
           );
     const icon = AppIconFrame(
       size: AppIconSize.lg,

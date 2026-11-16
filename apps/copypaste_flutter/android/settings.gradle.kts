@@ -24,3 +24,5 @@ plugins {
 }
 
 include(":app")
+// Separate APK that alone holds SMS access for the SMS Codes module.
+include(":sms")

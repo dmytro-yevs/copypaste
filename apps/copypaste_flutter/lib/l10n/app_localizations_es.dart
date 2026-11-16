@@ -4001,6 +4001,12 @@ class AppLocalizationsEs extends AppLocalizations {
       'Necesaria mientras SMS Codes está activo';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => 'App aparte, la única que lee los SMS';
+
+  @override
   String get modulesSmsApplyAccess => 'Aplicar acceso a SMS';
 
   @override

@@ -7,13 +7,14 @@ import android.content.Context
 internal class AndroidCaptureStateObserver(
     context: Context,
     private val observedAppOps: Set<String> = captureAppOps,
+    private val observedPackage: String = context.packageName,
     private val changed: () -> Unit,
 ) {
     private val app = context.applicationContext
     private val appOps = app.getSystemService(AppOpsManager::class.java)
     private var observing = false
     private val appOpListener = AppOpsManager.OnOpChangedListener { operation, packageName ->
-        if (packageName == app.packageName && operation in observedAppOps) changed()
+        if (packageName == observedPackage && operation in observedAppOps) changed()
     }
 
     fun start() {
@@ -21,7 +22,7 @@ internal class AndroidCaptureStateObserver(
         observing = true
         val manager = appOps ?: return
         for (operation in observedAppOps) {
-            runCatching { manager.startWatchingMode(operation, app.packageName, appOpListener) }
+            runCatching { manager.startWatchingMode(operation, observedPackage, appOpListener) }
         }
     }
 

@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "Yeni SMS mesajlarındaki kodları kopyalamak için erişime izin verin.",
   "modulesSmsNotification": "SMS bildirimi",
   "modulesSmsNotificationDescription": "SMS Codes çalışırken gerekli",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "SMS okuyan tek ayrı uygulama",
   "modulesSmsApplyAccess": "SMS erişimini uygula",
   "modulesSmsApplyAccessDescription": "Tek seferlik SMS erişimini uygulayın.",
   "modulesSmsSetupFailed": "SMS kurulumu başarısız oldu",

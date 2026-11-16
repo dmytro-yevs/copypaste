@@ -561,7 +561,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools'), findsOneWidget);
-      expect(find.widgetWithText(Button, 'Install'), findsNothing);
+      expect(
+        find.byKey(ValueKey('module-install-${testMarketplaceModule.id}')),
+        findsNothing,
+      );
       await tester.tap(
         find.byKey(ValueKey('module-details-${testMarketplaceModule.id}')),
       );
@@ -578,7 +581,10 @@ void main() {
       expect(find.textContaining('Requires macOS 14'), findsNothing);
       expect(find.text('Unavailable'), findsNothing);
       expect(find.text('Marketplace is unavailable'), findsNothing);
-      expect(find.widgetWithText(Button, 'Install'), findsNothing);
+      expect(
+        find.byKey(ValueKey('module-install-${testMarketplaceModule.id}')),
+        findsNothing,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -630,7 +636,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.tap(find.widgetWithText(Button, 'Install'));
+      await tester.tap(install);
       await tester.pumpAndSettle();
       expect(repository.calls, ['install']);
       expect(marketplace.disposedPackages, 1);

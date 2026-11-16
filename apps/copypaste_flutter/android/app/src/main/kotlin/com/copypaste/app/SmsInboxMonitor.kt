@@ -1,19 +1,22 @@
 package com.copypaste.app
 
+import android.content.ContentProviderClient
 import android.content.Context
 import android.database.ContentObserver
 import android.os.Handler
 import android.os.HandlerThread
-import android.provider.Telephony
 
-/** Observes the inbox, including hash-addressed SMS that older Android versions
- * deliver only to the intended app. No historical message body is imported. */
+/** Observes new inbox messages through the CopyPaste SMS app, including
+ * hash-addressed SMS. No historical message body is imported. */
 internal class SmsInboxMonitor(private val context: Context) {
     private val thread = HandlerThread("copypaste-sms-inbox").apply { start() }
     private val worker = Handler(thread.looper)
     private val preferences = context.getSharedPreferences("sms-module-inbox", Context.MODE_PRIVATE)
     @Volatile private var closed = false
     @Volatile private var host = 0L
+    private val inbox = AndroidSmsAccess.inboxUri(context)
+    // Keeps the SMS app's provider, and so its inbox observer, alive while monitoring.
+    private var provider: ContentProviderClient? = null
     private val observer = object : ContentObserver(worker) {
         override fun onChange(selfChange: Boolean) = scan()
     }
@@ -27,7 +30,9 @@ internal class SmsInboxMonitor(private val context: Context) {
         if (host == 0L) { completion(false); return@post }
         try {
             if (closed) { completion(false); return@post }
-            context.contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
+            provider = context.contentResolver.acquireUnstableContentProviderClient(inbox)
+                ?: run { completion(false); return@post }
+            context.contentResolver.registerContentObserver(inbox, true, observer)
             completion(true)
             scan()
         } catch (_: Exception) { completion(false) }
@@ -40,6 +45,8 @@ internal class SmsInboxMonitor(private val context: Context) {
         if (host != 0L) NativeRuntimeCapture.revokeHost(host)
         worker.post {
             context.contentResolver.unregisterContentObserver(observer)
+            provider?.close()
+            provider = null
             if (host != 0L) {
                 NativeRuntimeCapture.revokeHost(host)
                 NativeRuntimeCapture.drainHost(host)
@@ -63,11 +70,11 @@ internal class SmsInboxMonitor(private val context: Context) {
             val read = NativeRuntimeCapture.scoped(token, false, "text/plain", CaptureCallback { limit ->
                 val lastId = preferences.getLong("last-id", 0L)
                 context.contentResolver.query(
-                    Telephony.Sms.Inbox.CONTENT_URI,
-                    arrayOf(Telephony.Sms._ID, Telephony.Sms.BODY),
-                    "${Telephony.Sms._ID} > ? AND ${Telephony.Sms.DATE} >= ?",
-                    arrayOf(lastId.toString(), activated.toString()),
-                    "${Telephony.Sms._ID} ASC LIMIT 32",
+                    inbox.buildUpon()
+                        .appendQueryParameter("after", lastId.toString())
+                        .appendQueryParameter("since", activated.toString())
+                        .build(),
+                    null, null, null, null,
                 )?.use { cursor ->
                     while (!closed && cursor.moveToNext()) {
                         val id = cursor.getLong(0)

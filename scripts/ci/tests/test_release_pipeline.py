@@ -342,7 +342,7 @@ class ReleasePipelineTest(unittest.TestCase):
             root = Path(directory)
             for platform, names in {
                 "macos": ["app.dmg", "cli.tar.gz"], "windows": ["app.exe"],
-                "android": ["CopyPaste-v1.2.3-android" + suffix + ".apk" for suffix in ("", "-arm64", "-armv7")],
+                "android": ["CopyPaste-v1.2.3-android" + suffix + ".apk" for suffix in ("", "-arm64", "-armv7", "-sms")],
             }.items():
                 target = root / platform
                 target.mkdir()

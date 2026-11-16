@@ -4765,6 +4765,14 @@
   "@modulesSmsNotificationDescription": {
     "description": "Description of the SMS notification row. SMS Codes is the module name."
   },
+  "modulesSmsApp": "CopyPaste SMS",
+  "@modulesSmsApp": {
+    "description": "Title of the setup row for the separate Android app that alone holds SMS access. Product name; do not translate."
+  },
+  "modulesSmsAppDescription": "Separate app that alone reads SMS",
+  "@modulesSmsAppDescription": {
+    "description": "Description of the CopyPaste SMS setup row: the main app has no SMS access, only this separate app reads SMS."
+  },
   "modulesSmsApplyAccess": "Apply SMS access",
   "@modulesSmsApplyAccess": {
     "description": "Title and button that grant the Android SMS permission through Shizuku."

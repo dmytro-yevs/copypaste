@@ -3986,6 +3986,13 @@ class AppLocalizationsUk extends AppLocalizations {
       'Потрібне під час роботи SMS Codes';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription =>
+      'Окремий застосунок, що єдиний читає SMS';
+
+  @override
   String get modulesSmsApplyAccess => 'Надати доступ до SMS';
 
   @override

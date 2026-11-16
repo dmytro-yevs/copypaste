@@ -3,14 +3,13 @@ package com.copypaste.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.provider.Telephony
 import java.util.concurrent.Executors
 
+/** Starts SMS monitoring at boot and when the CopyPaste SMS app reports a new message. */
 class SmsModuleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED && !StartupPreferences.enabled(context)) return
-        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION &&
-            intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (intent.action != inboxChangedAction && intent.action != Intent.ACTION_BOOT_COMPLETED) return
         if (!AndroidSmsAccess.granted(context)) return
         val pending = goAsync()
         worker.execute {
@@ -20,5 +19,8 @@ class SmsModuleReceiver : BroadcastReceiver() {
             } finally { pending.finish() }
         }
     }
-    companion object { private val worker = Executors.newSingleThreadExecutor() }
+    companion object {
+        private const val inboxChangedAction = "com.copypaste.app.action.SMS_INBOX_CHANGED"
+        private val worker = Executors.newSingleThreadExecutor()
+    }
 }

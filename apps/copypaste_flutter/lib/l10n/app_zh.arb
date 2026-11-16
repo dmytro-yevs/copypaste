@@ -1090,6 +1090,8 @@
   "modulesSmsAllowAccess": "允许访问，以便从新短信中复制验证码。",
   "modulesSmsNotification": "短信通知",
   "modulesSmsNotificationDescription": "SMS Codes 运行期间必需",
+  "modulesSmsApp": "CopyPaste SMS",
+  "modulesSmsAppDescription": "唯一读取短信的独立应用",
   "modulesSmsApplyAccess": "应用短信访问权限",
   "modulesSmsApplyAccessDescription": "应用一次性短信访问权限。",
   "modulesSmsSetupFailed": "短信设置失败",

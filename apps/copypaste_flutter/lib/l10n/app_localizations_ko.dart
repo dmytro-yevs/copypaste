@@ -3679,6 +3679,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesSmsNotificationDescription => 'SMS Codes 실행 중 필요';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => 'SMS를 읽는 유일한 별도 앱';
+
+  @override
   String get modulesSmsApplyAccess => 'SMS 접근 권한 적용';
 
   @override

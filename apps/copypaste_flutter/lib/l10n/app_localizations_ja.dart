@@ -3702,6 +3702,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesSmsNotificationDescription => 'SMS Codes の実行中に必要です';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription => 'SMSを読み取る唯一の別アプリ';
+
+  @override
   String get modulesSmsApplyAccess => 'SMS へのアクセスを適用';
 
   @override

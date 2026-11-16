@@ -149,7 +149,7 @@ internal class ShizukuCaptureSetup(
                     val applied = try {
                         binder?.pingBinder() == true &&
                             service != null &&
-                            if (sms) service.applySmsGrants(context.packageName,
+                            if (sms) service.applySmsGrants(AndroidSmsAccess.companionPackage(context),
                                 android.os.Process.myUserHandle().hashCode(), AndroidSmsAccess.otpOpSupported(context))
                             else service.applyCaptureGrants(context.packageName)
                     } catch (_: Exception) {

@@ -13,8 +13,12 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- SMS access lives only in the separate CopyPaste SMS app; this
+         signature permission is the private channel between the two. -->
+    <permission
+        android:name="com.copypaste.app.permission.SMS_BRIDGE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.copypaste.app.permission.SMS_BRIDGE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -40,8 +44,8 @@
             android:name=".AppUpdateResultReceiver"
             android:exported="false" />
         <receiver android:name=".SmsModuleReceiver" android:exported="true" android:enabled="false"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter><action android:name="android.provider.Telephony.SMS_RECEIVED" /></intent-filter>
+            android:permission="com.copypaste.app.permission.SMS_BRIDGE">
+            <intent-filter><action android:name="com.copypaste.app.action.SMS_INBOX_CHANGED" /></intent-filter>
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
         <activity
@@ -265,6 +269,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <package android:name="com.copypaste.app.sms" />
         <package android:name="moe.shizuku.privileged.api" />
         <intent>
             <action android:name="android.intent.action.MAIN" />

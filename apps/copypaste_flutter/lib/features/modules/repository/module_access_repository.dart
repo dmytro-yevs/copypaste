@@ -3,11 +3,15 @@ import '../../../platform/android/android_shizuku_state.dart';
 /// Platform access is separate from signed module installation and execution.
 class SmsModuleAccessState {
   const SmsModuleAccessState({
+    required this.smsAppInstalled,
     required this.smsGranted,
     required this.notificationGranted,
     required this.shizuku,
     required this.adbCommands,
   });
+
+  /// The separate CopyPaste SMS app, the only holder of SMS access.
+  final bool smsAppInstalled;
   final bool smsGranted;
   final bool notificationGranted;
   final AndroidShizukuState shizuku;
@@ -24,5 +28,6 @@ abstract interface class ModuleAccessRepository {
   Future<SmsModuleAccessState> configureSms();
   Future<SmsModuleAccessState> requestSmsNotifications();
   Future<bool> openShizuku();
+  Future<void> installSmsApp();
   Future<bool> synchronize();
 }

@@ -26,5 +26,5 @@ Cloud synchronization continues to follow the configured server retention policy
 
 - **OCR** reads text from images locally.
 - **Semantic Search** finds related clips locally.
-- **SMS Codes** copies verification codes from new Android SMS messages.
+- **SMS Codes** copies verification codes from new Android SMS messages. CopyPaste itself never requests SMS access: only **CopyPaste SMS**, a separate small app from the same release signed with the same key, does.
 - **Supabase Sync** synchronizes encrypted history through your Supabase project.

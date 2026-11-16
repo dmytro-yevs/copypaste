@@ -3978,6 +3978,13 @@ class AppLocalizationsDe extends AppLocalizations {
       'Erforderlich, solange SMS Codes läuft';
 
   @override
+  String get modulesSmsApp => 'CopyPaste SMS';
+
+  @override
+  String get modulesSmsAppDescription =>
+      'Separate App, die als einzige SMS liest';
+
+  @override
   String get modulesSmsApplyAccess => 'SMS-Zugriff erteilen';
 
   @override

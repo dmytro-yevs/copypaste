@@ -832,7 +832,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             ("macos", ["app.dmg"]),
             ("windows", ["app.exe"]),
             ("android", [f"CopyPaste-v1.2.3-android{suffix}.apk"
-                         for suffix in (("",) if legacy else ("", "-arm64", "-armv7"))]),
+                         for suffix in (("",) if legacy else ("", "-arm64", "-armv7", "-sms"))]),
         ):
             directory = root / platform
             directory.mkdir()
@@ -851,7 +851,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             root = Path(directory)
             self.write_receipts(root)
             verify(root, "1.2.3", "a" * 40, "123")
-            for suffix in ("", "-arm64", "-armv7"):
+            for suffix in ("", "-arm64", "-armv7", "-sms"):
                 artifact = root / "android" / f"CopyPaste-v1.2.3-android{suffix}.apk"
                 artifact.write_bytes(b"corrupted")
                 with self.assertRaisesRegex(ValueError, "digest changed"):
