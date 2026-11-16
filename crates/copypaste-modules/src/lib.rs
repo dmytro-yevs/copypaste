@@ -9,6 +9,7 @@ mod host;
 mod host_lifetime;
 mod inference;
 mod input;
+mod instances;
 mod manager;
 #[allow(unsafe_code)]
 mod native;

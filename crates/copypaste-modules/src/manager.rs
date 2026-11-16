@@ -78,19 +78,19 @@ struct Registry {
     modules: BTreeMap<String, Record>,
 }
 
-struct Loaded {
-    instance: Arc<ModuleInstance>,
-    last_used: u64,
-}
 struct State {
     registry: Registry,
-    loaded: BTreeMap<String, Loaded>,
-    sequence: u64,
 }
 
 struct ResourceHealth {
     fingerprint: crate::resources::ResourceFingerprint,
     healthy: bool,
+}
+
+struct VerifiedManifest {
+    version: String,
+    fingerprint: crate::package::PackageFingerprint,
+    manifest: Arc<ModuleManifest>,
 }
 
 /// One owner per application data directory. Registry mutations are serialized;
@@ -99,10 +99,12 @@ pub struct ModuleManager {
     root: PathBuf,
     verifier: PackageVerifier,
     state: Mutex<State>,
+    instances: crate::instances::Instances,
     mutation: Mutex<()>,
     sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
     shared: Arc<HostShared>,
     model_health: Mutex<BTreeMap<String, ResourceHealth>>,
+    manifests: Mutex<BTreeMap<String, VerifiedManifest>>,
     inference: crate::inference::InferenceClient,
     worker_identity: crate::inference::WorkerIdentity,
     // Drop last, after inference and loaded native consumers have shut down.
@@ -143,15 +145,13 @@ impl ModuleManager {
         let manager = Self {
             root,
             verifier,
-            state: Mutex::new(State {
-                registry,
-                loaded: BTreeMap::new(),
-                sequence: 0,
-            }),
+            state: Mutex::new(State { registry }),
+            instances: crate::instances::Instances::new(),
             mutation: Mutex::new(()),
             sync_services: Mutex::new(None),
             shared: Arc::default(),
             model_health: Mutex::new(BTreeMap::new()),
+            manifests: Mutex::new(BTreeMap::new()),
             inference: crate::inference::InferenceClient::new(),
             worker_identity: crate::inference::WorkerIdentity {
                 app_version: app_version.into(),
@@ -187,24 +187,40 @@ impl ModuleManager {
     pub(crate) fn stop_module(&self, id: &str) -> Result<(), ModuleError> {
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
         self.inference.stop(Some(id));
-        let loaded = self
-            .state
-            .lock()
-            .map_err(|_| ModuleError::State)?
-            .loaded
-            .remove(id);
-        if let Some(loaded) = loaded {
-            loaded.instance.stop();
-        }
+        let loaded = {
+            let _state = self.state.lock().map_err(|_| ModuleError::State)?;
+            self.instances.remove(id)
+        };
+        drop(loaded);
         Ok(())
     }
 
-    fn manifest(&self, id: &str, record: &Record) -> Result<ModuleManifest, ModuleError> {
-        let manifest = self
-            .verifier
-            .installed(&self.directory(id, &record.version), false)?;
+    /// Verified once per installed package state; loading code verifies again.
+    fn manifest(&self, id: &str, record: &Record) -> Result<Arc<ModuleManifest>, ModuleError> {
+        let directory = self.directory(id, &record.version);
+        // Taken before reading, so a concurrent change can only cause a miss.
+        let fingerprint = crate::package::fingerprint(&directory);
+        let mut cache = self.manifests.lock().map_err(|_| ModuleError::State)?;
+        if let (Some(cached), Some(fingerprint)) = (cache.get(id), &fingerprint) {
+            if cached.version == record.version && &cached.fingerprint == fingerprint {
+                return Ok(Arc::clone(&cached.manifest));
+            }
+        }
+        cache.remove(id);
+        let manifest = self.verifier.installed(&directory, false)?;
         if manifest.id != id || manifest.version != record.version {
             return Err(ModuleError::State);
+        }
+        let manifest = Arc::new(manifest);
+        if let Some(fingerprint) = fingerprint {
+            cache.insert(
+                id.into(),
+                VerifiedManifest {
+                    version: record.version.clone(),
+                    fingerprint,
+                    manifest: Arc::clone(&manifest),
+                },
+            );
         }
         Ok(manifest)
     }
@@ -369,15 +385,13 @@ impl ModuleManager {
             let _ = fs::remove_dir_all(&destination);
             return Err(error);
         }
-        let previous = state.loaded.remove(&manifest.id);
+        let previous = self.instances.remove(&manifest.id);
         if manifest.search_provider.is_some() {
             self.inference.stop(Some(&manifest.id));
         }
         state.registry = registry;
         drop(state);
-        if let Some(previous) = previous {
-            previous.instance.stop();
-        }
+        drop(previous);
         if let Some(old) = old {
             let _ = fs::remove_dir_all(self.directory(&manifest.id, &old.version));
         }
@@ -421,7 +435,7 @@ impl ModuleManager {
                     return Err(ModuleError::Invalid("Choose languages and download their model before enabling semantic search.".into()));
                 }
             }
-            record.capabilities = manifest.capabilities;
+            record.capabilities = manifest.capabilities.clone();
         }
         record.enabled = enabled;
         self.persist(&registry)?;
@@ -430,14 +444,12 @@ impl ModuleManager {
             self.inference.stop(Some(id));
         }
         let previous = if !enabled {
-            state.loaded.remove(id)
+            self.instances.remove(id)
         } else {
             None
         };
         drop(state);
-        if let Some(previous) = previous {
-            previous.instance.stop();
-        }
+        drop(previous);
         Ok(())
     }
 
@@ -477,6 +489,8 @@ impl ModuleManager {
         } else {
             None
         };
+        // Declared before the locks, so teardown runs after they are released.
+        let mut retired = Vec::new();
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let mut registry = state.registry.clone();
@@ -496,13 +510,8 @@ impl ModuleManager {
         if manifest.search_provider.is_some() && (!same_search_model || prepared.is_some()) {
             self.inference.stop(Some(id));
         }
-        let previous = if !same_search_model || prepared.is_some() {
-            state.loaded.remove(id)
-        } else {
-            None
-        };
-        if let Some(previous) = previous {
-            previous.instance.stop();
+        if !same_search_model || prepared.is_some() {
+            retired.extend(self.instances.remove(id));
         }
         if let Some(prepared) = prepared {
             // The lifecycle lease prevents removal during final publication.
@@ -525,18 +534,12 @@ impl ModuleManager {
         )?;
         self.persist(&registry)?;
         state.registry = registry;
-        let previous = if manifest.sync_provider.is_some() {
-            state.loaded.remove(id)
-        } else {
-            None
-        };
-        if let (Some(loaded), Some(record)) = (state.loaded.get(id), state.registry.modules.get(id))
-        {
-            loaded.instance.set_preferences(record.preferences.clone());
+        if manifest.sync_provider.is_some() {
+            retired.extend(self.instances.remove(id));
         }
-        drop(state);
-        if let Some(previous) = previous {
-            previous.instance.stop();
+        if let Some(record) = state.registry.modules.get(id) {
+            self.instances
+                .set_preferences(id, record.preferences.clone());
         }
         Ok(())
     }
@@ -613,12 +616,13 @@ impl ModuleManager {
         // Persist removal before releasing code and deleting package/data. A crash
         // can leave unused files, but can never reactivate a removed module.
         self.persist(&registry)?;
-        let previous = state.loaded.remove(id);
+        let previous = self.instances.remove(id);
         self.inference.stop(Some(id));
         state.registry = registry;
         drop(state);
-        if let Some(previous) = previous {
-            previous.instance.stop();
+        drop(previous);
+        if let Ok(mut manifests) = self.manifests.lock() {
+            manifests.remove(id);
         }
         let state_cleared = self.clear_host_state(id);
         let packages = self.root.join("packages").join(id);
@@ -782,8 +786,8 @@ impl ModuleManager {
             if record.removing || (enabled_only && !record.enabled) {
                 continue;
             }
-            if let Some(provider) = self.manifest(id, record)?.sync_provider {
-                providers.push((id.clone(), provider.command));
+            if let Some(provider) = &self.manifest(id, record)?.sync_provider {
+                providers.push((id.clone(), provider.command.clone()));
             }
         }
         Ok(providers)
@@ -791,15 +795,13 @@ impl ModuleManager {
     pub(crate) fn stop_sync_providers(&self) -> Result<(), ModuleError> {
         let providers = self.sync_providers(false)?;
         let instances: Vec<_> = {
-            let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+            let _state = self.state.lock().map_err(|_| ModuleError::State)?;
             providers
                 .iter()
-                .filter_map(|(id, _)| state.loaded.remove(id))
+                .filter_map(|(id, _)| self.instances.remove(id))
                 .collect()
         };
-        for instance in instances {
-            instance.instance.stop();
-        }
+        drop(instances);
         Ok(())
     }
 
@@ -838,9 +840,9 @@ impl ModuleManager {
                 if !record.enabled || record.removing {
                     continue;
                 }
-                for handler in self.manifest(id, record)?.event_handlers {
+                for handler in &self.manifest(id, record)?.event_handlers {
                     if handler.event == ModuleEvent::SmsReceived {
-                        handlers.push((id.clone(), handler.command));
+                        handlers.push((id.clone(), handler.command.clone()));
                     }
                 }
             }
@@ -893,7 +895,7 @@ impl ModuleManager {
         arguments: BTreeMap<String, Value>,
         app: bool,
     ) -> Result<ModuleOutput, ModuleError> {
-        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
         let record = state
             .registry
             .modules
@@ -936,9 +938,9 @@ impl ModuleManager {
             };
             return self.inference.invoke(request, generation);
         }
-        let (instance, evicted) = self.lease(&mut state, id);
+        let lease = self.lease(id, &manifest);
         drop(state);
-        drop(evicted);
+        let instance = lease.ready();
         let result = (|| {
             let _inputs =
                 crate::input::snapshot(&self.root, &command.arguments, &mut invocation.arguments)?;
@@ -956,7 +958,7 @@ impl ModuleManager {
             )
         })();
         drop(instance);
-        self.trim();
+        self.instances.release(id);
         let output = result?;
         checked_output(&manifest, output)
     }
@@ -1017,31 +1019,12 @@ impl ModuleManager {
         })
     }
 
-    /// The loaded instance of `id`, marked as just used, and the idle
-    /// instances to drop once the state lock is released. Instances held by a
-    /// lease are never evicted.
-    fn lease(
-        &self,
-        state: &mut State,
-        id: &str,
-    ) -> (Arc<ModuleInstance>, Vec<Arc<ModuleInstance>>) {
-        state.sequence = state.sequence.saturating_add(1);
-        let last_used = state.sequence;
-        let loaded = state.loaded.entry(id.into()).or_insert_with(|| Loaded {
-            instance: Arc::new(ModuleInstance::new(id, Arc::clone(&self.shared))),
-            last_used,
-        });
-        loaded.last_used = last_used;
-        let instance = Arc::clone(&loaded.instance);
-        (instance, trim_idle_instances(state))
-    }
-
-    fn trim(&self) {
-        let evicted = match self.state.lock() {
-            Ok(mut state) => trim_idle_instances(&mut state),
-            Err(_) => return,
-        };
-        drop(evicted);
+    /// Call `ready` on the lease after releasing the state lock.
+    fn lease(&self, id: &str, manifest: &ModuleManifest) -> crate::instances::Lease {
+        self.instances
+            .lease(id, manifest.sync_provider.is_some(), || {
+                ModuleInstance::new(id, Arc::clone(&self.shared))
+            })
     }
 
     fn access(
@@ -1095,7 +1078,7 @@ impl ModuleManager {
         endpoint: &str,
         privileged: bool,
     ) -> Result<EndpointSession, ModuleError> {
-        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
         let record = state
             .registry
             .modules
@@ -1122,9 +1105,9 @@ impl ModuleManager {
             &manifest.preferences,
             &self.preferences(id, &manifest, &record.preferences),
         )?;
-        let (instance, evicted) = self.lease(&mut state, id);
+        let lease = self.lease(id, &manifest);
         drop(state);
-        drop(evicted);
+        let instance = lease.ready();
         let (connection, outbound) = instance.endpoints().open()?;
         let session = EndpointSession::new(connection.clone(), Arc::clone(&instance), outbound);
         let package_dir = self.directory(id, &record.version);
@@ -1294,27 +1277,6 @@ fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
     }
 }
 
-// Four idle instances bound the cost of a growing module collection. Active
-// invocations retain their own lease and can never be unloaded by eviction.
-fn trim_idle_instances(state: &mut State) -> Vec<Arc<ModuleInstance>> {
-    let mut evicted = Vec::new();
-    while state.loaded.len() > 4 {
-        let oldest = state
-            .loaded
-            .iter()
-            .filter(|(_, loaded)| Arc::strong_count(&loaded.instance) == 1)
-            .min_by_key(|(_, loaded)| loaded.last_used)
-            .map(|(id, _)| id.clone());
-        let Some(id) = oldest else {
-            break;
-        };
-        if let Some(loaded) = state.loaded.remove(&id) {
-            evicted.push(loaded.instance);
-        }
-    }
-    evicted
-}
-
 fn validate_stored_preferences(
     manifest: &ModuleManifest,
     values: &BTreeMap<String, Value>,
@@ -1394,5 +1356,31 @@ mod tests {
         };
         assert!(checked_output(&manifest(6), view("open")).is_ok());
         assert!(checked_output(&manifest(6), view("missing")).is_err());
+    }
+
+    #[test]
+    fn a_changed_installed_package_is_verified_again() {
+        let key = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let manager = ModuleManager::open(
+            &directory.path().join("modules"),
+            "1.0.0",
+            crate::host::tests::target(),
+            &key.pk.to_base64(),
+        )
+        .unwrap();
+        let module = manager
+            .install(&crate::host::tests::package(directory.path(), &key))
+            .unwrap();
+        assert!(manager.list().unwrap()[0].error.is_none());
+        assert!(manager.manifests.lock().unwrap().contains_key(&module.id));
+        fs::write(
+            manager
+                .directory(&module.id, &module.version)
+                .join("manifest.json.sig"),
+            b"replaced",
+        )
+        .unwrap();
+        assert!(manager.list().unwrap()[0].error.is_some());
     }
 }
