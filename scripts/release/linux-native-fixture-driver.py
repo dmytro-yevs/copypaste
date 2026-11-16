@@ -1924,6 +1924,24 @@ def main():
             require_external_file_drag(cli, cli_environment, workspace, app.pid, args.session)
             require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
             emit_runtime(args.runtime_format, prefix)
+        except BaseException:
+            report = [f"gui pid={app.pid} returncode={app.poll()}"]
+            for argv in (["ps", "-eo", "pid,ppid,stat,etime,args", "--forest"], ["sudo", "-n", "dmesg", "-T"],
+                         ["bash", "-c", "ls -l $XDG_RUNTIME_DIR $TMPDIR 2>&1; coredumpctl list 2>&1 | tail -5"]):
+                try:
+                    out = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment, timeout=20).stdout
+                    report.append("$ " + " ".join(argv) + "\n" + out.decode("utf-8", "replace")[-20000:])
+                except Exception as error:
+                    report.append(f"$ {argv}: {error}")
+            Path(args.evidence_dir, "debug-failure.txt").write_text("\n".join(report), encoding="utf-8")
+            log = gui_log_path(environment)
+            if log.is_file():
+                Path(args.evidence_dir, "debug-failure-gui.log").write_bytes(log.read_bytes()[-524288:])
+            try:
+                debug_window_probe("failure", app.pid, environment, args.evidence_dir)
+            except Exception:
+                pass
+            raise
         finally:
             app.terminate()
             try:
