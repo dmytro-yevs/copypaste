@@ -6,6 +6,35 @@ optional OCR, semantic search, SMS Codes, and Supabase Sync modules.
 
 Download the latest release from [GitHub Releases](https://github.com/dmytro-yevs/copypaste/releases).
 
+## Install on macOS
+
+CopyPaste for macOS needs Apple silicon and macOS 14 or later. Install it with Homebrew:
+
+```bash
+brew tap dmytro-yevs/copypaste
+```
+
+```bash
+brew install --cask copypaste
+```
+
+Or with the [install script](scripts/install.sh), which downloads the release DMG,
+checks it against the published SHA-256 checksum, and copies `CopyPaste.app` into
+`/Applications`, or `~/Applications` when `/Applications` is not writable:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/install.sh | sh
+```
+
+Options go after `sh -s --`: `--version v0.1.0`, `--dir ~/Applications`, or
+`--dry-run` to download and verify without installing.
+
+CopyPaste is not notarized, because Apple notarization requires a paid Apple
+Developer Program membership. Both install paths re-sign the app with a local
+identity on your Mac, and it opens without a Gatekeeper prompt. If you download
+the DMG in a browser instead, macOS blocks the first launch: open
+**System Settings → Privacy & Security** and choose **Open Anyway**.
+
 ## History organization
 
 History supports local-calendar date ranges, quick periods, and combined server-side
