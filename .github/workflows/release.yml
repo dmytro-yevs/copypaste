@@ -71,6 +71,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       previous_linux_artifact_run_id: ${{ steps.sources.outputs.previous_linux_artifact_run_id }}
+      windows_signing: ${{ steps.sources.outputs.windows_signing }}
       linux_evidence_run_id: ${{ inputs.linux_evidence_run_id || github.run_id }}
       supabase_module_run_id: ${{ inputs.supabase_module_run_id || github.run_id }}
       semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id || github.run_id }}
@@ -253,6 +254,11 @@ jobs:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_CERTIFICATE_THUMBPRINT: ${{ vars.SIGNPATH_CERTIFICATE_THUMBPRINT }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: python3 scripts/release/preflight-sources.py
       - id: platform
@@ -572,17 +578,85 @@ jobs:
             throw "Windows OpenSSL SDK is incomplete"
           }
       - name: Prepare Windows signing
+        if: needs.preflight.outputs.windows_signing == 'local'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: ./scripts/release/windows-sign.ps1 -Operation Prepare -OutputPfxPath "$env:RUNNER_TEMP\copypaste-release.pfx" -PersistEnvironment
+      - name: Prepare external Windows signature verification
+        if: needs.preflight.outputs.windows_signing == 'external'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_EXPECTED_THUMBPRINT: ${{ vars.SIGNPATH_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/release/windows-sign.ps1 -Operation PrepareExternal -PersistEnvironment
+      - name: Build signed Windows application
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING: ${{ needs.preflight.outputs.windows_signing }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+        run: ./scripts/release/build-windows-flutter.ps1 -Version $env:VERSION -BuildNumber $env:BUILD_NUMBER -Stage Application -Signing $env:WINDOWS_SIGNING
+      - name: Stage Windows application binaries for external signing
+        id: unsigned-application
+        if: needs.preflight.outputs.windows_signing == 'external'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 7
+          name: windows-unsigned-application
+          if-no-files-found: error
+          path: target/windows-signing/unsigned-application/
+      - name: Sign Windows application binaries with SignPath
+        if: needs.preflight.outputs.windows_signing == 'external'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: application
+          github-artifact-id: ${{ steps.unsigned-application.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: target/windows-signing/signed-application
       - name: Build signed Windows installer
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-        run: ./scripts/release/build-windows-flutter.ps1 -Version '${{ needs.preflight.outputs.version }}' -BuildNumber ${{ needs.preflight.outputs.build_number }}
+          WINDOWS_SIGNING: ${{ needs.preflight.outputs.windows_signing }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+        run: ./scripts/release/build-windows-flutter.ps1 -Version $env:VERSION -BuildNumber $env:BUILD_NUMBER -Stage Installer -Signing $env:WINDOWS_SIGNING
+      - name: Stage Windows installer for external signing
+        id: unsigned-installer
+        if: needs.preflight.outputs.windows_signing == 'external'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 7
+          name: windows-unsigned-installer
+          if-no-files-found: error
+          path: target/windows-signing/unsigned-installer/*.exe
+      - name: Sign Windows installer with SignPath
+        if: needs.preflight.outputs.windows_signing == 'external'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: target/windows-signing/signed-installer
+      - name: Verify signed Windows installer
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING: ${{ needs.preflight.outputs.windows_signing }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+        run: ./scripts/release/build-windows-flutter.ps1 -Version $env:VERSION -BuildNumber $env:BUILD_NUMBER -Stage Finalize -Signing $env:WINDOWS_SIGNING
       - name: Sign updater artifact
         shell: bash
         env:
@@ -1042,6 +1116,11 @@ jobs:
             git commit -m "Release CopyPaste $VERSION"
             git push origin HEAD:main
           fi
+      - name: Submit Windows installer to winget
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: scripts/release/publish-winget.sh "$VERSION" "dist/CopyPaste-v${VERSION}-windows-x86_64-setup.exe"
 
   release-required:
     name: Release qualification required

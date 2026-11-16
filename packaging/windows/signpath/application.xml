@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Artifact configuration "application": CopyPaste's own binaries, staged flat by the release workflow. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="CopyPaste.exe"><authenticode-sign/></pe-file>
+    <pe-file path="copypaste-cli.exe"><authenticode-sign/></pe-file>
+    <pe-file path="copypaste-daemon.exe"><authenticode-sign/></pe-file>
+    <pe-file path="copypaste-update-helper.exe"><authenticode-sign/></pe-file>
+    <pe-file path="copypaste_flutter_bridge.dll"><authenticode-sign/></pe-file>
+  </zip-file>
+</artifact-configuration>

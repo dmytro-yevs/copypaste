@@ -4,30 +4,54 @@
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 
 from github_inventory import inventory
 from previous_release import resolve
 
 
+PFX_SIGNING = ("WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
+               "WINDOWS_TIMESTAMP_URL")
+EXTERNAL_SIGNING = ("SIGNPATH_API_TOKEN", "SIGNPATH_ORGANIZATION_ID", "SIGNPATH_PROJECT_SLUG",
+                    "SIGNPATH_SIGNING_POLICY_SLUG", "SIGNPATH_CERTIFICATE_THUMBPRINT")
+
+
+def windows_signing(environment):
+    """Select external signing only when it is completely configured; never mix it with the PFX."""
+    configured = [name for name in EXTERNAL_SIGNING if environment.get(name)]
+    if not configured:
+        return "local"
+    missing = [name for name in EXTERNAL_SIGNING if name not in configured]
+    if missing:
+        raise ValueError("Incomplete external Windows signing configuration: " + ", ".join(missing))
+    thumbprint = re.sub(r"[\s:]", "", environment["SIGNPATH_CERTIFICATE_THUMBPRINT"])
+    if not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
+        raise ValueError("SIGNPATH_CERTIFICATE_THUMBPRINT must be a SHA-1 certificate thumbprint")
+    return "external"
+
+
 def require_secrets(environment, *, build, publish):
+    signing = windows_signing(environment)
     required = []
     if build:
         required += ["ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS",
-                     "ANDROID_KEY_PASSWORD", "TAURI_SIGNING_PRIVATE_KEY",
-                     "WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
-                     "WINDOWS_TIMESTAMP_URL"]
+                     "ANDROID_KEY_PASSWORD", "TAURI_SIGNING_PRIVATE_KEY"]
+        if signing == "local":
+            required += PFX_SIGNING
     if publish:
         required.append("HOMEBREW_TAP_TOKEN")
     missing = [name for name in required if not environment.get(name)]
     if missing:
         raise ValueError("Missing release signing/publication configuration: " + ", ".join(missing))
+    return signing
 
 
 def main():
     root = Path(__file__).parent
     environment = os.environ
-    require_secrets(environment, build=environment["BUILD"] == "true", publish=environment["PUBLISH"] == "true")
+    signing = require_secrets(environment, build=environment["BUILD"] == "true",
+                              publish=environment["PUBLISH"] == "true")
     repository, commit = environment["GITHUB_REPOSITORY"], environment["RELEASE_COMMIT"]
     if environment.get("LINUX_EVIDENCE_RUN_ID") and not environment.get("LINUX_ARTIFACT_RUN_ID"):
         raise ValueError("External Linux evidence requires its original linux_artifact_run_id")
@@ -60,6 +84,7 @@ def main():
         previous = resolve(repository, environment["RELEASE_VERSION"], Path(environment["RUNNER_TEMP"]))
     with open(environment["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write("previous_linux_artifact_run_id=" + previous + "\n")
+        output.write("windows_signing=" + signing + "\n")
     output = Path(environment["RUNNER_TEMP"]) / "release-source-artifacts.json"
     output.write_text(json.dumps(snapshots, indent=2) + "\n", encoding="utf-8")
     print("External dependency identities and required signing configuration are valid")

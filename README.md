@@ -6,6 +6,17 @@ optional OCR, semantic search, SMS Codes, and Supabase Sync modules.
 
 Download the latest release from [GitHub Releases](https://github.com/dmytro-yevs/copypaste/releases).
 
+## Install on Windows
+
+Install CopyPaste on Windows (x64) with winget:
+
+```powershell
+winget install CopyPaste.CopyPaste
+```
+
+`winget upgrade CopyPaste.CopyPaste` updates it. Maintainers: see the
+[Windows release setup](packaging/windows/README.md) for signing and winget publication.
+
 ## History organization
 
 History supports local-calendar date ranges, quick periods, and combined server-side
