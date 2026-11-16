@@ -9,7 +9,52 @@ permissions:
   contents: read
 
 jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - name: Install Linux release packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            cpio desktop-file-utils libgtk-3-dev libsecret-1-dev libssl-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev \
+            gobject-introspection libgirepository1.0-dev libmutter-14-dev ninja-build pkg-config rpm patchelf \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+      - name: Fetch pinned upstream tool
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/tool-x86_64.AppImage"
+          curl --fail --location --output "$tool" "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+          printf '%s  %s\n' "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0" "$tool" | sha256sum --check --status
+          chmod 755 "$tool"
+          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+      - name: Build Linux packages
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
+          scripts/release/build-linux-flutter.sh 0.1.0 50 x86_64
+          scripts/release/build-linux-packages.sh 0.1.0 x86_64 --release-scope
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 3
+          name: fixed-linux
+          path: |
+            dist/CopyPaste-v0.1.0-linux-x86_64.AppImage
+            dist/CopyPaste-v0.1.0-linux-x86_64.deb
+
   scenario:
+    needs: build
     name: ${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -63,6 +108,15 @@ jobs:
           path: current
           run-id: 43883290035
           github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: fixed-linux
+          path: fixed
+      - name: Swap in the fixed packages
+        run: |
+          set -euo pipefail
+          cp -f fixed/CopyPaste-v0.1.0-linux-x86_64.AppImage fixed/CopyPaste-v0.1.0-linux-x86_64.deb current/
+          sha256sum current/*.deb
       - uses: ./.github/actions/download-verified-artifact
         with:
           name: provider-supabase-linux-${{ matrix.architecture }}
