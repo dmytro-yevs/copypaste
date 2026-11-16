@@ -63,10 +63,11 @@ daemon_path="$(ps -p "$daemon_pid" -o command=)"
 [[ "$daemon_path" == "$installed/Contents/MacOS/copypaste-daemon"* ]]
 cli="$installed/Contents/MacOS/copypaste-cli"
 [[ -x "$cli" ]]
-socket="${TMPDIR:-/tmp}/cp-${app_pid}.sock"
 status_file="$root/status.json"
 for _ in $(seq 1 20); do
-    if COPYPASTE_SOCKET="$socket" "$cli" --json status >"$status_file" 2>/dev/null; then
+    # The app names the endpoint after its data directory; read it from the daemon.
+    socket="$(lsof -a -p "$daemon_pid" -U -Fn 2>/dev/null | sed -n 's|^n\(/.*/cp-[0-9a-f]*\.sock\)$|\1|p' | head -n 1)"
+    if [[ -n "$socket" ]] && COPYPASTE_SOCKET="$socket" "$cli" --json status >"$status_file" 2>/dev/null; then
         break
     fi
     sleep 0.25
