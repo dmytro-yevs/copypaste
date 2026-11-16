@@ -48,6 +48,7 @@ class _Repository extends Fake implements HistoryRepository {
 class _MutableRepository extends Fake implements HistoryRepository {
   final events = StreamController<HistoryRuntimeEvent>.broadcast();
   final clips = <HistoryClip>[for (var i = 0; i < 250; i++) _clip(i)];
+  final requests = <String?>[];
   @override
   Stream<HistoryRuntimeEvent> watch() => events.stream;
   @override
@@ -58,6 +59,7 @@ class _MutableRepository extends Fake implements HistoryRepository {
     required int limit,
     String? cursor,
   }) async {
+    requests.add(cursor);
     final start = int.tryParse(cursor ?? '') ?? 0;
     final end = (start + limit).clamp(0, clips.length);
     return HistoryClipPage(
@@ -71,7 +73,70 @@ class _MutableRepository extends Fake implements HistoryRepository {
       clips.firstWhere((clip) => clip.id == id);
 }
 
+Future<HistoryController> _scrolledController(_MutableRepository repo) async {
+  repo.clips.addAll([for (var i = 250; i < 10000; i++) _clip(i)]);
+  final controller = HistoryController(repo, includeFacets: false);
+  addTearDown(controller.dispose);
+  addTearDown(repo.events.close);
+  await controller.initialize();
+  await controller.window.reportPageExtent(0, 100);
+  for (var page = 1; page < 4; page++) {
+    await controller.window.loadMore();
+    await controller.window.reportPageExtent(page, 100);
+  }
+  return controller;
+}
+
+Future<void> _settle() async {
+  for (var i = 0; i < 40; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
 void main() {
+  test(
+    'rebuild stops just past a vanished anchor and keeps its neighbours',
+    () async {
+      final repo = _MutableRepository();
+      final controller = await _scrolledController(repo);
+      controller.window.beforeWindowChange = () async => {'120'};
+      repo.clips
+        ..removeWhere((clip) => clip.id == '120')
+        ..insert(0, _clip(20000));
+      repo.requests.clear();
+      repo.events.add(HistoryRuntimeEvent.itemsChanged);
+      await _settle();
+
+      expect(controller.window.state, HistoryLoadState.ready);
+      expect(
+        repo.requests.length,
+        lessThanOrEqualTo(5),
+        reason: 'A missing anchor must not scan the remaining 196 pages.',
+      );
+      final pages = controller.window.windowPages;
+      final fallback = pages.indexWhere((page) => page.ids.contains('121'));
+      expect(fallback, greaterThan(0));
+      expect(pages[fallback - 1].resident, isTrue);
+      expect(pages[fallback].resident, isTrue);
+      expect(pages[fallback + 1].resident, isTrue);
+    },
+  );
+
+  test('rebuild follows an anchor moved hundreds of rows down', () async {
+    final repo = _MutableRepository();
+    final controller = await _scrolledController(repo);
+    controller.window.beforeWindowChange = () async => {'100'};
+    repo.clips.insertAll(0, [for (var i = 20000; i < 20300; i++) _clip(i)]);
+    repo.events.add(HistoryRuntimeEvent.itemsChanged);
+    await _settle();
+
+    final pages = controller.window.windowPages;
+    final anchor = pages.indexWhere((page) => page.ids.contains('100'));
+    expect(anchor, 8);
+    expect(pages[anchor].resident, isTrue);
+    expect(controller.window.items.any((clip) => clip.id == '100'), isTrue);
+  });
+
   test(
     'keeps rebuilt pages renderable before their geometry is measured',
     () async {

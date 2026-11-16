@@ -753,16 +753,51 @@ class HistoryWindowController {
       afterWindowChange?.call();
       return;
     }
-    final wanted =
+    final first =
         anchors.firstOrNull ??
         _items.firstOrNull?.id ??
         _history.selection.selectedId;
+    var wanted = first;
     final oldIds = visitedIds;
     final previous = {for (final item in _items) item.id: item};
-    final anchorRank = oldIds.indexOf(wanted ?? '');
+    final anchorRank = oldIds.indexOf(first ?? '');
     final ranks = <String, int>{
       for (var i = 0; i < oldIds.length; i++) oldIds[i]: i,
     };
+    // History keeps its place on any captured anchor and stops reading once
+    // every anchor is provably gone. Quick Paste follows only the first.
+    final bounded = !_separatePinnedWindow;
+    final targets = <String>[?first, if (bounded) ...anchors.skip(1)];
+    var lastRank = -1;
+    for (final id in targets) {
+      final rank = ranks[id] ?? -1;
+      if (rank > lastRank) lastRank = rank;
+    }
+    final oldPageCount = _window.pages.length;
+    final oldCreated = <String, int>{};
+    final oldPinned = <String>{};
+    if (bounded) {
+      for (final page in _window.pages) {
+        for (var i = 0; i < page.ids.length; i++) {
+          oldCreated[page.ids[i]] = page.createdAtMillis[i];
+        }
+        oldPinned.addAll(page.pinnedIds);
+      }
+    }
+    // A row ranked after every anchor proves the walk passed their old
+    // position only if it kept its place: not pinned before or now, and not
+    // bumped by a recopy. New rows prove nothing.
+    bool passedTargets(int index, List<HistoryClip> items) {
+      if (lastRank < 0) return index >= oldPageCount - 1;
+      return items.any(
+        (item) =>
+            (ranks[item.id] ?? -1) > lastRank &&
+            !item.pinned &&
+            !oldPinned.contains(item.id) &&
+            oldCreated[item.id] == item.createdAt.millisecondsSinceEpoch,
+      );
+    }
+
     final rebuilt = HistoryWindowIndex(
       maxPages: HistoryResourceLimits.residentPages,
       maxBytes: HistoryResourceLimits.residentSummaryBytes,
@@ -779,6 +814,7 @@ class HistoryWindowController {
     HistoryClipPage? fallbackContents;
     var fallbackDistance = 1 << 30;
     var found = false;
+    var stopped = false;
     do {
       final incoming = cursor == null && start == 0 && freshFirstPage != null
           ? freshFirstPage
@@ -809,7 +845,10 @@ class HistoryWindowController {
         fallbackPage = index;
         fallbackContents = page;
       }
-      if (wanted != null && page.items.any((item) => item.id == wanted)) {
+      final pageIds = {for (final item in page.items) item.id};
+      final match = targets.where(pageIds.contains).firstOrNull;
+      if (match != null) {
+        wanted = match;
         found = true;
         break;
       }
@@ -824,6 +863,10 @@ class HistoryWindowController {
           fallbackContents = page;
         }
       }
+      if (bounded && passedTargets(index, page.items)) {
+        stopped = true;
+        break;
+      }
       // Fresh boundaries have no measured scroll extent. Keep their summaries
       // until layout reports geometry and reportPageExtent can safely evict them.
       cursor = page.nextCursor;
@@ -831,7 +874,8 @@ class HistoryWindowController {
     if (!found && fallbackPage != null && fallbackContents != null) {
       rebuilt.pages[fallbackPage].items = fallbackContents.items;
     }
-    if (found && rebuilt.pages.last.nextCursor != null) {
+    if ((found || (stopped && fallbackPage == rebuilt.pages.length - 1)) &&
+        rebuilt.pages.last.nextCursor != null) {
       final input = rebuilt.pages.last.nextCursor;
       final page = await _scope.repository.query(
         query: _query,
@@ -861,10 +905,11 @@ class HistoryWindowController {
         rebuilt.replace(pinned, page);
       }
     }
-    final active = rebuilt.pages.indexWhere(
+    var active = rebuilt.pages.indexWhere(
       (page) =>
           page.items != null && (wanted == null || page.ids.contains(wanted)),
     );
+    if (active < 0 && stopped) active = fallbackPage ?? -1;
     if (active >= 0) {
       rebuilt.retainAround(active, protectedIds: {?wanted});
     }
