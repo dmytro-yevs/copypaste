@@ -16,6 +16,7 @@ import '../../../shared/dialogs/unsaved_changes_dialog.dart';
 import '../../../shared/error_text.dart';
 import '../repository/clip_edit_preferences.dart';
 import '../repository/clip_edit_repository.dart';
+import 'history_selectable_text.dart';
 
 /// The text clip [ClipEditDrawer] edits.
 class ClipEditTarget {
@@ -47,11 +48,16 @@ Future<String?> showClipEditDrawer(
   required ClipEditRepository clips,
   required ClipEditPreferences preferences,
   ClipEditTarget? clip,
+  Future<bool> Function(String text)? onCopy,
 }) => showOverlay<String>(
   context,
   AppOverlays.drawerConfiguration(context, guarded: true),
-  builder: (context) =>
-      ClipEditDrawer(clips: clips, preferences: preferences, clip: clip),
+  builder: (context) => ClipEditDrawer(
+    clips: clips,
+    preferences: preferences,
+    clip: clip,
+    onCopy: onCopy,
+  ),
 ).future;
 
 /// One editor for new and edited text. Nothing is written until Save;
@@ -62,31 +68,43 @@ class ClipEditDrawer extends StatefulWidget {
     required this.clips,
     required this.preferences,
     this.clip,
+    this.onCopy,
   });
 
   final ClipEditRepository clips;
   final ClipEditPreferences preferences;
   final ClipEditTarget? clip;
 
+  /// Copies text selected in a read-only clip; resolves to whether it was
+  /// written. Without it a read-only selection cannot be copied.
+  final Future<bool> Function(String text)? onCopy;
+
   @override
   State<ClipEditDrawer> createState() => _ClipEditDrawerState();
 }
 
 class _ClipEditDrawerState extends State<ClipEditDrawer> {
-  late final _text = TextEditingController(text: widget.clip?.text ?? '');
+  /// Read-only clips are shown sliced and never get a text field controller.
+  late final bool _readOnly = widget.clip?.tooLarge ?? false;
+  TextEditingController? _text;
+  String _value = '';
+  bool _dirty = false;
+  bool _empty = true;
   bool _replaceOriginal = false;
   bool _saving = false;
   bool _closing = false;
 
   bool get _editing => widget.clip != null;
-  bool get _readOnly => widget.clip?.tooLarge ?? false;
-  bool get _dirty => !_readOnly && _text.text != (widget.clip?.text ?? '');
-  bool get _empty => _text.text.trim().isEmpty;
 
   @override
   void initState() {
     super.initState();
-    _text.addListener(() => setState(() {}));
+    if (!_readOnly) {
+      _value = widget.clip?.text ?? '';
+      _empty = _value.trim().isEmpty;
+      _text = TextEditingController(text: _value)
+        ..addListener(_handleTextChange);
+    }
     if (_editing) {
       unawaited(
         widget.preferences.replaceOriginal().then((value) {
@@ -98,9 +116,23 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
 
   @override
   void dispose() {
-    _text.dispose();
+    _text?.dispose();
     super.dispose();
   }
+
+  /// Selection-only changes keep the same text and need no rebuild.
+  void _handleTextChange() {
+    final value = _text!.text;
+    if (value == _value) return;
+    _value = value;
+    setState(() {
+      _dirty = value != (widget.clip?.text ?? '');
+      _empty = value.trim().isEmpty;
+    });
+  }
+
+  Future<bool> _copySelection(String text) async =>
+      await widget.onCopy?.call(text) ?? false;
 
   Future<void> _close() async {
     if (_closing || _saving) return;
@@ -127,7 +159,7 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
     setState(() {
       _saving = true;
     });
-    final text = _text.text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final text = _value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     try {
       final String id;
       if (widget.clip case final clip?) {
@@ -293,16 +325,22 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
           ),
           const Gap(AppSpacing.md),
         ],
-        TextArea(
-          key: const ValueKey('clip-edit-text'),
-          controller: _text,
-          readOnly: _readOnly,
-          autofocus: !_readOnly,
-          expandableHeight: true,
-          initialHeight: AppOverlaySize.editorBodyMinHeight,
-          minHeight: AppOverlaySize.editorBodyMinHeight,
-          decoration: AppOverlays.dialogFieldDecoration(context),
-        ),
+        if (_text case final controller?)
+          TextArea(
+            key: const ValueKey('clip-edit-text'),
+            controller: controller,
+            autofocus: true,
+            expandableHeight: true,
+            initialHeight: AppOverlaySize.editorBodyMinHeight,
+            minHeight: AppOverlaySize.editorBodyMinHeight,
+            decoration: AppOverlays.dialogFieldDecoration(context),
+          )
+        else
+          HistorySelectableText(
+            widget.clip!.text,
+            key: const ValueKey('clip-edit-text'),
+            onCopy: _copySelection,
+          ),
         if (_editing && !_readOnly) ...[
           const Gap(AppSpacing.md),
           _switch(
