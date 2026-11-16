@@ -3,9 +3,10 @@
 //! Every decode is bounded by `max_decoded_image_mb`; synced or imported image
 //! metadata cannot be trusted to describe the allocation it will require.
 
+use std::borrow::Cow;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
-use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits};
+use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits, RgbImage};
 
 pub(super) enum CapturedImage {
     Image(Vec<u8>),
@@ -17,17 +18,17 @@ pub(super) enum CapturedImage {
 /// Publish the original native representation as well as a bitmap for older
 /// Windows applications. The bitmap alone loses alpha, colour depth and TIFF
 /// metadata that the macOS paste-back preserves.
-pub(super) struct PasteImage {
+pub(super) struct PasteImage<'a> {
     pub(super) format: &'static str,
-    pub(super) encoded: Vec<u8>,
+    pub(super) encoded: Cow<'a, [u8]>,
     pub(super) bitmap: Vec<u8>,
 }
 
-pub(super) fn paste_image(
-    encoded: &[u8],
+pub(super) fn paste_image<'a>(
+    encoded: &'a [u8],
     content_type: &str,
     decoded_memory_mb: u32,
-) -> Option<PasteImage> {
+) -> Option<PasteImage<'a>> {
     let format = image::guess_format(encoded).ok()?;
     if matches!(content_type, copypaste_ipc::content_type::IMAGE_PNG) && format != ImageFormat::Png
         || matches!(content_type, copypaste_ipc::content_type::IMAGE_TIFF)
@@ -37,17 +38,17 @@ pub(super) fn paste_image(
     }
     let image = guess_and_decode(encoded, decoded_memory_mb)?;
     let (format, native) = match content_type {
-        copypaste_ipc::content_type::IMAGE_PNG => ("PNG", encoded.to_vec()),
-        copypaste_ipc::content_type::IMAGE_TIFF => ("TIFF", encoded.to_vec()),
+        copypaste_ipc::content_type::IMAGE_PNG => ("PNG", Cow::Borrowed(encoded)),
+        copypaste_ipc::content_type::IMAGE_TIFF => ("TIFF", Cow::Borrowed(encoded)),
         _ => {
             let mut native = Vec::new();
             image
                 .write_to(&mut Cursor::new(&mut native), ImageFormat::Png)
                 .ok()?;
-            ("PNG", native)
+            ("PNG", Cow::Owned(native))
         }
     };
-    let bitmap = encode(DynamicImage::ImageRgb8(image.into_rgb8()), ImageFormat::Bmp)?;
+    let bitmap = encode_bitmap(image.into_rgb8())?;
     Some(PasteImage {
         format,
         encoded: native,
@@ -63,18 +64,26 @@ pub(super) fn paste_image(
 #[cfg(test)]
 pub(super) fn to_bitmap(encoded: &[u8], decoded_memory_mb: u32) -> Option<Vec<u8>> {
     let image = guess_and_decode(encoded, decoded_memory_mb)?;
-    encode(DynamicImage::ImageRgb8(image.into_rgb8()), ImageFormat::Bmp)
+    encode_bitmap(image.into_rgb8())
 }
 
 /// Verify a registered image representation before retaining its compressed
 /// bytes. A tiny image can describe an unbounded decoded bitmap, so the
 /// capture boundary enforces the same decoded-memory limit as paste-back.
+/// A PNG is sized from its header and its image data is then validated one
+/// row at a time; the TIFF decoder charges its own buffers to the limit, so
+/// only a full decode matches it.
 pub(super) fn checked_image(
     encoded: Vec<u8>,
     format: ImageFormat,
     decoded_memory_mb: u32,
 ) -> CapturedImage {
-    match decode(Cursor::new(&encoded), format, decoded_memory_mb) {
+    let checked = match format {
+        ImageFormat::Png => check_decoded_size(&encoded, format, decoded_memory_mb)
+            .and_then(|()| drain_png_rows(&encoded, decoded_memory_mb)),
+        _ => decode(Cursor::new(&encoded), format, decoded_memory_mb).map(drop),
+    };
+    match checked {
         Ok(_) => CapturedImage::Image(encoded),
         Err(ImageError::Limits(_)) => CapturedImage::DecodedTooLarge,
         Err(_) => CapturedImage::Invalid,
@@ -86,8 +95,14 @@ pub(super) fn checked_image(
 /// `BmpDecoder::new_without_file_header` is image-rs's native DIB path. The
 /// clipboard API exposes its allocation size before `get_vec` copies it; this
 /// helper applies the decoded-memory cap before image-rs allocates pixels.
-pub(super) fn png_from_dib(dib: &[u8], decoded_memory_mb: u32, encoded_cap: u64) -> CapturedImage {
-    match decode_dib(dib, decoded_memory_mb) {
+pub(super) fn png_from_dib(
+    dib: Vec<u8>,
+    decoded_memory_mb: u32,
+    encoded_cap: u64,
+) -> CapturedImage {
+    let decoded = decode_dib(&dib, decoded_memory_mb);
+    drop(dib);
+    match decoded {
         Ok(image) => encode_png_bounded(image, encoded_cap),
         Err(ImageError::Limits(_)) => CapturedImage::DecodedTooLarge,
         Err(_) => CapturedImage::Invalid,
@@ -197,16 +212,61 @@ fn decode(
     reader.decode()
 }
 
+fn check_decoded_size(
+    bytes: &[u8],
+    format: ImageFormat,
+    decoded_memory_mb: u32,
+) -> image::ImageResult<()> {
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
+    reader.limits(limits(decoded_memory_mb));
+    let decoder = reader.into_decoder()?;
+    limits(decoded_memory_mb).reserve(decoder.total_bytes())
+}
+
+/// The rows `PngDecoder::read_image` would decode, with its settings, into one
+/// reused row buffer.
+fn drain_png_rows(bytes: &[u8], decoded_memory_mb: u32) -> image::ImageResult<()> {
+    let max_bytes = usize::try_from(limits(decoded_memory_mb).max_alloc.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX);
+    let mut decoder =
+        png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits { bytes: max_bytes });
+    decoder.set_ignore_text_chunk(false);
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let drained = decoder.read_info().and_then(|mut reader| {
+        while reader.next_row()?.is_some() {}
+        Ok(())
+    });
+    drained.map_err(|error| match error {
+        png::DecodingError::LimitsExceeded => ImageError::Limits(
+            image::error::LimitError::from_kind(image::error::LimitErrorKind::InsufficientMemory),
+        ),
+        error => ImageError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+    })
+}
+
 fn limits(decoded_memory_mb: u32) -> Limits {
     let mut limits = Limits::default();
     limits.max_alloc = Some(u64::from(decoded_memory_mb).saturating_mul(1024 * 1024));
     limits
 }
 
+#[cfg(test)]
 fn encode(image: DynamicImage, format: ImageFormat) -> Option<Vec<u8>> {
     let mut encoded = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut encoded), format)
+        .ok()?;
+    Some(encoded)
+}
+
+fn encode_bitmap(image: RgbImage) -> Option<Vec<u8>> {
+    let row = (u64::from(image.width()) * 3).next_multiple_of(4);
+    let size = row
+        .checked_mul(u64::from(image.height()))
+        .and_then(|pixels| usize::try_from(pixels.checked_add(54)?).ok())?;
+    let mut encoded = Vec::with_capacity(size);
+    image
+        .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Bmp)
         .ok()?;
     Some(encoded)
 }
@@ -397,8 +457,8 @@ mod tests {
             let prepared = paste_image(&encoded, content_type, 50)
                 .expect("every image kind supported by macOS paste-back must work on Windows");
             assert_eq!(prepared.format, "PNG");
-            for representation in [prepared.encoded, prepared.bitmap] {
-                let decoded = image::load_from_memory(&representation).unwrap();
+            for representation in [&prepared.encoded[..], &prepared.bitmap[..]] {
+                let decoded = image::load_from_memory(representation).unwrap();
                 assert_eq!((decoded.width(), decoded.height()), (3, 2));
             }
         }
@@ -406,12 +466,12 @@ mod tests {
 
     #[test]
     fn truncated_v5_headers_are_rejected_without_panicking() {
-        let mut dib = vec![0; 124];
+        let mut dib = [0; 124];
         dib[..4].copy_from_slice(&124u32.to_le_bytes());
         dib[16..20].copy_from_slice(&3u32.to_le_bytes());
         for end in 0..dib.len() {
             assert!(matches!(
-                png_from_dib(&dib[..end], 50, 1024),
+                png_from_dib(dib[..end].to_vec(), 50, 1024),
                 CapturedImage::Invalid
             ));
         }
@@ -444,7 +504,8 @@ mod tests {
     #[test]
     fn a_native_dib_becomes_a_png() {
         let bitmap = to_bitmap(&png(8, 8), 50).unwrap();
-        let CapturedImage::Image(png) = png_from_dib(&bitmap[14..], 50, 4 * 1024 * 1024) else {
+        let CapturedImage::Image(png) = png_from_dib(bitmap[14..].to_vec(), 50, 4 * 1024 * 1024)
+        else {
             panic!("a DIB made by the maintained bitmap codec must decode");
         };
         assert!(png.starts_with(b"\x89PNG"));
@@ -454,7 +515,7 @@ mod tests {
     fn a_native_dib_over_the_decoded_budget_is_refused() {
         let bitmap = to_bitmap(&png(1024, 1024), 50).unwrap();
         assert!(matches!(
-            png_from_dib(&bitmap[14..], 1, 4 * 1024 * 1024),
+            png_from_dib(bitmap[14..].to_vec(), 1, 4 * 1024 * 1024),
             CapturedImage::DecodedTooLarge
         ));
     }
@@ -470,7 +531,7 @@ mod tests {
     #[test]
     fn a_truncated_dib_does_not_reach_the_decoder() {
         assert!(matches!(
-            png_from_dib(&[40, 0, 0, 0], 50, 4 * 1024 * 1024),
+            png_from_dib(vec![40, 0, 0, 0], 50, 4 * 1024 * 1024),
             CapturedImage::Invalid
         ));
     }
