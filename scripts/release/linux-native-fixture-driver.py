@@ -1261,7 +1261,8 @@ class ModulesScreen:
         steps = [("observe", f"Enable {title}"), ("click", "Module settings"), ("observe", "Choose languages"),
                  ("click", "Choose languages")]
         steps += [step for language in languages for step in (("observe", language), ("click", language))]
-        steps += [("key", "Escape"), ("observe", "Save"), ("click", "Save"), ("click", "Done")]
+        # Saving closes the drawer, which returns to the module's row.
+        steps += [("key", "Escape"), ("observe", "Save"), ("click", "Save"), ("observe", f"Enable {title}")]
         return self._steps("set_preferences", steps)
 
     def set_enabled(self, title, enabled):

@@ -672,7 +672,7 @@ def qualify(args: argparse.Namespace) -> None:
         require_program(program, environment)
     service = expect_tray(environment, args.gui_pid)
     layout = dbus_menu_layout(environment, service)
-    open_item = menu_item_id(layout, "Open")
+    open_item = menu_item_id(layout, "Open CopyPaste")
 
     if args.session == "x11":
         for program in ("xdotool", "xprop", "xwininfo", "wmctrl"):
