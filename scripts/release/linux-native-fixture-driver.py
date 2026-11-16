@@ -1274,6 +1274,31 @@ class ModulesScreen:
         ])
 
 
+def debug_window_probe(label, pid, environment, evidence_dir):
+    out = Path(evidence_dir) / "debug-window.log"
+    lines = [f"=== {label} t={time.monotonic():.2f} pid={pid}"]
+    def capture(argv):
+        try:
+            result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment, timeout=15)
+            return result.stdout.decode("utf-8", "replace").strip()
+        except Exception as error:
+            return f"<{error}>"
+    every = capture(["xdotool", "search", "--pid", str(pid)]).split()
+    visible = capture(["xdotool", "search", "--onlyvisible", "--pid", str(pid)]).split()
+    lines.append(f"windows={every} visible={visible} desktop={capture(['xdotool', 'get_desktop'])}")
+    for window in every:
+        if window.isdigit():
+            info = capture(["xwininfo", "-id", window])
+            keep = [line.strip() for line in info.splitlines() if any(k in line for k in ("Map State", "Absolute", "Width", "Height", "xwininfo"))]
+            lines.append(f"  {window}: {keep}")
+            lines.append("    " + capture(["xprop", "-id", window, "WM_NAME", "WM_STATE", "_NET_WM_STATE", "_NET_WM_DESKTOP", "WM_TRANSIENT_FOR"]).replace("\n", " | "))
+    lines.append(capture(["wmctrl", "-lpG"]))
+    lines.append(capture([sys.executable, str(Path(__file__).with_name("debug-atspi-dump.py")), str(pid), "Settings"]))
+    with out.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    capture_display(Path(evidence_dir) / f"debug-{label}.png", environment)
+
+
 def capture_display(path, environment):
     """Best-effort PNG of the test display for diagnosing a failed UI phase."""
     try:
@@ -1864,6 +1889,27 @@ def main():
                 return runtime_socket
 
             require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
+            debug_actor = require_helper(args.wayland_actor, "debug actor")
+            debug_window_probe("before-loop", app.pid, environment, args.evidence_dir)
+            failures = 0
+            for cycle in range(6):
+                restart_gui_for_modules()
+                debug_window_probe(f"c{cycle}-restarted", app.pid, environment, args.evidence_dir)
+                try:
+                    atspi_action(debug_actor, "click", app.pid, "Settings", environment)
+                    debug_window_probe(f"c{cycle}-clicked", app.pid, environment, args.evidence_dir)
+                    atspi_action(debug_actor, "click", app.pid, "History", environment)
+                except Exception as error:
+                    failures += 1
+                    with (Path(args.evidence_dir) / "debug-window.log").open("a", encoding="utf-8") as handle:
+                        handle.write(f"!!! cycle {cycle} click failed: {error}\n")
+                    for step in range(6):
+                        time.sleep(2)
+                        debug_window_probe(f"c{cycle}-fail-{step}", app.pid, environment, args.evidence_dir)
+                    log = gui_log_path(environment)
+                    if log.is_file():
+                        (Path(args.evidence_dir) / f"debug-c{cycle}-gui.log").write_bytes(log.read_bytes()[-262144:])
+            raise RuntimeError(f"debug loop finished with {failures} failures")
             modules_screen = ModulesScreen(
                 require_helper(args.wayland_actor, "Modules screen AT-SPI actor"), lambda: app.pid, environment,
             )
