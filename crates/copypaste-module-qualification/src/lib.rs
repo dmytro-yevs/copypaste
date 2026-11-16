@@ -6,6 +6,7 @@ mod ai_tools;
 #[allow(unsafe_code)]
 mod android;
 mod semantic;
+mod snippets;
 mod supabase;
 
 use copypaste_modules::{ModuleManager, ModuleOutput, ModuleTarget, MODULE_RELEASE_PUBLIC_KEY};
@@ -85,6 +86,7 @@ pub(crate) fn qualify_with_inference(
         "copypaste.supabase" => supabase::qualify(&manager, &installed.id)?,
         "copypaste.sms-codes" => qualify_sms(&manager, &installed.id)?,
         "copypaste.ai-tools" => ai_tools::qualify(&manager, &installed, target)?,
+        "copypaste.snippets" => snippets::qualify(package, data, &installed)?,
         _ => return Err("No native qualification scenario exists for this module.".into()),
     };
     manager

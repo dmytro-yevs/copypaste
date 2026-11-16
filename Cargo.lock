@@ -932,8 +932,10 @@ name = "copypaste-module-qualification"
 version = "0.1.0"
 dependencies = [
  "copypaste-core",
+ "copypaste-ipc",
  "copypaste-module-sdk",
  "copypaste-modules",
+ "copypaste-runtime",
  "copypaste-sync",
  "hex",
  "jni",
@@ -941,6 +943,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

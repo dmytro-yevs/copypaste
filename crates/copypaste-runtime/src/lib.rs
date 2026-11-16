@@ -261,6 +261,23 @@ impl Runtime {
         )
     }
 
+    /// Opens a runtime over `keyring` without the platform keystore or a
+    /// clipboard, for hosts that exercise modules in isolation.
+    pub fn open_isolated(
+        data_dir: &Path,
+        device_name: &str,
+        keyring: Arc<Keyring>,
+    ) -> Result<Self, RuntimeError> {
+        std::fs::create_dir_all(data_dir).map_err(|_| RuntimeError::Storage)?;
+        Self::open_with_keyring(
+            data_dir,
+            device_name,
+            0,
+            Arc::new(host::InProcessHost(Arc::new(host::UnavailableClipboard))),
+            keyring,
+        )
+    }
+
     /// Continues construction after the host has selected a keyring, so tests
     /// can inject a deterministic key without touching the platform keychain.
     fn open_with_keyring(
