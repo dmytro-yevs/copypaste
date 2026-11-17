@@ -2,9 +2,42 @@ use crate::{
     ocr_error::OcrError,
     ocr_result::{Point, TextBox},
 };
-use image::imageops;
+use image::{GenericImageView, Rgb, imageops};
 use imageproc::geometric_transformations::{Interpolation, Projection};
 use ndarray::{Array, Array4};
+
+/// Reads like the result of `OcrUtils::make_padding` without allocating it.
+pub struct PaddedImage {
+    image: image::RgbImage,
+    padding: u32,
+}
+
+impl PaddedImage {
+    pub fn new(image: image::RgbImage, padding: u32) -> Self {
+        Self { image, padding }
+    }
+}
+
+impl GenericImageView for PaddedImage {
+    type Pixel = Rgb<u8>;
+
+    fn dimensions(&self) -> (u32, u32) {
+        (
+            self.image.width() + 2 * self.padding,
+            self.image.height() + 2 * self.padding,
+        )
+    }
+
+    fn get_pixel(&self, x: u32, y: u32) -> Rgb<u8> {
+        let x = x.wrapping_sub(self.padding);
+        let y = y.wrapping_sub(self.padding);
+        if x < self.image.width() && y < self.image.height() {
+            *self.image.get_pixel(x, y)
+        } else {
+            Rgb([255, 255, 255])
+        }
+    }
+}
 
 pub struct OcrUtils;
 
@@ -71,8 +104,8 @@ impl OcrUtils {
             .collect()
     }
 
-    pub fn get_rotate_crop_image(
-        img_src: &image::RgbImage,
+    pub fn get_rotate_crop_image<I: GenericImageView<Pixel = Rgb<u8>> + 'static>(
+        img_src: &I,
         box_points: &[Point],
     ) -> image::RgbImage {
         let mut points = box_points.to_vec();

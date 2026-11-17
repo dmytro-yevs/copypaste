@@ -6991,6 +6991,99 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-186",
+      "title": "OCR reads padding through a view and drops alpha in place",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/ocr_utils.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/db_net.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/scale_param.rs"
+      ],
+      "invariant": "Detection input and recognition crops stay byte-identical to the materialised padded image on all ten routes, while 8-bit RGB and RGBA decodes never hold a second full-resolution buffer.",
+      "tradeoffs": "Each pixel read through the padded view adds a bounds check. Releasing the alpha bytes relies on the allocator shrinking in place, seen on macOS only; one that copies restores the previous decode peak. The detection resize still builds a full-width floating-point temporary, about 136 MB at 16 megapixels, and the detection model's working memory keeps the process near 1.05 GB.",
+      "next_step": "Inference worker peak on Android and Windows. Resize the detection input in bands; find what the detection model holds.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l, full OCR of one image on all ten routes",
+        "baseline": 1154167603,
+        "candidate": 1104412672,
+        "peak_footprint_mib_before": {
+          "rgba_png_16_megapixels": [
+            1105.7,
+            1095.7
+          ],
+          "rgb_png_16_megapixels": [
+            1083.6,
+            1076.4
+          ],
+          "rgb_jpeg_16_megapixels": [
+            1073.1,
+            1084.1
+          ],
+          "rgba_png_1600_by_900": [
+            472.7,
+            464.3
+          ]
+        },
+        "peak_footprint_mib_after": {
+          "rgba_png_16_megapixels": [
+            1055.2,
+            1051.3
+          ],
+          "rgb_png_16_megapixels": [
+            1058.3,
+            1054.8
+          ],
+          "rgb_jpeg_16_megapixels": [
+            1045.0,
+            1053.0
+          ],
+          "rgba_png_1600_by_900": [
+            464.4,
+            465.8
+          ]
+        },
+        "pixel_stage_peak_mb": {
+          "decode_and_pad_rgba_png": [
+            108.4,
+            62.5
+          ],
+          "decode_and_pad_rgb_png": [
+            95.4,
+            47.2
+          ],
+          "through_detection_resize_rgba_png": [
+            251.0,
+            190.6
+          ],
+          "through_detection_resize_rgb_png": [
+            238.0,
+            189.9
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build, synthetic 4000 by 4000 images and the installed module package's models, read in place. Baseline and candidate are the means of the two RGBA PNG runs converted to bytes. Pixel-stage pairs are before and after for a harness that stops before inference.",
+        "repetitions_per_version": 2,
+        "attribution": "Recognised text was byte-identical before and after for all four images. The process was the module's evidence binary, not the application's inference worker. Session settings were measured as well: memory pattern off and optimisation level 1 or 3 changed nothing, and disabling the arena raised the peak by about 165 MB, so the builder is unchanged.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }
