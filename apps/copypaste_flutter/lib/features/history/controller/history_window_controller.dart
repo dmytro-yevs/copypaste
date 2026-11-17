@@ -765,8 +765,10 @@ class HistoryWindowController {
       for (var i = 0; i < oldIds.length; i++) oldIds[i]: i,
     };
     // History keeps its place on any captured anchor and stops reading once
-    // every anchor is provably gone. Quick Paste follows only the first.
-    final bounded = !_separatePinnedWindow;
+    // every anchor is provably gone. Quick Paste and relevance order, whose
+    // ranks can shift, follow only the first anchor.
+    final bounded =
+        !_separatePinnedWindow && _query.sort != HistorySort.relevance;
     final targets = <String>[?first, if (bounded) ...anchors.skip(1)];
     var lastRank = -1;
     for (final id in targets) {
@@ -784,17 +786,19 @@ class HistoryWindowController {
         oldPinned.addAll(page.pinnedIds);
       }
     }
-    // A row ranked after every anchor proves the walk passed their old
-    // position only if it kept its place: not pinned before or now, and not
-    // bumped by a recopy. New rows prove nothing.
+    // A row kept its place unless a pin change or a recopy moved it.
+    bool keptPlace(HistoryClip item) =>
+        item.pinned == oldPinned.contains(item.id) &&
+        oldCreated[item.id] == item.createdAt.millisecondsSinceEpoch;
+    // An unpinned row that kept its place and ranked after every anchor proves
+    // the walk passed their old position. New rows prove nothing.
     bool passedTargets(int index, List<HistoryClip> items) {
       if (lastRank < 0) return index >= oldPageCount - 1;
       return items.any(
         (item) =>
             (ranks[item.id] ?? -1) > lastRank &&
             !item.pinned &&
-            !oldPinned.contains(item.id) &&
-            oldCreated[item.id] == item.createdAt.millisecondsSinceEpoch,
+            keptPlace(item),
       );
     }
 
@@ -845,8 +849,11 @@ class HistoryWindowController {
         fallbackPage = index;
         fallbackContents = page;
       }
-      final pageIds = {for (final item in page.items) item.id};
-      final match = targets.where(pageIds.contains).firstOrNull;
+      final byId = {for (final item in page.items) item.id: item};
+      final match = targets.where((id) {
+        final item = byId[id];
+        return item != null && (id == first || keptPlace(item));
+      }).firstOrNull;
       if (match != null) {
         wanted = match;
         found = true;

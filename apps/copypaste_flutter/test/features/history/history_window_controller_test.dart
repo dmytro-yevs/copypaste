@@ -137,6 +137,42 @@ void main() {
     expect(controller.window.items.any((clip) => clip.id == '100'), isTrue);
   });
 
+  test('a recopied anchor below the first keeps the user\'s place', () async {
+    final repo = _MutableRepository();
+    repo.clips.removeRange(120, repo.clips.length);
+    final controller = HistoryController(repo, includeFacets: false);
+    addTearDown(controller.dispose);
+    addTearDown(repo.events.close);
+    await controller.initialize();
+    await controller.window.reportPageExtent(0, 100);
+    for (var page = 1; page < 3; page++) {
+      await controller.window.loadMore();
+      await controller.window.reportPageExtent(page, 100);
+    }
+    controller.window.beforeWindowChange = () async => {'100', '105'};
+    final recopied = repo.clips.firstWhere((clip) => clip.id == '105');
+    repo.clips
+      ..remove(recopied)
+      ..insert(
+        0,
+        HistoryClip(
+          id: recopied.id,
+          contentType: recopied.contentType,
+          preview: recopied.preview,
+          createdAt: DateTime.utc(2027),
+          pinned: false,
+        ),
+      );
+    repo.events.add(HistoryRuntimeEvent.itemsChanged);
+    await _settle();
+
+    final pages = controller.window.windowPages;
+    final anchor = pages.indexWhere((page) => page.ids.contains('100'));
+    expect(anchor, 2);
+    expect(pages[anchor].resident, isTrue);
+    expect(controller.window.items.any((clip) => clip.id == '100'), isTrue);
+  });
+
   test(
     'keeps rebuilt pages renderable before their geometry is measured',
     () async {
