@@ -7109,6 +7109,95 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Kotlin compiled with a temporary JDK 17 toolchain, the merged manifest no longer declares the provider, and the scanner channel tests passed; not run on a device."
+    },
+    {
+      "id": "RUN-188",
+      "title": "Semantic session allocator settings measured",
+      "domain": "runtime",
+      "implementation_status": "documented_current_design",
+      "priority": "P2",
+      "owner_module": "Semantic search module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/semantic-search/src/lib.rs"
+      ],
+      "invariant": "The session keeps the runtime's default CPU arena, memory pattern and optimisation level 3: disabling the arena or the pattern, or using level 2, gave no peak or retained saving beyond the spread between runs, with bit-identical embeddings.",
+      "next_step": "The tokenizer holds about 334 MiB and the loaded session about 305 MiB for a 113 MiB model, so a smaller tokenizer representation is the lever to evaluate; disabling prepacking saved about 10 MiB in a probe. Android, Windows and the English model are not measured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint MiB reported by /usr/bin/time -l, median of five runs with minimum and maximum",
+        "baseline": null,
+        "candidate": null,
+        "peak_footprint_mib": {
+          "current": [
+            669,
+            659,
+            676
+          ],
+          "arena_off": [
+            680,
+            678,
+            683
+          ],
+          "memory_pattern_off": [
+            668,
+            663,
+            673
+          ],
+          "both_off": [
+            680,
+            678,
+            692
+          ],
+          "both_off_level_2": [
+            683,
+            677,
+            689
+          ]
+        },
+        "footprint_after_load_mib": {
+          "current": [
+            641,
+            631,
+            643
+          ],
+          "arena_off": [
+            635,
+            635,
+            637
+          ],
+          "memory_pattern_off": [
+            636,
+            635,
+            638
+          ],
+          "both_off": [
+            636,
+            635,
+            646
+          ],
+          "both_off_level_2": [
+            638,
+            635,
+            640
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build of a harness driving the module's public interface with the installed multilingual model: one query to load, then 40 requests in indexing order with passages up to 24,000 characters, 15 ms apart. Variants interleaved while other builds loaded the machine, so latency is not established.",
+        "repetitions_per_version": 5,
+        "attribution": "No variant lowers peak or retained footprint beyond the spread, and every variant's 116 vectors equal the current ones exactly. The harness is not in the repository.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "measurement_only_no_source_change"
     }
   ]
 }
