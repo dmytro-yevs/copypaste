@@ -1285,6 +1285,33 @@ pub(crate) async fn request(
     .map_err(|_| crate::api::RuntimeError::internal())
 }
 
+/// [`copypaste_ipc::Method::ImagePreview`] with the PNG kept as bytes, since no
+/// IPC text form is needed in-process.
+pub(crate) async fn image_preview(
+    item_id: String,
+    max_edge: Option<u32>,
+    bounds: Option<copypaste_ipc::ImagePreviewBounds>,
+) -> Result<crate::api::ClipImagePreview, crate::api::RuntimeError> {
+    let runtime = RUNTIME
+        .get()
+        .ok_or_else(crate::api::RuntimeError::not_initialized)?;
+    runtime
+        .start_listener()
+        .await
+        .map_err(|_| crate::api::RuntimeError::internal())?;
+    runtime.start_module_sync();
+    match runtime.image_preview_png(item_id, max_edge, bounds).await {
+        Ok(thumbnail) => Ok(crate::api::ClipImagePreview {
+            png_bytes: thumbnail.png,
+            width: thumbnail.width,
+            height: thumbnail.height,
+        }),
+        Err(refusal) => Err(crate::client::response_to_result(*refusal)
+            .err()
+            .unwrap_or_else(crate::api::RuntimeError::internal)),
+    }
+}
+
 /// Serves one IPC method for the native surfaces that run without a Flutter
 /// engine (keyboard panel, tiles, widget). Takes `{"method", "params"}` JSON and
 /// returns the response JSON with id 0. It never starts the P2P listener or

@@ -420,7 +420,7 @@ fn decode_image(path: &Path) -> Result<image::RgbImage, String> {
     reader
         .decode()
         .map_err(|_| "The selected image is too large or malformed for OCR.".to_owned())
-        .map(|image| image.to_rgb8())
+        .map(image::DynamicImage::into_rgb8)
 }
 
 fn validate_text_regions(boxes: &[TextBox], image: &image::RgbImage) -> Result<(), String> {

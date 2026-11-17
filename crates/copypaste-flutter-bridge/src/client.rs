@@ -155,7 +155,7 @@ pub(crate) async fn stream(
     }
 }
 
-fn response_to_result(response: Response) -> Result<Response, RuntimeError> {
+pub(crate) fn response_to_result(response: Response) -> Result<Response, RuntimeError> {
     if response.ok {
         return Ok(response);
     }
