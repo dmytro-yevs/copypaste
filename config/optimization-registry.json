@@ -6838,6 +6838,51 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Module compiled and passed Clippy offline; OCR results not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-183",
+      "title": "Settling frames release the hidden window surface on macOS",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/test/app/resource_policy_test.dart"
+      ],
+      "invariant": "After a suspension on macOS the presentation renders four forced frames 300 ms apart and stops as soon as it is shown again, so the window surface replaced by the suspension frame is not held while the window is hidden.",
+      "tradeoffs": "Four placeholder frames per suspension. One window-sized surface, the front buffer, still stays allocated while hidden on macOS 26. A sample of the installed application on macOS 27 held no window surface while hidden even without these frames, so no saving is expected there.",
+      "next_step": "Hidden-idle footprint of the application process on macOS 26 and macOS 27 hardware, before and after, with the IOSurface category recorded.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process IOSurface dirty bytes, window hidden 150 s",
+        "baseline": 11223040,
+        "candidate": 0,
+        "footprint_bytes_without_frames": [
+          100663296,
+          101711872,
+          103809024,
+          109051904
+        ],
+        "footprint_bytes_with_frames": [
+          88080384,
+          89128960,
+          89128960,
+          96468992
+        ],
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; scroll the list, close the window, sample with footprint after 150 s. One fresh process per run; footprint totals are the tool's whole megabytes.",
+        "repetitions_per_version": 4,
+        "attribution": "The IOSurface category was 11 MB in every run without the frames and absent in every run with them. Whole-process footprint also moves with the Dart heap, which varied between 28 MB and 36 MB across runs for unrelated reasons. Three runs with frames and two without came from experimental builds; two of those with frames also forced a Dart collection, the other triggers changed no category.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

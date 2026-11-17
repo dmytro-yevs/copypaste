@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/app/resource_policy.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
@@ -82,4 +84,36 @@ void main() {
       expect(events, [AppResourcePolicy.skiaResourceBytes]);
     },
   );
+
+  testWidgets('a suspended macOS presentation renders its settling frames', (
+    tester,
+  ) async {
+    messenger.setMockMethodCallHandler(SystemChannels.skia, (_) async => true);
+    messenger.setMockMethodCallHandler(relief, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(SystemChannels.skia, null);
+      messenger.setMockMethodCallHandler(relief, null);
+    });
+    var frames = 0;
+    tester.binding.addPersistentFrameCallback((_) => frames++);
+    // Suspends, then renders the first requested frame and waits out every
+    // interval a full settling pass would use.
+    Future<void> suspendAndSettle({bool resumed = false}) async {
+      unawaited(AppResourcePolicy.suspendPresentation());
+      await tester.pump();
+      frames = 0;
+      if (resumed) await AppResourcePolicy.resumePresentation();
+      await tester.pump();
+      for (var i = 0; i < AppResourcePolicy.settlingFrames; i++) {
+        await tester.pump(AppResourcePolicy.settlingInterval);
+      }
+    }
+
+    await suspendAndSettle();
+    expect(frames, AppResourcePolicy.settlingFrames);
+
+    // A presentation shown again owes the hidden window nothing further.
+    await suspendAndSettle(resumed: true);
+    expect(frames, 1);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 }

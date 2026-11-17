@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -12,8 +13,13 @@ abstract final class AppResourcePolicy {
   static const decodedImageCount = 128;
   static const skiaResourceBytes = 16 * 1024 * 1024;
 
+  /// Frames rendered after a suspension on macOS, and the gap between them.
+  static const settlingFrames = 4;
+  static const settlingInterval = Duration(milliseconds: 300);
+
   static final _pressure = _MemoryPressureObserver();
   static bool _presentationSuspended = false;
+  static int _suspension = 0;
 
   /// Called before either the main or Quick Paste engine starts presentation.
   static Future<void> configure() async {
@@ -34,6 +40,20 @@ abstract final class AppResourcePolicy {
     cache.clear();
     cache.clearLiveImages();
     await _releaseCaches();
+    await _settleWindowSurface();
+  }
+
+  /// Renders the frames that let macOS drop the window surface replaced by the
+  /// suspended presentation. Hidden lifecycle states disable ordinary frames,
+  /// so the single frame that swaps the presentation leaves that surface held.
+  static Future<void> _settleWindowSurface() async {
+    if (defaultTargetPlatform != TargetPlatform.macOS) return;
+    final suspension = ++_suspension;
+    for (var frame = 0; frame < settlingFrames; frame++) {
+      if (!_presentationSuspended || suspension != _suspension) return;
+      WidgetsBinding.instance.scheduleForcedFrame();
+      await Future<void>.delayed(settlingInterval);
+    }
   }
 
   /// Restores the renderer budget before a suspended presentation rebuilds.
