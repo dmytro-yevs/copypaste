@@ -7270,6 +7270,71 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-191",
+      "title": "Release the OCR detector before recognition",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/db_net.rs"
+      ],
+      "invariant": "OCR creates the text-detection session for each recognition and drops it, with its arena, before line preparation and recognition, and frees the resized detection image before the detector runs, without changing recognised text or box geometry.",
+      "tradeoffs": "The detector session is created on every call, about 25 ms; the worker is torn down after each request, so it was never reused. A corrupt detector model now fails after the image is decoded instead of at engine load, in the same invocation.",
+      "next_step": "About 820 MiB of the 16-megapixel peak is the runtime's working memory inside the detector run, roughly 190 bytes per detection input pixel. Only a smaller detection size lowers it and that changes the text: a cap of 1,600 gave 602 MiB and 1,280 gave 458 MiB at 16 megapixels, with lines splitting, merging and small text lost. Android and Windows are not measured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l with MallocLargeCache=0, the policy the inference worker inherits; full OCR of one image on all ten routes",
+        "baseline": 1010512691,
+        "candidate": 980208845,
+        "peak_footprint_mib_median": {
+          "rendered_text_16_megapixels": [
+            963.7,
+            934.8
+          ],
+          "synthetic_rgba_16_megapixels": [
+            947.5,
+            934.9
+          ],
+          "rendered_text_2880_by_1800": [
+            569.1,
+            545.8
+          ],
+          "rendered_text_1600_by_900": [
+            401.1,
+            368.6
+          ]
+        },
+        "footprint_during_recognition_mib": {
+          "rendered_text_16_megapixels": [
+            900,
+            208
+          ],
+          "rendered_text_2880_by_1800": [
+            566,
+            126
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build of the module's evidence binary, installed models read in place, images of rendered text in eight scripts. Pairs are before and after. Baseline and candidate are the 16-megapixel medians converted to bytes. The recognition figures are the highest footprint while the routes run, from an instrumented copy with phase markers.",
+        "repetitions_per_version": 5,
+        "attribution": "The peak sits inside the detector run, so releasing the detector lowers it only by what recognition used to add on top. The larger effect is that recognition, most of the run time, proceeds near 200 MiB instead of 900 MiB at 16 megapixels. Recognised text was byte-identical in every run.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

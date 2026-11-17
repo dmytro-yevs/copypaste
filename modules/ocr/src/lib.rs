@@ -86,7 +86,6 @@ impl Module for OcrModule {
 }
 
 struct OcrEngine {
-    detector: DbNet,
     models: PathBuf,
 }
 
@@ -99,12 +98,7 @@ impl OcrEngine {
             require_file(&models.join(route.model), route.id)?;
             require_file(&models.join(route.dictionary), route.id)?;
         }
-
-        let mut detector = DbNet::new();
-        detector
-            .init_model(path_string(&models.join(DETECTOR))?.as_str(), 2, None)
-            .map_err(ocr_error)?;
-        Ok(Self { detector, models })
+        Ok(Self { models })
     }
 
     fn recognize(&mut self, image_path: &Path) -> Result<String, String> {
@@ -112,10 +106,17 @@ impl OcrEngine {
         let padded = PaddedImage::new(decode_image(image_path)?, padding);
         let longest_side = padded.width().max(padded.height()).min(2_000);
         let scale = ScaleParam::get_scale_param(&padded, longest_side + (padding * 2));
-        let boxes = self
-            .detector
-            .get_text_boxes(&padded, &scale, 0.5, 0.3, 1.6)
-            .map_err(ocr_error)?;
+        // The detector's arena keeps its peak working memory until the session
+        // is dropped, so release it before recognition allocates on top of it.
+        let boxes = {
+            let mut detector = DbNet::new();
+            detector
+                .init_model(path_string(&self.models.join(DETECTOR))?.as_str(), 2, None)
+                .map_err(ocr_error)?;
+            detector
+                .get_text_boxes(&padded, &scale, 0.5, 0.3, 1.6)
+                .map_err(ocr_error)?
+        };
         validate_text_regions(&boxes, &padded)?;
         if boxes.is_empty() {
             return Ok(String::new());

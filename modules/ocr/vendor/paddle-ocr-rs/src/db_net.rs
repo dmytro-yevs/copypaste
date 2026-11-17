@@ -62,6 +62,8 @@ impl DbNet {
 
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+        let (rows, cols) = (src_resize.height(), src_resize.width());
+        drop(src_resize);
 
         let tensor = Tensor::from_array(input_tensors)?;
 
@@ -69,8 +71,8 @@ impl DbNet {
 
         let text_boxes = Self::get_text_boxes_core(
             &outputs,
-            src_resize.height(),
-            src_resize.width(),
+            rows,
+            cols,
             &ScaleParam::new(
                 scale.src_width,
                 scale.src_height,
