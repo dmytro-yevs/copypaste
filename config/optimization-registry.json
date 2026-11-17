@@ -6150,10 +6150,48 @@
         "Android": "not_established",
         "Windows": "not_established"
       },
-      "measured_saving": null,
+      "measured_saving": {
+        "metric": "main process native heap PSS bytes, application hidden 90 s",
+        "baseline": 43947008,
+        "candidate": 36717568,
+        "native_heap_bytes_hidden_10s_before": [
+          44991488,
+          44653568,
+          44622848
+        ],
+        "native_heap_bytes_hidden_90s_before": [
+          44327936,
+          43916288,
+          43947008
+        ],
+        "native_heap_bytes_hidden_10s_after": [
+          43176960,
+          44155904,
+          43098112
+        ],
+        "native_heap_bytes_hidden_90s_after": [
+          36869120,
+          36717568,
+          36597760
+        ],
+        "total_pss_bytes_hidden_90s_before": [
+          164836352,
+          164533248,
+          162999296
+        ],
+        "total_pss_bytes_hidden_90s_after": [
+          154872832,
+          157399040,
+          154021888
+        ],
+        "scenario": "API 34 arm64 emulator with 2 GB RAM and software rendering, release build signed with a debug key; about 48 clips with text, six images and one document; start, scroll the list to its end and back, press Home, sample with dumpsys meminfo. One fresh process per run; baseline and candidate are the medians. Before is origin/main, after is this branch.",
+        "repetitions_per_version": 3,
+        "attribution": "The two builds differ by every change on the branch, but native heap is level between them 10 s after hiding and falls only on the branch once the 60 s suspension has run the purge. The same build measured in another session differed by up to 4 MB in total PSS, so only the native heap figures are attributed.",
+        "qualification": false
+      },
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "Android arm64 bridge check compiled and Dart analysis passed; Kotlin and Windows C++ not compiled; native resource qualification pending."
+      "functional_validation": "A release arm64 build ran on an API 34 emulator: native heap fell after the 60 s suspension and after a trim request, with no crash. Windows C++ not compiled; native resource qualification pending."
     },
     {
       "id": "RUN-158",
@@ -6420,7 +6458,7 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "Dart tests and analysis passed; Kotlin not compiled; native resource qualification pending."
+      "functional_validation": "Dart tests and analysis passed. On an API 34 emulator a picked 1.1 MB backup was streamed byte-exact to its staged file; the module-input picker was not exercised; native resource qualification pending."
     },
     {
       "id": "RUN-168",
@@ -6444,7 +6482,7 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "kotlin_not_compiled_unit_test_pending_native_resource_qualification_pending"
+      "functional_validation": "On an API 34 emulator PNG screenshots of 320x240, 1280x720 and 1080x1920 were stored through the screenshot observer; the build before this change refused the 1080x1920 one and retried it at every start. Native resource qualification pending."
     },
     {
       "id": "RUN-169",
@@ -6810,7 +6848,7 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "Runtime test passed and the Android arm64 bridge check compiled; native resource qualification pending."
+      "functional_validation": "Runtime test passed. On an API 34 emulator list thumbnails and inspector previews rendered; native resource qualification pending."
     },
     {
       "id": "RUN-182",
@@ -6875,7 +6913,7 @@
           89128960,
           96468992
         ],
-        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; scroll the list, close the window, sample with footprint after 150 s. One fresh process per run; footprint totals are the tool's whole megabytes.",
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; close the window with the list at its top (the scripted scroll did not take effect), sample with footprint after 150 s. One fresh process per run; footprint totals are the tool's whole megabytes.",
         "repetitions_per_version": 4,
         "attribution": "The IOSurface category was 11 MB in every run without the frames and absent in every run with them. Whole-process footprint also moves with the Dart heap, which varied between 28 MB and 36 MB across runs for unrelated reasons. Three runs with frames and two without came from experimental builds; two of those with frames also forced a Dart collection, the other triggers changed no category.",
         "qualification": false
@@ -6901,7 +6939,7 @@
       ],
       "invariant": "After a suspension on macOS the application runs up to four old-space collections before its settling frames. Each is started by large typed data that is allocated and dropped unwritten, so it counts as heap growth without being paged in; the steps stop at the first collection that does not complete, when the presentation is shown again, or when resident size rises by 16 MiB. The idle notifications of the settling frames then return the freed pages.",
       "tradeoffs": "About 1.5 s of collector work per suspension and up to 192 MiB of address space per collection. It relies on the VM leaving the pages of large typed data unwritten. The collected heap still holds the compiled grammars of the syntax highlighter and the date symbols of every locale, which their packages keep in static fields.",
-      "next_step": "Hidden-idle footprint on macOS 26 and macOS 27 hardware, before and after. Measure Windows and Android before enabling the collection there; with compressed pointers the VM does not return cached pages on an idle notification.",
+      "next_step": "Hidden-idle footprint on macOS 26 and macOS 27 hardware, before and after. Measure Windows before enabling the collection there. On an API 34 arm64 emulator the same collection with its settling frames lowered a 41 MB Dart heap by 1.1 MB in three interleaved runs with no change in PSS beyond the run spread, so it stays off on Android; one unreplicated run of the collections without the frames lowered it by 8.5 MB and is the open lead there.",
       "native_resource_qualification": {
         "macOS": "not_established"
       },
@@ -6933,7 +6971,7 @@
           "suspended_with_strong_route_observer": 30635424,
           "suspended_with_weak_route_observer": 25160032
         },
-        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; scroll the list, close the window, sample with footprint. One fresh process per run; totals are the tool's whole megabytes, baseline and candidate are the medians. The profile-build figures are heap usage reported by the VM service after a forced collection.",
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; close the window with the list at its top (the scripted scroll did not take effect), sample with footprint. One fresh process per run; totals are the tool's whole megabytes, baseline and candidate are the medians. The profile-build figures are heap usage reported by the VM service after a forced collection.",
         "repetitions_per_version": 3,
         "attribution": "Before: settling frames only, with and without the weak route observer, which on its own changed no category because nothing collected the unmounted presentation. After: weak observer plus four collections. A single collection left the heap between 28 MB and 35 MB across four runs. Resident size did not rise during the collection steps in any traced run.",
         "qualification": false
@@ -7108,7 +7146,7 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "Kotlin compiled with a temporary JDK 17 toolchain, the merged manifest no longer declares the provider, and the scanner channel tests passed; not run on a device."
+      "functional_validation": "On an API 34 emulator the installed package declares no ML Kit provider, two scan attempts ended in the scanner-unavailable state without a crash (the image has no Play Store), and ML Kit first wrote its preferences at the first scan. A QR pairing on a device is not done."
     },
     {
       "id": "RUN-188",
