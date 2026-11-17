@@ -49,7 +49,10 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
 
     // Each fetch holds at most one message's worth of stored bytes, so the
     // pending message plus one fetch is all that is ever resident.
-    let sizes = source.stored_sizes(&allowed)?;
+    let sizes = source.stored_sizes(&allowed).unwrap_or_else(|_| {
+        tracing::warn!("local item sizes were unavailable; serving items one at a time");
+        HashMap::new()
+    });
     let mut rest = allowed.as_slice();
     while !rest.is_empty() {
         let (chunk, tail) = rest.split_at(fetch_len(rest, &sizes));

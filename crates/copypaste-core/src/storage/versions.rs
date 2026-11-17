@@ -371,16 +371,16 @@ impl Store {
             "SELECT {projection} FROM sync_records AS clipboard_items WHERE id IN ({placeholders})"
         );
         let mut stmt = conn.prepare_cached(&sql)?;
-        let columns = ItemColumns::resolve(&stmt)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(unique), |row| {
+        let rows = ItemColumns::resolve(&stmt).and_then(|columns| {
+            stmt.query_map(rusqlite::params_from_iter(unique), |row| {
                 row_to_item(row, &columns)
             })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+            .collect::<rusqlite::Result<Vec<_>>>()
+        });
         if !cached {
             stmt.discard();
         }
-        Ok(rows)
+        Ok(rows?)
     }
 
     /// The stored size (`content_bytes`) of each clip among `ids`. A size
