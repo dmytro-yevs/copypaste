@@ -39,6 +39,11 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
+        <!-- PairingScannerChannel initializes ML Kit before the first scan. -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.clipboard" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/clipboard_paths" /></provider>
         <receiver
             android:name=".AppUpdateResultReceiver"

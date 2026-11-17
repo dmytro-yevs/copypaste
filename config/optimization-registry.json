@@ -7084,6 +7084,31 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-187",
+      "title": "Initialize ML Kit only for a pairing scan",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "PairingScannerChannel",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/AndroidManifest.xml",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/PairingScannerChannel.kt"
+      ],
+      "invariant": "ML Kit and the module-install client are created only when a pairing QR scan starts, and ML Kit initializes once per process before every scanner client.",
+      "tradeoffs": "The first scan in a process pays the initialization that every process start paid before, including starts for the keyboard, tiles, widgets and restored services.",
+      "next_step": "Java heap and start time of the main process on a device with and without the provider, and one QR pairing on a device.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Kotlin compiled with a temporary JDK 17 toolchain, the merged manifest no longer declares the provider, and the scanner channel tests passed; not run on a device."
     }
   ]
 }
