@@ -21,8 +21,8 @@
 //!   nothing.
 //!
 //! The cursor rules live here because they are one rule seen from three angles
-//! — the inclusive bound, the ascending page order, and the watermark that only
-//! moves forward. Keeping them together prevents the read bound and persisted
+//! — the inclusive bound, the server's page order, and a watermark that never
+//! moves back in time. Keeping them together prevents the read bound and persisted
 //! cursor from drifting apart.
 
 use super::driver::CloudSync;
@@ -91,7 +91,8 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// makes a multi-device burst drain at one page per tick.
     ///
     /// Idempotent. Applying the same page twice is absorbed by the store's
-    /// ordering (INV-I1), and the watermark only moves forward.
+    /// ordering (INV-I1). The watermark never moves back in time, and within
+    /// one millisecond it follows the server's order.
     ///
     /// # Errors
     ///
@@ -146,14 +147,12 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 .await?;
             let page_len = rows.len();
             stats.downloaded += page_len;
-            // Normalise at the page boundary, before the ordering and cursor
-            // see a stamp. Sorting raw `-1` before `(0, "a")` and then
-            // clamping it to `(0, "z")` would advance the keyset past the
-            // honest `(0, "a")` row.
+            // Normalise at the page boundary, before the cursor sees a stamp,
+            // so every check and every cursor move reads the same value.
             for row in &mut rows {
                 row.created_at = clamp_stamp(row.created_at);
             }
-            sort_page(&mut rows);
+            warn_if_newest_first(&rows);
 
             let now = now_ms();
             let mut advanced = cursor.clone();
@@ -265,6 +264,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     continue;
                 }
 
+                advanced.advance_past(created_at, &row.item_id);
                 batch_bytes += content.len();
                 batch.push(LocalItem {
                     item_id: row.item_id,
@@ -278,21 +278,16 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     origin_device_id: row.origin_device_id,
                 });
                 if batch_bytes >= APPLY_BATCH_BYTES {
-                    republish |= apply_batch(
-                        source,
-                        std::mem::take(&mut batch),
-                        &mut advanced,
-                        &mut stats,
-                    )?;
+                    republish |= apply_batch(source, std::mem::take(&mut batch), &mut stats)?;
                     batch_bytes = 0;
                 }
             }
-            republish |= apply_batch(source, batch, &mut advanced, &mut stats)?;
+            republish |= apply_batch(source, batch, &mut stats)?;
 
-            // Persist per page, so an interrupted drain resumes from the last
-            // completed page rather than from the start. Monotonic by
-            // construction: `advanced` starts at the current cursor and
-            // `advance_past` only ever moves it forward.
+            // Persist per page, once every batch of it is merged, so an
+            // interrupted drain resumes from the last completed page rather
+            // than from the start. Never back in time: `advance_past` refuses
+            // an earlier millisecond, and within one it follows the server.
             if advanced != cursor {
                 if let Some(item_id) = advanced.item_id.as_deref() {
                     source.set_watermark_keyset(advanced.created_at, item_id)?;
@@ -319,20 +314,16 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     }
 }
 
-/// Merge decrypted rows and move the cursor past the last of them. Returns
-/// whether a declined row's local winner was queued for upload.
+/// Merge decrypted rows. Returns whether a declined row's local winner was
+/// queued for upload.
 fn apply_batch(
     source: &dyn CloudSource,
     batch: Vec<LocalItem>,
-    advanced: &mut Cursor,
     stats: &mut SyncStats,
 ) -> Result<bool, SyncError> {
-    let Some((created_at, item_id)) = batch
-        .last()
-        .map(|item| (item.created_at, item.item_id.clone()))
-    else {
+    if batch.is_empty() {
         return Ok(false);
-    };
+    }
     let offered = batch.len();
     let outcomes = source.apply_remote_batch(batch)?;
     if outcomes.len() != offered {
@@ -347,7 +338,6 @@ fn apply_batch(
             }
         }
     }
-    advanced.advance_past(created_at, &item_id);
     Ok(republish)
 }
 
@@ -370,14 +360,17 @@ struct Cursor {
 }
 
 impl Cursor {
-    /// Move to this row's position, if it is ahead of where we are.
+    /// Move to this row's position, in the order the server returned it.
     ///
-    /// Guarded rather than assigned: pages arrive sorted, but a cursor that
-    /// could move backwards would re-download history on the next round, and
-    /// the "only ever forward" property is what INV-N5 leans on.
+    /// Rows are taken in the server's order because its keyset filter compares
+    /// `item_id` by the database collation, which byte order does not match: a
+    /// byte-order maximum can sit behind rows the server has already passed,
+    /// and a cursor kept there stalls. Guarded on the millisecond only, which
+    /// both sides compare the same way: the cursor never moves back in time
+    /// (INV-N5), and within one millisecond it is as ordered as the server's
+    /// output.
     fn advance_past(&mut self, created_at: i64, item_id: &str) {
-        let ahead = (created_at, Some(item_id)) > (self.created_at, self.item_id.as_deref());
-        if ahead {
+        if created_at >= self.created_at {
             self.created_at = created_at;
             self.item_id = Some(item_id.to_owned());
         }
@@ -395,19 +388,16 @@ impl Cursor {
     }
 }
 
-/// Put a page in the order the cursor needs, and say so if it was not already.
+/// Say so when a page is not oldest-first.
 ///
-/// The sort is cheap insurance against a page that is merely *unordered*.
-/// It is **not** a repair for a page that is ordered newest-first: a
-/// newest-first source returns the newest `limit` rows and there is no way,
-/// from this side, to reach the older ones behind them. The warning exists so
-/// that failure is visible in a log rather than showing up months later as
-/// "my old history never downloaded" — see
-/// [`RestApi::fetch_since`](super::RestApi::fetch_since).
-fn sort_page(rows: &mut [CloudItem]) {
-    let descending = rows
-        .windows(2)
-        .any(|w| (w[1].created_at, &w[1].item_id) < (w[0].created_at, &w[0].item_id));
+/// Rows are applied in the order they arrive, and that order cannot be
+/// repaired here: a newest-first source returns the newest `limit` rows and
+/// there is no way, from this side, to reach the older ones behind them. The
+/// warning makes that visible in a log rather than months later as "my old
+/// history never downloaded" — see [`RestApi::fetch_since`](super::RestApi::fetch_since).
+/// Only the millisecond is compared; ids follow the server's collation.
+fn warn_if_newest_first(rows: &[CloudItem]) -> bool {
+    let descending = rows.windows(2).any(|w| w[1].created_at < w[0].created_at);
     if descending {
         tracing::warn!(
             rows = rows.len(),
@@ -415,11 +405,7 @@ fn sort_page(rows: &mut [CloudItem]) {
              and older rows behind it will not be fetched"
         );
     }
-    rows.sort_by(|a, b| {
-        a.created_at
-            .cmp(&b.created_at)
-            .then_with(|| a.item_id.cmp(&b.item_id))
-    });
+    descending
 }
 
 /// Clamp a wire timestamp's lower bound.
@@ -933,22 +919,29 @@ mod tests {
     }
 
     #[test]
-    fn a_page_is_put_into_cursor_order_before_it_is_applied() {
-        // Defensive: the transport is required to page oldest-first, and the
-        // cursor cannot drain a newest-first page. Sorting costs nothing and
-        // means an unordered page is merely slow rather than wrong.
-        let mut page = vec![
-            cloud_row("c", 3_000, "third"),
-            cloud_row("a", 1_000, "first"),
-            cloud_row("b2", 2_000, "second, later id"),
-            cloud_row("b1", 2_000, "second, earlier id"),
-        ];
-        sort_page(&mut page);
+    fn a_newest_first_page_is_reported_and_an_id_order_is_not() {
+        let rows = |stamps: [(&str, i64); 2]| stamps.map(|(id, at)| cloud_row(id, at, "x"));
+        assert!(warn_if_newest_first(&rows([("a", 2_000), ("b", 1_000)])));
+        assert!(!warn_if_newest_first(&rows([("b", 1_000), ("A", 1_000)])));
+    }
 
-        let order: Vec<&str> = page.iter().map(|r| r.item_id.as_str()).collect();
-        // Compound key: `created_at` then `item_id`, so the ordering has no
-        // ties even for a burst inside one millisecond (INV-N1).
-        assert_eq!(order, ["a", "b1", "b2", "c"]);
+    #[tokio::test]
+    async fn the_cursor_follows_the_server_collation_across_a_cut() {
+        let rows = ["a", "B", "C", "D"].map(|id| cloud_row(id, 1_000, "large"));
+        let source = FakeSource::with_keyset_watermark();
+        let mut rest = FakeRest::seeded(rows.to_vec());
+        rest.cut_after = Some(2);
+        rest.collated = true;
+        let sync = driver(rest, FakeAuth::default());
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.applied, 4);
+        assert_eq!(
+            source.watermark_item_id().unwrap().as_deref(),
+            Some("D"),
+            "a byte-order cursor stays at `a` and stalls after `B`"
+        );
     }
 
     #[test]
@@ -964,9 +957,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_negative_row_cannot_sort_a_zero_boundary_past_the_cursor() {
-        // The negative row's id sorts after the honest one. If sorting happened
-        // before normalisation it would become `(0, "z-negative")` first and
-        // cause `(0, "a-zero")` to be skipped by keyset advancement.
+        // The negative row's id sorts after the honest one. A cursor taken
+        // from a byte-order maximum after clamping would become
+        // `(0, "z-negative")` and skip `(0, "a-zero")`.
         let source = FakeSource::with_keyset_watermark();
         // A malformed persisted cursor or transport fixture can still expose a
         // negative row even though production cursors are clamped at zero.
@@ -989,7 +982,8 @@ mod tests {
         assert_eq!(source.watermark().unwrap(), 0);
         assert_eq!(
             source.watermark_item_id().unwrap().as_deref(),
-            Some("z-negative")
+            Some("a-zero"),
+            "the cursor sits on the last row the server returned"
         );
     }
 
