@@ -7076,7 +7076,7 @@
             189.9
           ]
         },
-        "scenario": "macOS 27.3 host, release build, synthetic 4000 by 4000 images and the installed module package's models, read in place. Baseline and candidate are the means of the two RGBA PNG runs converted to bytes. Pixel-stage pairs are before and after for a harness that stops before inference.",
+        "scenario": "macOS 27.3 host, release build, synthetic 4000 by 4000 images and the installed module package's models, read in place. Baseline and candidate are the means of the two RGBA PNG runs converted to bytes. Pixel-stage pairs are before and after for a harness that stops before inference. Taken with the default allocator, which keeps freed large blocks in the footprint; the inference worker inherits MallocLargeCache=0 and holds less.",
         "repetitions_per_version": 2,
         "attribution": "Recognised text was byte-identical before and after for all four images. The process was the module's evidence binary, not the application's inference worker. Session settings were measured as well: memory pattern off and optimisation level 1 or 3 changed nothing, and disabling the arena raised the peak by about 165 MB, so the builder is unchanged.",
         "qualification": false
@@ -7190,7 +7190,7 @@
             640
           ]
         },
-        "scenario": "macOS 27.3 host, release build of a harness driving the module's public interface with the installed multilingual model: one query to load, then 40 requests in indexing order with passages up to 24,000 characters, 15 ms apart. Variants interleaved while other builds loaded the machine, so latency is not established.",
+        "scenario": "macOS 27.3 host, release build of a harness driving the module's public interface with the installed multilingual model: one query to load, then 40 requests in indexing order with passages up to 24,000 characters, 15 ms apart. Variants interleaved while other builds loaded the machine, so latency is not established. Taken with the default allocator, which keeps freed large blocks in the footprint; the inference worker inherits MallocLargeCache=0 and holds less.",
         "repetitions_per_version": 5,
         "attribution": "No variant lowers peak or retained footprint beyond the spread, and every variant's 116 vectors equal the current ones exactly. The harness is not in the repository.",
         "qualification": false
@@ -7226,9 +7226,9 @@
         "Windows": "not_established"
       },
       "measured_saving": {
-        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l; module harness with one query to load, then 40 requests in indexing order",
-        "baseline": 701497344,
-        "candidate": 390431668,
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l with MallocLargeCache=0, the policy the inference worker inherits; module harness with one query to load, then 40 requests in indexing order",
+        "baseline": 514641101,
+        "candidate": 244003635,
         "module_footprint_after_load_kib_before": [
           650625,
           651137
@@ -7262,10 +7262,38 @@
           "tokens_compared_on_installed_vocabulary": 1326116,
           "embedding_vectors_sha256_equal": true
         },
-        "scenario": "macOS 27.3 host, release build, installed multilingual model with 250,002 pieces read in place. Five alternating runs per version; ranges are minimum and maximum, pairs are before and after. Baseline is the 669 MiB median before; candidate is the mean of two confirming runs of the final code, 390,742,952 and 390,120,384 bytes.",
-        "repetitions_per_version": 5,
+        "scenario": "macOS 27.3 host, release build, installed multilingual model with 250,002 pieces read in place. Baseline and candidate are the medians of three runs per version under the worker policy, 490.8 and 232.7 MiB, converted to bytes. The other figures are five alternating runs per version with the default allocator, which keeps freed large blocks in the footprint; ranges are minimum and maximum, pairs are before and after.",
+        "repetitions_per_version": 3,
         "attribution": "The library's trie had 782,761 nodes with one hash map each, and its deserializer built the vocabulary twice. The process was a harness driving the module's public interface, not the application's inference worker. Embedding vectors of the 40-request run are byte-identical before and after.",
-        "qualification": false
+        "qualification": false,
+        "peak_footprint_mib_worker_policy": {
+          "before": [
+            491.4,
+            490.8,
+            490.5
+          ],
+          "after": [
+            232.7,
+            232.8,
+            232.7
+          ]
+        },
+        "module_footprint_after_load_kib_worker_policy": {
+          "before": [
+            398672,
+            397921,
+            397440
+          ],
+          "after": [
+            133904,
+            133936,
+            133696
+          ]
+        },
+        "peak_footprint_mib_default_allocator": [
+          669,
+          372
+        ]
       },
       "evidence_refs": [],
       "supersedes": [],
