@@ -1063,6 +1063,39 @@ mod tests {
     }
 
     #[test]
+    fn a_binary_recopy_after_a_delete_revives_the_clip_above_its_tombstone() {
+        let f = fixture();
+        let bytes = vec![0x89; 128];
+        let first = f.binary_at(&bytes, T0).unwrap().into_item();
+        assert!(f.store.delete(&first.id).unwrap());
+        let tombstone = f.store.version(&first.id).unwrap().unwrap();
+        assert!(tombstone.deleted && tombstone.created_at > T0 + 60_000);
+
+        // The capture clock is behind the delete: the stamp must still pass it,
+        // or a peer holding the tombstone would delete the clip again.
+        let recopy = f.binary_at(&bytes, T0 + 60_000).unwrap();
+        assert!(matches!(recopy, Ingested::Stored(_)));
+        let revived = recopy.into_item();
+        assert_eq!(
+            (revived.id.as_str(), revived.created_at),
+            (first.id.as_str(), tombstone.created_at + 1)
+        );
+        let stored = f.store.get(&first.id).unwrap().unwrap();
+        assert_eq!(stored, revived);
+        assert_eq!(
+            crate::open_binary(
+                &stored.content_ciphertext,
+                &f.keyring.item_key(),
+                &stored.id
+            )
+            .unwrap()
+            .as_slice(),
+            bytes
+        );
+        assert_eq!(f.store.count().unwrap(), 1);
+    }
+
+    #[test]
     fn identical_bytes_with_distinct_text_and_file_representations_stay_distinct_in_both_orders() {
         let bytes = b"same bytes, different clipboard representation";
         for text_first in [true, false] {
