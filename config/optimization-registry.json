@@ -6056,7 +6056,7 @@
         "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_module_action_runner.dart"
       ],
-      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance and a module action in flight, defers suspension.",
+      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance and a module action in flight, defers suspension. The observer that tracks nested routes holds them weakly: a navigator disposed by the suspension reports no removals, and a route held strongly keeps the whole unmounted presentation reachable through its builder.",
       "next_step": "On an Android phone and a narrow desktop window, leave the History detail drawer or a Settings section open, hide the app for more than 60 s and record app footprint and Dart heap before and after, plus timer wakeups over 10 minutes.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6878,6 +6878,64 @@
         "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; scroll the list, close the window, sample with footprint after 150 s. One fresh process per run; footprint totals are the tool's whole megabytes.",
         "repetitions_per_version": 4,
         "attribution": "The IOSurface category was 11 MB in every run without the frames and absent in every run with them. Whole-process footprint also moves with the Dart heap, which varied between 28 MB and 36 MB across runs for unrelated reasons. Three runs with frames and two without came from experimental builds; two of those with frames also forced a Dart collection, the other triggers changed no category.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-184",
+      "title": "Collect and compact the Dart heap after a suspension on macOS",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_controller.dart",
+        "apps/copypaste_flutter/test/app/resource_policy_test.dart"
+      ],
+      "invariant": "After a suspension on macOS the application runs up to four old-space collections before its settling frames. Each is started by large typed data that is allocated and dropped unwritten, so it counts as heap growth without being paged in; the steps stop at the first collection that does not complete, when the presentation is shown again, or when resident size rises by 16 MiB. The idle notifications of the settling frames then return the freed pages.",
+      "tradeoffs": "About 1.5 s of collector work per suspension and up to 192 MiB of address space per collection. It relies on the VM leaving the pages of large typed data unwritten. The collected heap still holds the compiled grammars of the syntax highlighter and the date symbols of every locale, which their packages keep in static fields.",
+      "next_step": "Hidden-idle footprint on macOS 26 and macOS 27 hardware, before and after. Measure Windows and Android before enabling the collection there; with compressed pointers the VM does not return cached pages on an idle notification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process physical footprint bytes, window hidden 100 to 150 s",
+        "baseline": 96468992,
+        "candidate": 90177536,
+        "footprint_bytes_before": [
+          92274688,
+          96468992,
+          96468992
+        ],
+        "footprint_bytes_after": [
+          89128960,
+          90177536,
+          90177536
+        ],
+        "dart_heap_bytes_before": [
+          32505856,
+          36700160,
+          36700160
+        ],
+        "dart_heap_bytes_after": [
+          29360128,
+          29360128,
+          30408704
+        ],
+        "live_heap_bytes_profile_build": {
+          "suspended_with_strong_route_observer": 30635424,
+          "suspended_with_weak_route_observer": 25160032
+        },
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; scroll the list, close the window, sample with footprint. One fresh process per run; totals are the tool's whole megabytes, baseline and candidate are the medians. The profile-build figures are heap usage reported by the VM service after a forced collection.",
+        "repetitions_per_version": 3,
+        "attribution": "Before: settling frames only, with and without the weak route observer, which on its own changed no category because nothing collected the unmounted presentation. After: weak observer plus four collections. A single collection left the heap between 28 MB and 35 MB across four runs. Resident size did not rise during the collection steps in any traced run.",
         "qualification": false
       },
       "evidence_refs": [],

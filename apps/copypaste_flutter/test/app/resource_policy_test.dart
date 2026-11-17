@@ -96,16 +96,20 @@ void main() {
     });
     var frames = 0;
     tester.binding.addPersistentFrameCallback((_) => frames++);
-    // Suspends, then renders the first requested frame and waits out every
-    // interval a full settling pass would use.
+    // Suspends, then waits out the longest collection and settling pass.
     Future<void> suspendAndSettle({bool resumed = false}) async {
       unawaited(AppResourcePolicy.suspendPresentation());
       await tester.pump();
       frames = 0;
       if (resumed) await AppResourcePolicy.resumePresentation();
-      await tester.pump();
-      for (var i = 0; i < AppResourcePolicy.settlingFrames; i++) {
-        await tester.pump(AppResourcePolicy.settlingInterval);
+      const step = AppResourcePolicy.collectionInterval;
+      const settle = AppResourcePolicy.settlingInterval;
+      final longest =
+          (step * AppResourcePolicy.collectionSteps + settle) *
+              AppResourcePolicy.collectionCycles +
+          settle * AppResourcePolicy.settlingFrames;
+      for (var waited = Duration.zero; waited <= longest; waited += step) {
+        await tester.pump(step);
       }
     }
 
@@ -114,6 +118,6 @@ void main() {
 
     // A presentation shown again owes the hidden window nothing further.
     await suspendAndSettle(resumed: true);
-    expect(frames, 1);
+    expect(frames, 0);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 }
