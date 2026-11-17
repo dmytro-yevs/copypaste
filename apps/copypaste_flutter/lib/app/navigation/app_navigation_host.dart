@@ -37,7 +37,6 @@ class _AppNavigationHostState extends State<AppNavigationHost> {
   @override
   void dispose() {
     _child.dispose();
-    widget.controller.releaseRoutes();
     super.dispose();
   }
 

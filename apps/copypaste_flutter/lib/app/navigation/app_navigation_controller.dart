@@ -82,9 +82,6 @@ class AppNavigationController extends ChangeNotifier {
   /// Observes the nested navigator; the navigation host attaches it.
   NavigatorObserver get routeObserver => _routes;
 
-  /// Forgets the routes of a disposed nested navigator.
-  void releaseRoutes() => _routes.clear();
-
   /// Whether the open drawer and every nested route can close without losing
   /// work. Overlays not marked passive never are.
   bool get overlaysPassive {
@@ -176,8 +173,6 @@ class _NestedRouteStack extends NavigatorObserver {
   /// Routes above the destinations' root that are still on the stack.
   Iterable<Route<dynamic>> get pushed =>
       _routes.where((route) => route.isActive && !route.isFirst);
-
-  void clear() => _routes.clear();
 
   void _forget(Route<dynamic>? route) {
     _routes.removeWhere((entry) => entry == route || !entry.isActive);

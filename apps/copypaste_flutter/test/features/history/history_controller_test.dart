@@ -13,6 +13,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('HistoryController', () {
+    test('defers suspension until a module action settles', () async {
+      final controller = HistoryController(_HistoryRepository());
+      addTearDown(controller.dispose);
+      final response = Completer<String>();
+
+      final action = controller.runModuleAction(() => response.future);
+      expect(controller.canSuspend, isFalse);
+      response.complete('done');
+      expect(await action, 'done');
+      expect(controller.canSuspend, isTrue);
+    });
+
     test('reuses immutable row snapshots until rows change', () async {
       final repository = _HistoryRepository()
         ..pages.addAll([

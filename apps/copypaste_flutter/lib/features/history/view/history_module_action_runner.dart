@@ -61,10 +61,12 @@ Future<void> runHistoryModuleAction(
   final title = action.action.title;
   ModuleResult result;
   try {
-    final detail = await controller.capabilities.detail(clip.id);
-    result = await modules.request(moduleId, action.action.command, {
-      'item_id': clip.id,
-      'text': detail.body ?? detail.preview,
+    result = await controller.runModuleAction(() async {
+      final detail = await controller.capabilities.detail(clip.id);
+      return modules.request(moduleId, action.action.command, {
+        'item_id': clip.id,
+        'text': detail.body ?? detail.preview,
+      });
     });
   } catch (error) {
     if (!context.mounted) return;
