@@ -392,7 +392,8 @@ impl ModuleManager {
         state.registry = registry;
         drop(state);
         drop(previous);
-        if let Some(old) = old {
+        // A stuck teardown leaves the old version for the next cleanup pass.
+        if let Some(old) = old.filter(|_| self.instances.torn_down(&manifest.id)) {
             let _ = fs::remove_dir_all(self.directory(&manifest.id, &old.version));
         }
         Ok(self.summary(manifest, &record))
@@ -624,6 +625,10 @@ impl ModuleManager {
         if let Ok(mut manifests) = self.manifests.lock() {
             manifests.remove(id);
         }
+        // Teardown may still write; a stuck one stays persisted cleanup debt.
+        if !self.instances.torn_down(id) {
+            return Ok(());
+        }
         let state_cleared = self.clear_host_state(id);
         let packages = self.root.join("packages").join(id);
         if crate::native::pinned_under(&packages) {
@@ -677,7 +682,7 @@ impl ModuleManager {
             .collect();
         let mut registry = state.registry.clone();
         for id in pending {
-            if !self.clear_host_state(&id) {
+            if self.instances.tearing_down(&id) || !self.clear_host_state(&id) {
                 continue;
             }
             let packages = self.root.join("packages").join(&id);
@@ -700,6 +705,9 @@ impl ModuleManager {
         // Once process-scoped code is gone, reclaim inactive package versions
         // retained by earlier updates. Only manager-owned version directories qualify.
         for (id, record) in &registry.modules {
+            if self.instances.tearing_down(id) {
+                continue;
+            }
             let parent = self.root.join("packages").join(id);
             if let Ok(entries) = fs::read_dir(&parent) {
                 for entry in entries.flatten() {
@@ -940,7 +948,7 @@ impl ModuleManager {
         }
         let lease = self.lease(id, &manifest);
         drop(state);
-        let instance = lease.ready();
+        let instance = lease.ready()?;
         let result = (|| {
             let _inputs =
                 crate::input::snapshot(&self.root, &command.arguments, &mut invocation.arguments)?;
@@ -1107,9 +1115,14 @@ impl ModuleManager {
         )?;
         let lease = self.lease(id, &manifest);
         drop(state);
-        let instance = lease.ready();
+        let instance = lease.ready()?;
         let (connection, outbound) = instance.endpoints().open()?;
-        let session = EndpointSession::new(connection.clone(), Arc::clone(&instance), outbound);
+        let session = EndpointSession::new(
+            connection.clone(),
+            Arc::clone(&instance),
+            outbound,
+            self.instances.session_use(id),
+        );
         let package_dir = self.directory(id, &record.version);
         let data_dir = self.root.join("data").join(id);
         instance.open_endpoint(

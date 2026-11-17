@@ -17,7 +17,7 @@ type ProcessTermination = Arc<dyn Fn() + Send + Sync>;
 type ProcessControl = Option<(String, ProcessTermination)>;
 
 pub(crate) const IDLE_DELAY: Duration = Duration::from_secs(60);
-const REQUEST_LIMIT: Duration = Duration::from_secs(60);
+pub(crate) const REQUEST_LIMIT: Duration = Duration::from_secs(60);
 
 /// Platform adapters create one private channel and own process termination.
 pub trait InferenceLauncher: Send + Sync {

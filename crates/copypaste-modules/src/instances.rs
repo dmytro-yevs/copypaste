@@ -7,7 +7,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, MutexGuard, OnceLock,
+        Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak,
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -15,6 +15,9 @@ use std::{
 
 /// Bounds the cost of a growing module collection before idle expiry.
 const MAX_LOADED: usize = 4;
+/// A module request already gives up after this long; so does a wait for a
+/// stuck teardown, instead of blocking every later call of that module.
+const TEARDOWN_LIMIT: Duration = crate::inference::REQUEST_LIMIT;
 /// Outlasts every time-windowed state a module keeps (import review, hourly rate limits).
 const IDLE_PERIOD: Duration = Duration::from_secs(60 * 60);
 
@@ -57,6 +60,42 @@ struct Shared {
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, Map> {
         self.map.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// False when an instance of `id` is still tearing down after the limit.
+    fn torn_down(&self, id: &str) -> bool {
+        let map = self.lock();
+        !self
+            .retired
+            .wait_timeout_while(map, TEARDOWN_LIMIT, |map| map.retiring.contains_key(id))
+            .unwrap_or_else(|error| error.into_inner())
+            .1
+            .timed_out()
+    }
+
+    fn release(self: &Arc<Self>, id: &str) {
+        let evicted = {
+            let mut map = self.lock();
+            if let Some(entry) = map.loaded.get_mut(id) {
+                entry.last_used = Instant::now();
+            }
+            trim(&mut map, self)
+        };
+        drop(evicted);
+    }
+}
+
+/// Restarts the idle period of its module when an endpoint session ends.
+pub(crate) struct SessionUse {
+    id: String,
+    shared: Weak<Shared>,
+}
+
+impl Drop for SessionUse {
+    fn drop(&mut self) {
+        if let Some(shared) = self.shared.upgrade() {
+            shared.release(&self.id);
+        }
     }
 }
 
@@ -102,18 +141,15 @@ pub(crate) struct Lease {
 }
 
 impl Lease {
-    /// Tears down evicted instances and waits until no instance of this module
-    /// is still tearing down. Call it without holding manager locks.
-    pub(crate) fn ready(self) -> Arc<ModuleInstance> {
+    /// Tears down evicted instances and waits, within the teardown limit,
+    /// until no instance of this module is still tearing down. Call it
+    /// without holding manager locks.
+    pub(crate) fn ready(self) -> Result<Arc<ModuleInstance>, crate::ModuleError> {
         drop(self.evicted);
-        let map = self.shared.lock();
-        drop(
-            self.shared
-                .retired
-                .wait_while(map, |map| map.retiring.contains_key(&self.id))
-                .unwrap_or_else(|error| error.into_inner()),
-        );
-        self.instance
+        if !self.shared.torn_down(&self.id) {
+            return Err(crate::ModuleError::Load);
+        }
+        Ok(self.instance)
     }
 }
 
@@ -177,14 +213,25 @@ impl Instances {
 
     /// Restarts the idle period of `id` after its work ended.
     pub(crate) fn release(&self, id: &str) {
-        let evicted = {
-            let mut map = self.shared.lock();
-            if let Some(entry) = map.loaded.get_mut(id) {
-                entry.last_used = Instant::now();
-            }
-            trim(&mut map, &self.shared)
-        };
-        drop(evicted);
+        self.shared.release(id);
+    }
+
+    /// Held by an endpoint session; see [`SessionUse`].
+    pub(crate) fn session_use(&self, id: &str) -> SessionUse {
+        SessionUse {
+            id: id.into(),
+            shared: Arc::downgrade(&self.shared),
+        }
+    }
+
+    /// Waits, within the teardown limit, until no instance of `id` is still
+    /// tearing down, so its files can be deleted.
+    pub(crate) fn torn_down(&self, id: &str) -> bool {
+        self.shared.torn_down(id)
+    }
+
+    pub(crate) fn tearing_down(&self, id: &str) -> bool {
+        self.shared.lock().retiring.contains_key(id)
     }
 
     /// Takes `id` out of use; drop the result outside other locks to stop it.
@@ -306,11 +353,18 @@ mod tests {
             let shared = Arc::clone(&shared);
             move || ModuleInstance::new(id, shared)
         };
-        let idle = instances.lease("idle", false, create("idle")).ready();
-        let leased = instances.lease("leased", false, create("leased")).ready();
+        let idle = instances
+            .lease("idle", false, create("idle"))
+            .ready()
+            .unwrap();
+        let leased = instances
+            .lease("leased", false, create("leased"))
+            .ready()
+            .unwrap();
         let provider = instances
             .lease("provider", true, create("provider"))
-            .ready();
+            .ready()
+            .unwrap();
         drop((idle, provider));
         let started = Instant::now();
         while instances.shared.lock().loaded.contains_key("idle") {
@@ -330,7 +384,7 @@ mod tests {
             let lease = instances.lease(id, index == 0, || {
                 ModuleInstance::new(id, Arc::clone(&shared))
             });
-            drop(lease.ready());
+            drop(lease.ready().unwrap());
         }
         {
             let map = instances.shared.lock();
@@ -345,6 +399,21 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_endpoint_session_restarts_the_idle_period() {
+        let instances = Instances::new();
+        let shared = Arc::<crate::bridge::HostShared>::default();
+        let instance = instances
+            .lease("module", false, || ModuleInstance::new("module", shared))
+            .ready()
+            .unwrap();
+        let session = instances.session_use("module");
+        let opened = instances.shared.lock().loaded["module"].last_used;
+        std::thread::sleep(Duration::from_millis(5));
+        drop((session, instance));
+        assert!(instances.shared.lock().loaded["module"].last_used > opened);
+    }
+
+    #[test]
     fn a_new_instance_waits_for_the_previous_one_to_finish_teardown() {
         let instances = Instances::new();
         let shared = Arc::<crate::bridge::HostShared>::default();
@@ -352,7 +421,8 @@ mod tests {
             .lease("module", false, || {
                 ModuleInstance::new("module", Arc::clone(&shared))
             })
-            .ready();
+            .ready()
+            .unwrap();
         let retiring = instances.remove("module").unwrap();
         let lease = instances.lease("module", false, || {
             ModuleInstance::new("module", Arc::clone(&shared))
@@ -361,8 +431,9 @@ mod tests {
             .lease("other", false, || {
                 ModuleInstance::new("other", Arc::clone(&shared))
             })
-            .ready();
-        let waiting = std::thread::spawn(move || lease.ready());
+            .ready()
+            .unwrap();
+        let waiting = std::thread::spawn(move || lease.ready().unwrap());
         std::thread::sleep(Duration::from_millis(50));
         assert!(!waiting.is_finished());
         drop(retiring);
