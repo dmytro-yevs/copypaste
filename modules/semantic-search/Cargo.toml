@@ -17,6 +17,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 copypaste-module-sdk = { path = "../../crates/copypaste-module-sdk" }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "load-dynamic"] }
+serde = { version = "1", features = ["derive"] }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 
 [dev-dependencies]

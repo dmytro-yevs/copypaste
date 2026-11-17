@@ -7198,6 +7198,78 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "measurement_only_no_source_change"
+    },
+    {
+      "id": "RUN-190",
+      "title": "Compact Unigram tokenizer vocabulary",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Semantic search module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/semantic-search/src/unigram.rs",
+        "modules/semantic-search/src/tokenizer.rs",
+        "modules/semantic-search/src/lib.rs",
+        "modules/semantic-search/Cargo.toml"
+      ],
+      "invariant": "A Unigram tokenizer file loads straight into a flat sorted trie with contiguous piece, score and offset arrays, never into the library's per-node hash maps or an intermediate JSON value, and yields encodings identical to the library tokenizer. Other tokenizer kinds load through the library unchanged.",
+      "tradeoffs": "There is no word cache, so tokenizing repetitive text takes about a fifth longer, around 0.1 ms per embedded chunk of about 26 ms. The segmentation is a port of the library's and must follow it when the tokenizers dependency is upgraded; the equivalence tests guard that. About 16 MB of the remaining load footprint is the freed file text that the allocator keeps.",
+      "next_step": "Inference worker footprint on Android and Windows, and the English model, whose tokenizer takes the library path. The loaded session still holds about 305 MiB for a 113 MiB model.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l; module harness with one query to load, then 40 requests in indexing order",
+        "baseline": 701497344,
+        "candidate": 390431668,
+        "module_footprint_after_load_kib_before": [
+          650625,
+          651137
+        ],
+        "module_footprint_after_load_kib_after": [
+          342736,
+          343488
+        ],
+        "tokenizer_alone_footprint_after_load_kib_before": [
+          343024,
+          343072
+        ],
+        "tokenizer_alone_footprint_after_load_kib_after": [
+          41824,
+          43456
+        ],
+        "tokenizer_live_malloc_at_load_mb": [
+          265.2,
+          12.8
+        ],
+        "module_load_ms_median": [
+          318,
+          172
+        ],
+        "tokenizer_encode_ms_per_request_median": [
+          0.084,
+          0.107
+        ],
+        "equivalence": {
+          "inputs_compared_on_installed_vocabulary": 6040,
+          "tokens_compared_on_installed_vocabulary": 1326116,
+          "embedding_vectors_sha256_equal": true
+        },
+        "scenario": "macOS 27.3 host, release build, installed multilingual model with 250,002 pieces read in place. Five alternating runs per version; ranges are minimum and maximum, pairs are before and after. Baseline is the 669 MiB median before; candidate is the mean of two confirming runs of the final code, 390,742,952 and 390,120,384 bytes.",
+        "repetitions_per_version": 5,
+        "attribution": "The library's trie had 782,761 nodes with one hash map each, and its deserializer built the vocabulary twice. The process was a harness driving the module's public interface, not the application's inference worker. Embedding vectors of the 40-request run are byte-identical before and after.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }
