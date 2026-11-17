@@ -171,6 +171,26 @@ begin
     exception when check_violation then
         null;
     end;
+
+    -- A nonce long enough to outgrow the row every device has to download.
+    begin
+        insert into public.clipboard_items
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('long-nonce', 'Y3Q=', repeat('A', 129), 'text', 5, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
+        raise exception 'a nonce longer than its bound was accepted';
+    exception when check_violation then
+        null;
+    end;
+
+    -- A payload that is not base64 cannot be decoded by any device.
+    begin
+        insert into public.clipboard_items
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('raw-payload', E'Y3Q=\n', 'bm8=', 'text', 5, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
+        raise exception 'a payload outside the base64 alphabet was accepted';
+    exception when check_violation then
+        null;
+    end;
 end
 $$;
 

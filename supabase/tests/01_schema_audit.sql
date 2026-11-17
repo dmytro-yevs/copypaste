@@ -117,6 +117,23 @@ begin
 end
 $$;
 
+do $$
+declare
+    id_order text;
+begin
+    -- The pull orders and bounds its keyset on `item_id`. Byte order is the
+    -- only one every server and every client agree on.
+    select collation_name into id_order
+      from information_schema.columns
+     where table_schema = 'public' and table_name = 'clipboard_items'
+       and column_name = 'item_id';
+    if id_order is distinct from 'C' then
+        raise exception 'item_id is ordered by % rather than "C": the pull order depends on the server locale',
+            coalesce(id_order, 'the database default');
+    end if;
+end
+$$;
+
 -- --- row-level security ----------------------------------------------------
 
 do $$
