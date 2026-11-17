@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::history_actions;
+use copypaste_core::image_preview::ImageThumbnail;
 use copypaste_core::{
     now_ms, p2p_contract, ClipboardPayload, HistoryCursor, IngestError, ItemCursor, StoreError,
     StoredItem,
@@ -797,6 +798,31 @@ impl Runtime {
 
     /// Produce a small PNG only when a history row needs to draw an image.
     /// The caller holds the shared preview-source admission.
+    /// [`Method::ImagePreview`] for an in-process host, which takes the PNG as
+    /// bytes instead of the reply's text form. An error is the method's reply.
+    pub async fn image_preview_png(
+        self: &Arc<Self>,
+        item_id: String,
+        max_edge: Option<u32>,
+        bounds: Option<copypaste_ipc::ImagePreviewBounds>,
+    ) -> Result<ImageThumbnail, Box<Response>> {
+        let admission = copypaste_core::image_preview::acquire_preview_source().await;
+        let runtime = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let _admission = admission;
+            runtime.note_activity();
+            runtime.image_thumbnail(0, &item_id, max_edge, bounds)
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(Box::new(Response::err(
+                0,
+                ErrorCode::Internal,
+                MSG_IMAGE_PREVIEW,
+            )))
+        })
+    }
+
     fn image_preview(
         &self,
         id: u64,
@@ -804,49 +830,66 @@ impl Runtime {
         max_edge: Option<u32>,
         bounds: Option<copypaste_ipc::ImagePreviewBounds>,
     ) -> Response {
-        // Release the encrypted row and decrypted source before encoding.
-        let thumbnail = {
-            let row = match self.store.get(item_id) {
-                Ok(Some(row)) => row,
-                Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-                Err(error) => return storage_error(id, "image_preview", &error),
-            };
-            if !matches!(
-                copypaste_ipc::content_type::classify(&row.content_type),
-                copypaste_ipc::ContentClass::Image
-            ) {
-                return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
-            }
-            let bytes = match copypaste_core::open_binary(
-                &row.content_ciphertext,
-                &self.keyring.item_key(),
-                &row.id,
-            ) {
-                Ok(bytes) => bytes,
-                Err(error) => return decrypt_error(id, &error),
-            };
-            let budget = self.settings.get().max_decoded_image_mb;
-            match copypaste_core::thumbnail_png(
-                &bytes,
-                budget,
-                max_edge,
-                bounds.map(|bounds| (bounds.width, bounds.height)),
-            ) {
-                Ok(thumbnail) => thumbnail,
-                Err(error) => {
-                    tracing::warn!(id = %row.id, ?error, "image preview unavailable");
-                    return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
-                }
-            }
+        match self.image_thumbnail(id, item_id, max_edge, bounds) {
+            Ok(thumbnail) => Response::ok(
+                id,
+                ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
+                    png_base64: STANDARD.encode(thumbnail.png),
+                    width: thumbnail.width,
+                    height: thumbnail.height,
+                }),
+            ),
+            Err(response) => *response,
+        }
+    }
+
+    /// Releases the encrypted row and decrypted source before it returns.
+    fn image_thumbnail(
+        &self,
+        id: u64,
+        item_id: &str,
+        max_edge: Option<u32>,
+        bounds: Option<copypaste_ipc::ImagePreviewBounds>,
+    ) -> Result<ImageThumbnail, Box<Response>> {
+        let refuse = |response| Err(Box::new(response));
+        let row = match self.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => return refuse(Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND)),
+            Err(error) => return refuse(storage_error(id, "image_preview", &error)),
         };
-        Response::ok(
-            id,
-            ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
-                png_base64: STANDARD.encode(thumbnail.png),
-                width: thumbnail.width,
-                height: thumbnail.height,
-            }),
+        if !matches!(
+            copypaste_ipc::content_type::classify(&row.content_type),
+            copypaste_ipc::ContentClass::Image
+        ) {
+            return refuse(Response::err(
+                id,
+                ErrorCode::InvalidRequest,
+                MSG_IMAGE_PREVIEW,
+            ));
+        }
+        let bytes = match copypaste_core::open_binary(
+            &row.content_ciphertext,
+            &self.keyring.item_key(),
+            &row.id,
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) => return refuse(decrypt_error(id, &error)),
+        };
+        let budget = self.settings.get().max_decoded_image_mb;
+        copypaste_core::thumbnail_png(
+            &bytes,
+            budget,
+            max_edge,
+            bounds.map(|bounds| (bounds.width, bounds.height)),
         )
+        .or_else(|error| {
+            tracing::warn!(id = %row.id, ?error, "image preview unavailable");
+            refuse(Response::err(
+                id,
+                ErrorCode::InvalidRequest,
+                MSG_IMAGE_PREVIEW,
+            ))
+        })
     }
 
     fn source_app_icon(&self, id: u64, item_id: &str) -> Response {
@@ -1294,12 +1337,7 @@ impl Runtime {
             // only wakes watchers.
             self.note_remote_change();
         }
-        if transition.lan_visibility_changed() {
-            self.p2p
-                .node()
-                .set_lan_visibility(transition.config().lan_visibility);
-        }
-        self.p2p.configure_relay(transition.config());
+        self.p2p.apply_network_settings(transition.config());
         copypaste_runtime_log::set_level(transition.config().log_level);
         if let Some(enabled) = transition.sync_enabled_changed() {
             self.p2p.sync_enabled_changed(enabled);
@@ -1654,5 +1692,50 @@ fn export_reply(
         Err(error @ ExportError::Abandoned) => {
             Response::err(id, ErrorCode::Internal, error.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::fixture;
+
+    #[tokio::test]
+    async fn in_process_image_preview_matches_the_reply_bytes() {
+        let (runtime, _dir) = fixture();
+        let source = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let row = copypaste_core::ingest_binary_into_with_capture_context(
+            &runtime.store,
+            &runtime.keyring,
+            &source,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            1,
+            None,
+            None,
+            &runtime.settings.config(),
+        )
+        .unwrap()
+        .into_item();
+        let method = Method::ImagePreview {
+            id: row.id.clone(),
+            max_edge: None,
+            bounds: None,
+        };
+        let reply = match runtime.request(1, method).await.data {
+            Some(ResponseData::ImagePreview(preview)) => preview,
+            other => panic!("{other:?}"),
+        };
+        let thumbnail = runtime.image_preview_png(row.id, None, None).await.unwrap();
+        assert_eq!(STANDARD.decode(reply.png_base64).unwrap(), thumbnail.png);
+        assert_eq!(
+            (reply.width, reply.height),
+            (thumbnail.width, thumbnail.height)
+        );
+        let missing = runtime
+            .image_preview_png("missing".into(), None, None)
+            .await;
+        assert_eq!(missing.unwrap_err().error_code, Some(ErrorCode::NotFound));
     }
 }

@@ -1,8 +1,160 @@
-//! Runtime effects for the shared outgoing peer scheduler.
-use crate::Runtime;
+//! Runtime effects for the shared outgoing peer scheduler, and the peer
+//! listener and scheduler that run only while sync is on.
+use crate::{Runtime, RuntimeError};
 use copypaste_p2p::{node::SyncCycle, Peer};
 use copypaste_sync::peer_driver::PeerSyncHost;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
+use tokio::sync::watch;
+
+/// The outgoing scheduler and, once the port is bound, its accept loop.
+/// A session stays in its slot until it is stopped.
+pub(crate) struct PeerSession {
+    stop: watch::Sender<bool>,
+    scheduler: tokio::task::JoinHandle<()>,
+    listener: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl PeerSession {
+    fn handles(&mut self) -> impl Iterator<Item = &mut tokio::task::JoinHandle<()>> {
+        std::iter::once(&mut self.scheduler).chain(self.listener.as_mut())
+    }
+}
+
+/// A host that abandons the wait for a stop still closes the port.
+impl Drop for PeerSession {
+    fn drop(&mut self) {
+        self.handles().for_each(|task| task.abort());
+    }
+}
+
+/// Clears the listening flag however the accept loop ends, panics included.
+struct Listening(Arc<Runtime>);
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        self.0.listener_started.store(false, Ordering::Release);
+    }
+}
+
+impl Runtime {
+    /// Forward node changes and follow the sync switch until shutdown, when
+    /// the peer session is closed. Returns the task the first time only.
+    pub fn start_peer_network(self: &Arc<Self>) -> Option<tokio::task::JoinHandle<()>> {
+        if self.peer_supervisor_started.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        // The caller starts the session for the current state; the follower
+        // reacts only to later switches.
+        self.p2p
+            .driver
+            .set_enabled(self.settings.get().sync_enabled);
+        let changes = self.forward_changes(self.shutdown.subscribe());
+        let follow = Arc::clone(self).follow_sync_switch(self.shutdown.subscribe());
+        Some(tokio::spawn(async move {
+            tokio::join!(changes, follow);
+        }))
+    }
+
+    /// While sync is on, serve the peer port and schedule outgoing peer sync.
+    /// The scheduler keeps dialling out when the port cannot be bound.
+    pub async fn start_peer_session(self: &Arc<Self>) -> Result<(), RuntimeError> {
+        let mut slot = self.peer_session.lock().await;
+        self.start_peer_session_in(&mut slot)
+    }
+
+    /// [`Runtime::start_peer_session`] for request paths: a switch already
+    /// in progress is left to finish, so a request never waits on a teardown.
+    pub(crate) fn try_start_peer_session(self: &Arc<Self>) -> Result<(), RuntimeError> {
+        match self.peer_session.try_lock() {
+            Ok(mut slot) => self.start_peer_session_in(&mut slot),
+            Err(_) => Ok(()),
+        }
+    }
+
+    fn start_peer_session_in(
+        self: &Arc<Self>,
+        slot: &mut Option<PeerSession>,
+    ) -> Result<(), RuntimeError> {
+        if !self.settings.get().sync_enabled || *self.shutdown.borrow() {
+            return Ok(());
+        }
+        let bound = (!self.listener_started.load(Ordering::Acquire)).then(|| {
+            self.p2p
+                .node()
+                .bind_listener()
+                .and_then(tokio::net::TcpListener::from_std)
+        });
+        let (listener, result) = match bound {
+            Some(Ok(listener)) => (Some(listener), Ok(())),
+            Some(Err(_)) => (None, Err(RuntimeError::Listener)),
+            None => (None, Ok(())),
+        };
+        match slot {
+            Some(session) => {
+                if let Some(listener) = listener {
+                    session.listener = Some(self.serve(listener, &session.stop));
+                }
+                if session.scheduler.is_finished() {
+                    let stopped = session.stop.subscribe();
+                    session.scheduler = tokio::spawn(Arc::clone(self).run_peer_sync(stopped));
+                }
+            }
+            None => {
+                let (stop, stopped) = watch::channel(false);
+                let listener = listener.map(|listener| self.serve(listener, &stop));
+                let scheduler = tokio::spawn(Arc::clone(self).run_peer_sync(stopped));
+                *slot = Some(PeerSession {
+                    stop,
+                    scheduler,
+                    listener,
+                });
+            }
+        }
+        result
+    }
+
+    fn serve(
+        self: &Arc<Self>,
+        listener: tokio::net::TcpListener,
+        stop: &watch::Sender<bool>,
+    ) -> tokio::task::JoinHandle<()> {
+        self.listener_started.store(true, Ordering::Release);
+        let listening = Listening(Arc::clone(self));
+        let stopped = stop.subscribe();
+        tokio::spawn(async move {
+            Arc::clone(&listening.0).listen(listener, stopped).await;
+            drop(listening);
+        })
+    }
+
+    /// Close the peer port and stop scheduling, waiting until both are down.
+    async fn stop_peer_session(&self) {
+        let mut slot = self.peer_session.lock().await;
+        if let Some(mut session) = slot.take() {
+            let _ = session.stop.send(true);
+            for task in session.handles() {
+                let _ = task.await;
+            }
+        }
+    }
+
+    /// Start or stop the peer session as the sync switch changes.
+    async fn follow_sync_switch(self: Arc<Self>, mut shutdown: watch::Receiver<bool>) {
+        while !*shutdown.borrow() {
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => break,
+                () = self.p2p.sync_switch_changed() => {}
+            }
+            if !self.settings.get().sync_enabled {
+                self.stop_peer_session().await;
+            } else if self.start_peer_session().await.is_err() {
+                tracing::warn!("could not bind the peer port; not accepting peers");
+            }
+        }
+        self.stop_peer_session().await;
+    }
+}
 
 pub(crate) struct RuntimePeerHost(pub(crate) Arc<Runtime>);
 
@@ -234,6 +386,84 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(20), state.run_peer_round(permit, rx))
             .await
             .expect("a refused peer must not wedge the round");
+    }
+
+    async fn set_sync(state: &Arc<Runtime>, enabled: bool) {
+        let patch = copypaste_ipc::ConfigPatch {
+            sync_enabled: Some(enabled),
+            ..Default::default()
+        };
+        assert!(
+            state
+                .request(0, copypaste_ipc::Method::SetConfig { patch })
+                .await
+                .ok
+        );
+    }
+
+    async fn listening_becomes(state: &Runtime, expected: bool) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.listener_started.load(Ordering::Acquire) != expected {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the peer port must follow the sync switch");
+    }
+
+    /// With sync off nothing binds the peer port or schedules peer rounds;
+    /// the switch starts and stops them without a restart.
+    #[tokio::test]
+    async fn the_peer_session_follows_the_sync_switch() {
+        let (state, _dir) = fixture();
+        set_sync(&state, false).await;
+        state.start_listener().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!state.listener_started.load(Ordering::Acquire));
+        assert!(state.p2p.listen_addr().is_none());
+
+        set_sync(&state, true).await;
+        listening_becomes(&state, true).await;
+        assert!(state.p2p.listen_addr().is_some());
+        assert!(state
+            .peer_session
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|session| !session.scheduler.is_finished()));
+
+        set_sync(&state, false).await;
+        listening_becomes(&state, false).await;
+        // The stop holds the slot until both tasks have ended.
+        assert!(state.peer_session.lock().await.is_none());
+        assert!(state.p2p.listen_addr().is_none());
+        state.shutdown();
+    }
+
+    /// Pairing needs sync on at both ends. Once this device turns it off, its
+    /// port refuses connections, so no ceremony can start on it.
+    #[tokio::test]
+    async fn a_device_with_sync_off_cannot_be_paired_from_outside() {
+        let (receiver, _receiver_dir) = fixture();
+        let (initiator, _initiator_dir) = fixture();
+        receiver.start_listener().await.unwrap();
+        initiator.start_listener().await.unwrap();
+        let addr: std::net::SocketAddr = receiver.p2p.listen_addr().unwrap().parse().unwrap();
+        set_sync(&receiver, false).await;
+        listening_becomes(&receiver, false).await;
+
+        let addr = format!("127.0.0.1:{}", addr.port());
+        assert!(tokio::net::TcpStream::connect(&addr).await.is_err());
+        let _ = initiator
+            .request(0, copypaste_ipc::Method::PairNearby { addr })
+            .await;
+        assert_eq!(
+            receiver.p2p.node().pair_progress().phase,
+            copypaste_p2p::PairingPhase::Idle
+        );
+        assert!(receiver.p2p.peers().is_empty());
+        receiver.shutdown();
+        initiator.shutdown();
     }
 
     /// The master switch is read at the top of each round, which is what makes

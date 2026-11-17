@@ -209,6 +209,10 @@ impl Node {
     ) -> Result<(), NodeError> {
         self.prepare_group(source)?;
         let (psk, control) = self.pairing.begin_responder(pairing_id)?;
+        let _abandoned = AbandonedCeremony {
+            node: self,
+            pairing_id,
+        };
         let identity = local_identity(self, source, session.local_addr());
         let established = establish(
             session,
@@ -482,6 +486,10 @@ async fn persist_bilaterally(
         .peers
         .upsert_from_admission(&mut slot, peer.clone(), Some(admissions))
         .is_ok();
+    let mut pending = UncommittedSlot {
+        node,
+        slot: stored.then_some(slot),
+    };
     let acknowledged = tokio::time::timeout(PAIRING_COMMIT_TIMEOUT, async {
         session
             .send(&PairingMessage::Stored { ok: stored })
@@ -512,7 +520,8 @@ async fn persist_bilaterally(
     // be discarded to do it. A rollback that could not be written is a failure
     // of its own — the key is out of the candidate list, but the file still
     // names it, and saying "the peer timed out" would hide that (B4).
-    if stored && outcome != Commit::Both {
+    let slot = pending.slot.take();
+    if let Some(slot) = slot.filter(|_| outcome != Commit::Both) {
         if let Err(e) = node.peers.restore(&slot) {
             tracing::warn!(
                 pairing_id = %peer.pairing_id,
@@ -523,6 +532,40 @@ async fn persist_bilaterally(
         }
     }
     outcome
+}
+
+/// An inbound ceremony dropped mid-flight, for example by a listener
+/// shutdown, ends as cancelled instead of holding the pairing state busy.
+/// A ceremony that already finished is left as it ended.
+struct AbandonedCeremony<'a> {
+    node: &'a Node,
+    pairing_id: &'a str,
+}
+
+impl Drop for AbandonedCeremony<'_> {
+    fn drop(&mut self) {
+        if self.node.pairing.is_pending_pairing(self.pairing_id) {
+            self.node
+                .pairing
+                .finish(self.pairing_id, PairingPhase::Cancelled, None);
+            self.node.republish();
+        }
+    }
+}
+
+/// A stored pairing whose acknowledgement never arrived is rolled back even
+/// when the ceremony is dropped while waiting for it.
+struct UncommittedSlot<'a> {
+    node: &'a Node,
+    slot: Option<crate::peers::PeerSnapshot>,
+}
+
+impl Drop for UncommittedSlot<'_> {
+    fn drop(&mut self) {
+        if let Some(slot) = self.slot.take() {
+            let _ = self.node.peers.restore(&slot);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -655,6 +698,28 @@ mod tests {
         );
         b.pair_create_invite().unwrap();
         let _ = shutdown.send(true);
+    }
+
+    /// A listener stopped mid-ceremony, as when sync is turned off, leaves
+    /// nothing stored and the responder free for the next pairing.
+    #[tokio::test]
+    async fn a_listener_stop_cancels_an_inbound_ceremony() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = node(&dir, "stopped-a");
+        let b = node(&dir, "stopped-b");
+        let (addr, shutdown) = start_listener(
+            Arc::clone(&b),
+            Arc::new(TestSource::new("stopped-b", vec![])),
+        )
+        .await;
+        a.pair_nearby(&addr.to_string(), &TestSource::new("stopped-a", vec![]))
+            .await
+            .unwrap();
+        wait_for(&b, PairingPhase::AwaitingConfirmation).await;
+        shutdown.send(true).unwrap();
+        wait_for(&b, PairingPhase::Cancelled).await;
+        assert!(b.peers().list().is_empty());
+        b.pair_create_invite().unwrap();
     }
 
     /// Sleeps rather than yielding: under `start_paused` the clock only moves
