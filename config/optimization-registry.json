@@ -7243,6 +7243,32 @@
       "functional_validation": "measurement_only_no_source_change"
     },
     {
+      "id": "RUN-189",
+      "title": "Persist a settled-row mark for Android screenshot scans",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "ScreenshotCaptureMonitor",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureMonitor.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureState.kt",
+        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ScreenshotCaptureTest.kt"
+      ],
+      "invariant": "A scan starts after a persisted row mark that advances only through a contiguous run of settled rows, so pending or failed screenshots, clock changes and a rebuilt media index are reconsidered and private-mode content is never replayed.",
+      "tradeoffs": "An image moved or renamed into a screenshots folder, or restored from trash, after it was settled is no longer captured. A screenshot that keeps failing holds the mark, so scans from that row on cost what they did before. Receipts are not pruned.",
+      "next_step": "Confirm on API 29 that another application's pending rows are visible through setIncludePending; only the API 30 and later query was exercised. If they are not, a screenshot published after a later image settled could be skipped on Android 10. Measure the scan cost on a device with a large photo library.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "The screenshot capture unit tests cover the mark. On an API 34 emulator, in one run, the query returned a pending row owned by another application, the mark held while a later settled image was captured, the pending screenshot was captured after publication, and a system screenshot appeared once in History and was not captured again after a restart. API 29 was not exercised."
+    },
+    {
       "id": "RUN-190",
       "title": "Compact Unigram tokenizer vocabulary",
       "domain": "runtime",

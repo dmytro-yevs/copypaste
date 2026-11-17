@@ -1,13 +1,16 @@
 package com.copypaste.app
 
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.provider.MediaStore
@@ -99,41 +102,48 @@ internal class ScreenshotCaptureMonitor(
         }
         val since = ScreenshotCaptureState.since(context)
         if (since == 0L) return
-        // The continuation belongs to this scan only. A later scan starts at
-        // the policy cutoff so pending or failed captures are reconsidered.
-        var afterAdded: Long? = null
+        // Rows are read in _ID (insertion) order. The persisted mark advances only
+        // through a contiguous run of settled rows, so pending and failed rows,
+        // and every row after them, are reconsidered by later scans. A row added
+        // after the mark has a larger _ID even if the clock moved back, and a
+        // rebuilt MediaStore restarts _IDs with current DATE_ADDED values.
+        var mark = ScreenshotCaptureState.scanMark(context)
+        var advancing = true
         var afterId = 0L
         while (!closed) {
-            val candidates = mutableListOf<Candidate>()
+            val rows = mutableListOf<Row>()
             var rowsRead = 0
             try {
                 val allowed = reader.readMetadata {
                     val pathColumn = if (Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
                     val columns = mutableListOf(Images._ID, Images.DISPLAY_NAME, pathColumn, Images.MIME_TYPE, Images.DATE_ADDED, Images.DATE_TAKEN)
                     if (Build.VERSION.SDK_INT >= 29) columns.add(Images.IS_PENDING)
-                    val selection = "${Images.DATE_ADDED} >= ?" + if (afterAdded == null) "" else
-                        " AND (${Images.DATE_ADDED} > ? OR (${Images.DATE_ADDED} = ? AND ${Images._ID} > ?))"
-                    val arguments = if (afterAdded == null) arrayOf((since / 1000).toString()) else
-                        arrayOf((since / 1000).toString(), afterAdded.toString(), afterAdded.toString(), afterId.toString())
-                    context.contentResolver.query(
-                        Images.EXTERNAL_CONTENT_URI, columns.toTypedArray(), selection,
-                        arguments, "${Images.DATE_ADDED} ASC, ${Images._ID} ASC",
-                    )?.use { cursor ->
+                    val selection = "${Images.DATE_ADDED} >= ? AND (${Images._ID} > ? OR ${Images.DATE_ADDED} >= ?) AND ${Images._ID} > ?"
+                    val arguments = arrayOf((since / 1000).toString(), mark.id.toString(),
+                        mark.addedSeconds.toString(), afterId.toString())
+                    queryImages(columns.toTypedArray(), selection, arguments)?.use { cursor ->
                         while (!closed && rowsRead < CANDIDATE_PAGE_SIZE && cursor.moveToNext()) {
                             rowsRead++
-                            afterAdded = cursor.getLong(4)
-                            afterId = cursor.getLong(0)
-                            if (Build.VERSION.SDK_INT >= 29 && cursor.getInt(6) != 0) continue
+                            val id = cursor.getLong(0)
+                            afterId = id
+                            val added = cursor.getLong(4)
+                            if (Build.VERSION.SDK_INT >= 29 && cursor.getInt(6) != 0) {
+                                rows.add(Row(id, added, null, settled = false))
+                                continue
+                            }
                             val name = cursor.getString(1).orEmpty()
                             val path = cursor.getString(2).orEmpty()
                             val type = cursor.getString(3).orEmpty()
-                            val added = cursor.getLong(4)
                             val taken = cursor.getLong(5)
                             if (!isScreenshot(name, path) || !type.startsWith("image/") ||
-                                !isNew(since, added, taken)) continue
-                            val uri = ContentUris.withAppendedId(Images.EXTERNAL_CONTENT_URI, cursor.getLong(0))
+                                !isNew(since, added, taken)) {
+                                rows.add(Row(id, added, null, settled = true))
+                                continue
+                            }
+                            val uri = ContentUris.withAppendedId(Images.EXTERNAL_CONTENT_URI, id)
                             val receipt = "$uri:$added:$taken"
-                            if (!receipts.contains(receipt)) candidates.add(Candidate(uri, type, receipt, name))
+                            rows.add(if (receipts.contains(receipt)) Row(id, added, null, settled = true)
+                                else Row(id, added, Candidate(uri, type, receipt, name), settled = false))
                         }
                     }
                 }
@@ -143,17 +153,28 @@ internal class ScreenshotCaptureMonitor(
                     else if (!closed) worker.postDelayed(scanTask, 250L)
                     return
                 }
-                for ((uri, type, receipt, displayName) in candidates) {
+                for (row in rows) {
+                    val (uri, type, receipt, displayName) = row.candidate ?: continue
                     if (closed || !ScreenshotCaptureState.enabled(context)) return
                     if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
-                    if (reader.capture(uri, type, displayName)) receipts.record(receipt)
-                    else {
+                    if (reader.capture(uri, type, displayName)) {
+                        receipts.record(receipt)
+                        row.settled = true
+                    } else {
                         if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
                         if (!reader.readMetadata {}) {
                             if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
                             return
                         }
                     }
+                }
+                if (advancing) {
+                    val previous = mark
+                    for (row in rows) {
+                        if (!row.settled) { advancing = false; break }
+                        mark = ScreenshotCaptureState.ScanMark(row.id, maxOf(mark.addedSeconds, row.addedSeconds))
+                    }
+                    if (mark != previous) ScreenshotCaptureState.setScanMark(context, mark)
                 }
             } catch (_: RuntimeException) {
                 // Permission revocation and provider failures carry no image data into logs.
@@ -166,7 +187,26 @@ internal class ScreenshotCaptureMonitor(
         }
     }
 
+    /** Pending rows must stay visible so they hold the scan mark until publication. */
+    private fun queryImages(columns: Array<String>, selection: String, arguments: Array<String>): Cursor? {
+        val order = "${Images._ID} ASC"
+        return if (Build.VERSION.SDK_INT >= 30) context.contentResolver.query(
+            Images.EXTERNAL_CONTENT_URI, columns, Bundle().apply {
+                putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arguments)
+                putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, order)
+                putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+            }, null,
+        ) else {
+            @Suppress("DEPRECATION")
+            val uri = if (Build.VERSION.SDK_INT >= 29) MediaStore.setIncludePending(Images.EXTERNAL_CONTENT_URI)
+                else Images.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(uri, columns, selection, arguments, order)
+        }
+    }
+
     private data class Candidate(val uri: Uri, val type: String, val receipt: String, val displayName: String)
+    private class Row(val id: Long, val addedSeconds: Long, val candidate: Candidate?, var settled: Boolean)
 
     companion object {
         internal const val CANDIDATE_PAGE_SIZE = 32
