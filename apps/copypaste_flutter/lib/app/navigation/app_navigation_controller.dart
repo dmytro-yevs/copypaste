@@ -168,20 +168,27 @@ class AppNavigationController extends ChangeNotifier {
 }
 
 class _NestedRouteStack extends NavigatorObserver {
-  final List<Route<dynamic>> _routes = [];
+  // Weak, because a navigator disposed with its presentation reports no
+  // removals and a route's builder keeps the whole unmounted tree reachable.
+  final List<WeakReference<Route<dynamic>>> _routes = [];
 
   /// Routes above the destinations' root that are still on the stack.
-  Iterable<Route<dynamic>> get pushed =>
-      _routes.where((route) => route.isActive && !route.isFirst);
+  Iterable<Route<dynamic>> get pushed => _routes
+      .map((entry) => entry.target)
+      .whereType<Route<dynamic>>()
+      .where((route) => route.isActive && !route.isFirst);
 
   void _forget(Route<dynamic>? route) {
-    _routes.removeWhere((entry) => entry == route || !entry.isActive);
+    _routes.removeWhere((entry) {
+      final target = entry.target;
+      return target == null || target == route || !target.isActive;
+    });
   }
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _forget(null);
-    _routes.add(route);
+    _routes.add(WeakReference(route));
   }
 
   @override
@@ -195,6 +202,6 @@ class _NestedRouteStack extends NavigatorObserver {
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     _forget(oldRoute);
-    if (newRoute != null) _routes.add(newRoute);
+    if (newRoute != null) _routes.add(WeakReference(newRoute));
   }
 }
