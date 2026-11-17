@@ -66,7 +66,92 @@ class _PrependingRepository extends _Repository {
   }
 }
 
+class _Retained extends StatefulWidget {
+  const _Retained({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_Retained> createState() => _RetainedState();
+}
+
+class _RetainedState extends State<_Retained>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 void main() {
+  testWidgets('keeps its place when a clip arrives on another destination', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repo = _PrependingRepository();
+    final controller = HistoryController(repo);
+    final destinations = PageController();
+    final scroll = ScrollController();
+    addTearDown(controller.dispose);
+    addTearDown(repo.events.close);
+    addTearDown(destinations.dispose);
+    addTearDown(scroll.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: PageView(
+            controller: destinations,
+            allowImplicitScrolling: true,
+            children: [
+              _Retained(
+                child: PrimaryScrollController(
+                  controller: scroll,
+                  automaticallyInheritForPlatforms: const {},
+                  child: HistoryScreen(controller: controller),
+                ),
+              ),
+              const SizedBox.shrink(),
+              const SizedBox.shrink(),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    scroll.jumpTo(120);
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('history-row-3'));
+    final y = tester.getTopLeft(row).dy;
+
+    destinations.jumpToPage(2);
+    await tester.pumpAndSettle();
+    repo.clips.insert(
+      0,
+      HistoryClip(
+        id: 'new',
+        contentType: 'text/plain',
+        preview: 'new',
+        createdAt: DateTime.utc(2026, 1, 1, 0, 0, 1),
+        pinned: false,
+      ),
+    );
+    repo.events.add(HistoryRuntimeEvent.itemsChanged);
+    await tester.pumpAndSettle();
+    destinations.jumpToPage(0);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(row, findsOneWidget);
+    expect(tester.getTopLeft(row).dy, closeTo(y, 1));
+  });
+
   testWidgets('renders a rebuilt prefix after history was offstage', (
     tester,
   ) async {
