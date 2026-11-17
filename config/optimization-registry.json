@@ -6941,6 +6941,56 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-185",
+      "title": "Bound tree-building transforms to the stored text cap",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-transform",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-transform/src/lib.rs",
+        "crates/copypaste-transform/src/error.rs",
+        "crates/copypaste-transform/src/structure/yaml.rs",
+        "crates/copypaste-transform/src/markup/html.rs",
+        "crates/copypaste-transform/src/catalogue.rs"
+      ],
+      "invariant": "structure.yaml_to_json, markup.rich_to_plain and markup.html_to_markdown refuse input above 4 MiB before parsing. Every stored clip, which the text cap holds to 4 MiB, and every 64 KiB preview still converts with unchanged output.",
+      "tradeoffs": "Sample text or a chain intermediate between 4 MiB and 16 MiB is now refused by these three transforms with the input-size error. A 4 MiB input of repeated short elements still peaks at up to 0.77 GB for YAML, 1.86 GB for rich to plain and 0.34 GB for HTML to Markdown.",
+      "next_step": "Lower the 4 MiB peak: stream YAML events into the JSON writer (needs the parser as a direct dependency) and replace the html2text render with the crate's own tree walk (changes output). Measure the daemon and the Android process on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "peak heap bytes held during one apply call beyond the input, counting global allocator",
+        "baseline": 3726642056,
+        "candidate": 160,
+        "peak_bytes_before_at_16_mib": {
+          "yaml_to_json_flow_sequence": 3087009936,
+          "rich_to_plain_inline_tags": 3726642056,
+          "html_to_markdown_paragraphs": 1354761350
+        },
+        "peak_bytes_at_4_mib_unchanged": {
+          "yaml_to_json_flow_sequence": 771753616,
+          "rich_to_plain_paragraphs": 1863321992,
+          "html_to_markdown_paragraphs": 338690694
+        },
+        "scenario": "macOS 27.3 host, release build of a standalone harness that links the crate; synthetic inputs of repeated short elements at 1, 4 and 16 MiB. Baseline and candidate are rich to plain on 16 MiB of inline tags. Peaks grow linearly with the input, 42 to 444 times its size.",
+        "repetitions_per_version": 1,
+        "attribution": "Above 4 MiB the three transforms now return the input-size error before any parsing. Peaks at 1 and 4 MiB are unchanged within 512 bytes. The process was a harness, not the daemon.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }
