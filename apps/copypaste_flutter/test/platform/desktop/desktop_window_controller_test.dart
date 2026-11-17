@@ -267,6 +267,22 @@ void main() {
       expect(geometryStore.lastWrittenBounds, host.bounds);
     });
 
+    test('reports hidden before the window leaves the screen', () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      await controller.initialize();
+      bool? visibleAtHide;
+      host.onHide = () => visibleAtHide = controller.isVisible.value;
+
+      await controller.handleCloseRequested();
+
+      expect(visibleAtHide, isFalse);
+      await controller.dispose();
+    });
+
     test(
       'lightweight close releases the runtime and quits instead of hiding',
       () async {
@@ -787,6 +803,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   Future<void> Function()? captureHandler;
   Future<void> Function()? settingsHandler;
   int hideCalls = 0;
+  void Function()? onHide;
   int showAndFocusCalls = 0;
   int quitCalls = 0;
   int initializeWindowCalls = 0;
@@ -816,6 +833,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   @override
   Future<void> hide() async {
     hideCalls += 1;
+    onHide?.call();
   }
 
   @override

@@ -6973,8 +6973,13 @@
         },
         "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; close the window with the list at its top (the scripted scroll did not take effect), sample with footprint. One fresh process per run; totals are the tool's whole megabytes, baseline and candidate are the medians. The profile-build figures are heap usage reported by the VM service after a forced collection.",
         "repetitions_per_version": 3,
-        "attribution": "Before: settling frames only, with and without the weak route observer, which on its own changed no category because nothing collected the unmounted presentation. After: weak observer plus four collections. A single collection left the heap between 28 MB and 35 MB across four runs. Resident size did not rise during the collection steps in any traced run.",
-        "qualification": false
+        "attribution": "Before: settling frames only, with and without the weak route observer, which on its own changed no category because nothing collected the unmounted presentation. After: weak observer plus four collections. A single collection left the heap between 28 MB and 35 MB across four runs. Resident size did not rise during the collection steps in any traced run. With the list scrolled to its end and back (86 clips, a later build with the same presentation code, hidden 150 s) three runs measured 86 MB, 93 MB and 94 MB.",
+        "qualification": false,
+        "footprint_bytes_after_list_scrolled": [
+          90177536,
+          97517568,
+          98566144
+        ]
       },
       "evidence_refs": [],
       "supersedes": [],
@@ -7401,6 +7406,79 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-192",
+      "title": "Presentation stops animating before the window hides",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "DesktopWindowController",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/desktop/desktop_window_controller.dart",
+        "apps/copypaste_flutter/lib/main.dart"
+      ],
+      "invariant": "A close that hides the window reports the presentation hidden before the native window leaves the screen, and the presentation runs under a ticker mode that follows that visibility, so animations request no frames once the window is being hidden. A hide that fails reports the window visible again.",
+      "tradeoffs": "An animation in flight when the window hides pauses and resumes when the window is shown again instead of finishing off screen.",
+      "next_step": "Surface count and footprint peak at close on macOS 26 and macOS 27 hardware; the same on Windows, where the cost of a frame rendered for a hidden window is unmeasured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process IOSurface bytes at the peak after the window closes",
+        "baseline": 112197632,
+        "candidate": 33554432,
+        "iosurface_peak_bytes_before": [
+          112197632
+        ],
+        "iosurface_peak_bytes_after": [
+          33554432,
+          33554432,
+          45088768
+        ],
+        "surfaces_at_peak_before": [
+          13
+        ],
+        "surfaces_at_peak_after": [
+          7,
+          6,
+          7
+        ],
+        "footprint_peak_bytes_after_close_before": [
+          210763776
+        ],
+        "footprint_peak_bytes_after_close_after": [
+          154140672,
+          137363456,
+          140509184
+        ],
+        "earlier_session_before": {
+          "iosurface_peak_bytes": [
+            145752064,
+            145752064
+          ],
+          "surfaces_at_peak": [
+            20,
+            16
+          ],
+          "footprint_peak_bytes": [
+            254803968,
+            246415360
+          ]
+        },
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release builds on Flutter 3.47.6; 86 clips; History scrolled, the pointer resting over a clip card, the window closed with cmd+w, surfaces sampled through the close. One fresh process per run; values are the tools' whole megabytes, the candidate is the median.",
+        "repetitions_per_version": 3,
+        "attribution": "Before the change the close was followed by twelve frames in about 270 ms, ten of them from the hover-out animation of the card under the pointer, and each frame created a window-sized backing store. With it the close adds one to three surfaces instead of about nine. Both builds free the surfaces about a second later, so the saving is the transient peak and not the hidden footprint. Only one reference run of the earlier build was taken in the same session; two more come from an earlier session.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Controller tests passed. In the macOS guest animations ran again after the window was reopened, Quick Paste opened while the main window was hidden, and the presentation still suspended after 60 s hidden; Windows not built."
     }
   ]
 }

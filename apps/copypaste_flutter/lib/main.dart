@@ -960,7 +960,14 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       explicitChildNodes: true,
       label: 'CopyPaste',
       textDirection: TextDirection.ltr,
-      child: _buildPresentation(windowReady: windowReady),
+      // Until the engine reports the application hidden, a hidden window
+      // still renders every frame its animations ask for.
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _visibility,
+        builder: (context, visible, child) =>
+            TickerMode(enabled: visible, child: child!),
+        child: _buildPresentation(windowReady: windowReady),
+      ),
     );
   }
 
