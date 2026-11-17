@@ -6052,9 +6052,11 @@
         "apps/copypaste_flutter/lib/app/navigation/app_page_route.dart",
         "apps/copypaste_flutter/lib/app/theme/app_overlays.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
-        "apps/copypaste_flutter/lib/features/settings/view/settings_screen.dart"
+        "apps/copypaste_flutter/lib/features/settings/view/settings_screen.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_module_action_runner.dart"
       ],
-      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance, defers suspension.",
+      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance and a module action in flight, defers suspension.",
       "next_step": "On an Android phone and a narrow desktop window, leave the History detail drawer or a Settings section open, hide the app for more than 60 s and record app footprint and Dart heap before and after, plus timer wakeups over 10 minutes.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6215,9 +6217,10 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/instances.rs",
-        "crates/copypaste-modules/src/manager.rs"
+        "crates/copypaste-modules/src/manager.rs",
+        "crates/copypaste-modules/src/endpoints.rs"
       ],
-      "invariant": "An in-process instance is unloaded once it has gone 1 hour unused with no lease, no endpoint session and no sync-provider role; sync providers are never evicted by idle expiry or by the cap; the reaper does not wake while nothing can expire; a new instance of a module loads only after every earlier instance of it has finished tearing down.",
+      "invariant": "An in-process instance is unloaded 1 hour after its last command or endpoint session ends, unless it is leased or running as a sync provider; the reaper does not wake while nothing can expire; a new instance of a module, and deletion of that module files, wait for its previous teardown for at most 60 s.",
       "next_step": "Daemon and Android app-process footprint and thread count after a snippets or AI tools command, at 5 minutes and at 61 minutes idle; latency of a command issued during an update of the same module.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6381,7 +6384,7 @@
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart"
       ],
-      "invariant": "A History rebuild stops reading once a row ranked after every captured anchor in the old ledger, unmoved since then, has been read, or at the old ledger length when no anchor was in it; while any anchor exists rebuild behaviour is unchanged.",
+      "invariant": "A History rebuild follows its first anchor or another anchor that kept its place, and stops reading once a row ranked after every captured anchor in the old ledger, unmoved since then, has been read, or at the old ledger length when no anchor was in it; the Relevance sort and Quick Paste keep the unbounded walk.",
       "next_step": "Count IPC page reads and peak resident pages per rebuild on a 10,000-row history with the anchor deleted remotely and with a 300-row insertion above it.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6568,7 +6571,7 @@
         "crates/copypaste-cloud/src/rest/client.rs",
         "crates/copypaste-cloud/src/sync/pull.rs"
       ],
-      "invariant": "A pull page holds less than two maximal rows with oversized strings dropped and their rows refused, at most two items of plaintext wait to be merged, and one pull makes at most 50 requests.",
+      "invariant": "A pull page holds less than two maximal rows with oversized strings dropped and their rows refused, at most two items of plaintext wait to be merged, one pull makes at most 50 requests, and the cursor follows the order the server returned.",
       "next_step": "Daemon and Android app peak, steady state and growth while catching up on 100 one-megabyte and 100 four-megabyte images, before and after.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6748,6 +6751,93 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-180",
+      "title": "Peer networking follows the sync switch",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime peer_sync",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/peer_sync.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-runtime/src/p2p.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-sync/src/peer_driver.rs",
+        "crates/copypaste-daemon/src/main.rs",
+        "crates/copypaste-p2p/src/node/listen.rs",
+        "crates/copypaste-p2p/src/node/pairing_ceremony.rs"
+      ],
+      "invariant": "The peer port, accept loop, reachability probes, relay presence, outgoing scheduler and LAN discovery run only while sync is on, and start and stop with the switch without a restart; a paused scheduler waits for a wake instead of a timer; stopping the listener leaves no busy pairing state, no unconfirmed stored pairing and no advertised address.",
+      "next_step": "With sync off and a peer paired, record wakeups, open sockets, multicast membership and footprint over 10 idle minutes, before and after, on the Android app process and on the macOS and Windows daemon separately.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Runtime, peer and daemon tests passed and the Android arm64 bridge check compiled; daemon startup and shutdown not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-181",
+      "title": "In-process image preview without base64",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge Android host",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "crates/copypaste-flutter-bridge/src/api/mod.rs",
+        "crates/copypaste-flutter-bridge/src/client.rs"
+      ],
+      "invariant": "On Android a clip image preview reaches Dart as the PNG bytes produced by the same admission-gated handler as the IPC method, with no text encoding or decoding in between.",
+      "next_step": "App process peak and steady native heap while scrolling an image-heavy History on a device, before and after.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Runtime test passed and the Android arm64 bridge check compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-182",
+      "title": "OCR decode reuses the RGB8 buffer",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs"
+      ],
+      "invariant": "Image decoding for OCR never holds two full-resolution pixel buffers at once when the decoder already gives 8-bit RGB.",
+      "next_step": "OCR worker peak footprint on a 16-megapixel JPEG, before and after, on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Module compiled and passed Clippy offline; OCR results not run; native resource qualification pending."
     }
   ]
 }
