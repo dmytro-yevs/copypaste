@@ -12,9 +12,11 @@ class UiMemoryController extends ChangeNotifier {
   UiMemoryController({
     required ValueListenable<bool> visible,
     required bool Function() canSuspend,
+    VoidCallback? beforeSuspend,
     bool startHidden = false,
   }) : _visible = visible,
        _canSuspend = canSuspend,
+       _beforeSuspend = beforeSuspend,
        _delay = startHidden ? startHiddenDelay : hiddenDelay {
     _visible.addListener(_visibilityChanged);
     _visibilityChanged();
@@ -25,6 +27,10 @@ class UiMemoryController extends ChangeNotifier {
 
   final ValueListenable<bool> _visible;
   final bool Function() _canSuspend;
+
+  /// Closes passive presentation, such as read-only overlays, that
+  /// [_canSuspend] accepted.
+  final VoidCallback? _beforeSuspend;
   Duration _delay;
   bool _seenHidden = false;
   Timer? _deadline;
@@ -55,6 +61,7 @@ class UiMemoryController extends ChangeNotifier {
         _schedule();
         return;
       }
+      _beforeSuspend?.call();
       _suspended = true;
       _delay = hiddenDelay;
       notifyListeners();

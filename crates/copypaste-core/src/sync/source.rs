@@ -616,6 +616,17 @@ impl SyncSource for StoreSource {
         })
     }
 
+    fn stored_sizes(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SyncError> {
+        super::blocking(|| {
+            self.store
+                .stored_sizes(ids)
+                .map_err(|e| store_error(e, "could not read item sizes for a sync session"))
+        })
+    }
+
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
         Ok(self.apply_batch(vec![item])?.pop().unwrap_or(false))
     }

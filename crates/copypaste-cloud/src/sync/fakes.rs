@@ -15,7 +15,7 @@ use std::time::Duration;
 use super::*;
 use crate::auth::{now_ms, Session};
 use crate::crypto::{encrypt_row, SyncKey};
-use crate::rest::CloudItem;
+use crate::rest::{CloudItem, RowPage};
 use crate::CloudConfig;
 use zeroize::Zeroizing;
 
@@ -298,6 +298,12 @@ pub(super) struct FakeRest {
     pub(super) fetches: AtomicUsize,
     /// Tokens seen, so a test can assert the refreshed one was used.
     pub(super) tokens: Mutex<Vec<String>>,
+    /// Cut every page after this many rows, as the byte budget does.
+    pub(super) cut_after: Option<usize>,
+    /// Rows delivered as the transport delivers an oversized one.
+    pub(super) oversized: Vec<String>,
+    /// Order and filter ids case-insensitively, as a database collation does.
+    pub(super) collated: bool,
 }
 
 impl FakeRest {
@@ -330,13 +336,24 @@ impl FakeRest {
         }
     }
 
+    /// Ties under the collation are broken by bytes, as a deterministic
+    /// database collation does.
+    fn id_key(&self, id: &str) -> (String, String) {
+        let folded = if self.collated {
+            id.to_ascii_lowercase()
+        } else {
+            id.to_owned()
+        };
+        (folded, id.to_owned())
+    }
+
     pub(super) fn sorted_rows(&self) -> Vec<CloudItem> {
         let mut rows: Vec<CloudItem> = self.rows.lock().unwrap().values().cloned().collect();
         // A total, tie-free order — INV-N1.
         rows.sort_by(|a, b| {
             a.created_at
                 .cmp(&b.created_at)
-                .then_with(|| a.item_id.cmp(&b.item_id))
+                .then_with(|| self.id_key(&a.item_id).cmp(&self.id_key(&b.item_id)))
         });
         rows
     }
@@ -351,20 +368,38 @@ impl RestApi for FakeRest {
         since_ms: i64,
         after_item_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<CloudItem>, TransportFault> {
+    ) -> Result<RowPage, TransportFault> {
         if let Some(fault) = self.next(token) {
             return Err(fault);
         }
         self.fetches.fetch_add(1, Ordering::SeqCst);
-        Ok(self
+        let mut page = RowPage::default();
+        for row in self
             .sorted_rows()
             .into_iter()
             .filter(|r| match after_item_id {
-                Some(id) => (r.created_at, r.item_id.as_str()) > (since_ms, id),
+                Some(id) => (r.created_at, self.id_key(&r.item_id)) > (since_ms, self.id_key(id)),
                 None => r.created_at >= since_ms,
             })
-            .take(limit as usize)
-            .collect())
+        {
+            if page.rows.len() == limit as usize {
+                break;
+            }
+            if Some(page.rows.len()) == self.cut_after {
+                page.cut = true;
+                break;
+            }
+            if self.oversized.contains(&row.item_id) {
+                page.oversized.push(row.item_id.clone());
+                page.rows.push(CloudItem {
+                    ciphertext: String::new(),
+                    ..row
+                });
+            } else {
+                page.rows.push(row);
+            }
+        }
+        Ok(page)
     }
 
     /// Validates like the real transport does, so a test cannot upload a row

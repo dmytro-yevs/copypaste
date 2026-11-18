@@ -95,6 +95,9 @@ impl StoreView {
     /// Bound plaintext crossing a native provider boundary while retaining a
     /// resumable keyset for every deferred row. Rows the store withholds from
     /// cloud are passed over without being offered.
+    ///
+    /// Rows are chosen from their headers and opened one at a time, so a
+    /// round holds the budget plus one row rather than a whole scan page.
     pub fn scan_bounded(
         &self,
         store: &Store,
@@ -103,6 +106,27 @@ impl StoreView {
         started_epoch: u64,
         previously_unreadable: &UnreadableUploads,
         max_bytes: usize,
+    ) -> Result<Scan, SyncError> {
+        self.scan_loading(
+            store,
+            since_ms,
+            after_item_id,
+            started_epoch,
+            previously_unreadable,
+            max_bytes,
+            &mut |id: &str| store.version(id),
+        )
+    }
+
+    fn scan_loading(
+        &self,
+        store: &Store,
+        since_ms: i64,
+        after_item_id: Option<&str>,
+        started_epoch: u64,
+        previously_unreadable: &UnreadableUploads,
+        max_bytes: usize,
+        load: &mut Load<'_>,
     ) -> Result<Scan, SyncError> {
         // A record that would not parse lost ids whose rows the floor has
         // already passed. Rescanning from the start is the only way back to
@@ -127,10 +151,15 @@ impl StoreView {
         if !retried.is_empty() {
             for chunk in retried.chunks(UPLOAD_SCAN_LIMIT as usize) {
                 let withheld = store.cloud_withheld_among(chunk).map_err(source_error)?;
-                for row in store.versions(chunk).map_err(source_error)? {
-                    if withheld.contains(&row.id) || !settings.sync_allows(&row.content_type, &[]) {
+                for header in store.version_headers(chunk).map_err(source_error)? {
+                    if withheld.contains(&header.id)
+                        || !settings.sync_allows(&header.content_type, &[])
+                    {
                         continue;
                     }
+                    let Some(row) = reload(load, &header, &settings, false)? else {
+                        continue;
+                    };
                     match self.to_local(&row) {
                         Some(item)
                             if items
@@ -168,12 +197,13 @@ impl StoreView {
                 &mut unreadable,
                 &mut items,
                 max_bytes,
+                load,
             )?;
             unreadable.sweep = walked;
         }
 
         let rows = store
-            .versions_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
+            .version_headers_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
             .map_err(source_error)?;
         let mut offer = Offer {
             truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
@@ -188,12 +218,17 @@ impl StoreView {
         let mut behind = offer.started.clone();
         let mut bytes = items.iter().map(|item| item.content.len()).sum::<usize>();
         let withheld = withheld(store, &rows)?;
-        for row in &rows {
-            if !previously_unreadable.ids.contains(&row.id)
-                && !withheld.contains(&row.id)
-                && settings.sync_allows(&row.content_type, &[])
+        for header in &rows {
+            let row = if !previously_unreadable.ids.contains(&header.id)
+                && !withheld.contains(&header.id)
+                && settings.sync_allows(&header.content_type, &[])
             {
-                match self.to_local(row) {
+                reload(load, header, &settings, true)?
+            } else {
+                None
+            };
+            if let Some(row) = row {
+                match self.to_local(&row) {
                     Some(item) => {
                         if bytes.saturating_add(item.content.len()) > max_bytes {
                             offer.last = behind.clone();
@@ -210,7 +245,7 @@ impl StoreView {
                     }
                 }
             }
-            behind = keyset_of(row);
+            behind = keyset_of(header);
         }
         unreadable.settle_total();
         if unreadable.total > 0 {
@@ -239,6 +274,7 @@ impl StoreView {
     /// boundary — or running out of rows — ends the cycle, which settles the
     /// count and sends the cursor back to `from`. `None` retires the walk: a
     /// cycle that counted nothing has nothing left behind to come back for.
+    #[allow(clippy::too_many_arguments)]
     fn walk_left_behind(
         &self,
         store: &Store,
@@ -248,10 +284,11 @@ impl StoreView {
         found: &mut UnreadableUploads,
         items: &mut Vec<LocalItem>,
         max_bytes: usize,
+        load: &mut Load<'_>,
     ) -> Result<Option<Sweep>, SyncError> {
         let settings = self.shared.settings();
         let page = store
-            .versions_after(
+            .version_headers_after(
                 sweep.next.created_at,
                 sweep.next.item_id.as_deref(),
                 UPLOAD_SCAN_LIMIT,
@@ -259,20 +296,24 @@ impl StoreView {
             .map_err(source_error)?;
         let mut cycled = page.len() < UPLOAD_SCAN_LIMIT as usize;
         let withheld = withheld(store, &page)?;
-        for row in &page {
-            let at = keyset_of(row);
+        for header in &page {
+            let at = keyset_of(header);
             if at > *floor {
                 cycled = true;
                 break;
             }
-            if previously_unreadable.ids.contains(&row.id)
-                || withheld.contains(&row.id)
-                || !settings.sync_allows(&row.content_type, &[])
+            if previously_unreadable.ids.contains(&header.id)
+                || withheld.contains(&header.id)
+                || !settings.sync_allows(&header.content_type, &[])
             {
                 sweep.next = at;
                 continue;
             }
-            match self.to_local(row) {
+            let Some(row) = reload(load, header, &settings, true)? else {
+                sweep.next = at;
+                continue;
+            };
+            match self.to_local(&row) {
                 Some(item) => {
                     if items.iter().map(|item| item.content.len()).sum::<usize>()
                         + item.content.len()
@@ -415,6 +456,26 @@ impl StoreView {
             source_app_name: row.app_name.clone(),
         })
     }
+}
+
+/// Reads one row with its payload; `None` when it has gone since its header.
+type Load<'a> =
+    dyn FnMut(&str) -> Result<Option<copypaste_core::StoredItem>, copypaste_core::StoreError> + 'a;
+
+/// The row behind `header` as it is now, or `None` when it has gone or left
+/// the sync filter. With `in_order`, a row restamped past its header is also
+/// `None`: a keyset round must upload in ascending order, and the main scan
+/// offers the row again at its new position.
+fn reload(
+    load: &mut Load<'_>,
+    header: &copypaste_core::StoredItem,
+    settings: &copypaste_ipc::ConfigData,
+    in_order: bool,
+) -> Result<Option<copypaste_core::StoredItem>, SyncError> {
+    Ok(load(&header.id).map_err(source_error)?.filter(|row| {
+        (!in_order || row.created_at <= header.created_at)
+            && settings.sync_allows(&row.content_type, &[])
+    }))
 }
 
 fn keyset_of(row: &copypaste_core::StoredItem) -> UploadFloor {
@@ -647,6 +708,114 @@ mod tests {
             )
             .unwrap();
         assert_eq!(second.items[0].item_id, "b");
+    }
+
+    /// A page of headers is read, but a payload only for a row the budget is
+    /// still deciding about: the offered rows and the first one deferred.
+    #[test]
+    fn a_byte_bounded_scan_opens_only_the_rows_it_decides_on() {
+        let d = device();
+        for (id, stamp) in [("a", 1000), ("b", 1001), ("c", 1002), ("d", 1003)] {
+            d.put(id, stamp, true);
+        }
+        let budget = 2 * "clipboard a".len();
+        let mut loaded = Vec::new();
+        let scan = d
+            .view()
+            .scan_loading(
+                &d.store,
+                0,
+                None,
+                0,
+                &UnreadableUploads::default(),
+                budget,
+                &mut |id: &str| {
+                    loaded.push(id.to_owned());
+                    d.store.version(id)
+                },
+            )
+            .unwrap();
+
+        let offered: Vec<_> = scan.items.iter().map(|item| item.item_id.clone()).collect();
+        assert_eq!(offered, ["a", "b"]);
+        assert_eq!(loaded, ["a", "b", "c"]);
+        assert!(scan.offer.truncated);
+        assert_eq!(scan.offer.last.item_id.as_deref(), Some("b"));
+        let public = d
+            .view()
+            .scan_bounded(&d.store, 0, None, 0, &UnreadableUploads::default(), budget)
+            .unwrap();
+        assert_eq!(
+            (public.offer.truncated, public.offer.last),
+            (scan.offer.truncated, scan.offer.last)
+        );
+    }
+
+    /// A row hard-deleted or restamped between its header and its payload is
+    /// passed over and the cursor moves past it; a restamped row is offered
+    /// later at its new position, which keeps a round's uploads ascending.
+    #[test]
+    fn a_row_that_changed_after_its_header_is_passed_over() {
+        let d = device();
+        for (id, stamp) in [("a", 1000), ("b", 1001), ("c", 1002), ("d", 1003)] {
+            d.put(id, stamp, true);
+        }
+        let scan = d
+            .view()
+            .scan_loading(
+                &d.store,
+                0,
+                None,
+                0,
+                &UnreadableUploads::default(),
+                usize::MAX,
+                &mut |id: &str| match id {
+                    "b" => Ok(None),
+                    "c" => Ok(d.store.version(id)?.map(|mut row| {
+                        row.created_at = 5_000;
+                        row
+                    })),
+                    _ => d.store.version(id),
+                },
+            )
+            .unwrap();
+
+        let offered: Vec<_> = scan.items.iter().map(|item| item.item_id.clone()).collect();
+        assert_eq!(offered, ["a", "d"]);
+        assert!(!scan.offer.truncated);
+        assert_eq!(scan.offer.last.item_id.as_deref(), Some("d"));
+        assert_eq!(scan.unreadable.total, 0);
+    }
+
+    /// The retry list goes through the same loader, one row at a time.
+    #[test]
+    fn a_retried_row_is_loaded_through_the_loader() {
+        let d = device();
+        d.put("a", 1000, true);
+        d.put("b", 1001, true);
+        let mut previous = UnreadableUploads::default();
+        previous.track("a");
+        let mut loaded = Vec::new();
+        let scan = d
+            .view()
+            .scan_loading(
+                &d.store,
+                0,
+                None,
+                0,
+                &previous,
+                usize::MAX,
+                &mut |id: &str| {
+                    loaded.push(id.to_owned());
+                    d.store.version(id)
+                },
+            )
+            .unwrap();
+
+        let offered: Vec<_> = scan.items.iter().map(|item| item.item_id.clone()).collect();
+        assert_eq!(offered, ["a", "b"]);
+        assert_eq!(loaded, ["a", "b"]);
+        assert!(scan.unreadable.ids.is_empty());
     }
 
     #[test]

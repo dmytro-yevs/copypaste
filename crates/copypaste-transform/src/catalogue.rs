@@ -606,6 +606,29 @@ mod tests {
     }
 
     #[test]
+    fn tree_transforms_refuse_input_past_their_bound() {
+        let ctx = Context::new();
+        let at_bound = "a".repeat(crate::MAX_TREE_INPUT_BYTES);
+        let yaml = Step::current("structure.yaml_to_json").unwrap();
+        assert!(apply(&yaml, &at_bound, &ctx).is_ok());
+        let over = format!("{at_bound}a");
+        for id in [
+            "structure.yaml_to_json",
+            "markup.rich_to_plain",
+            "markup.html_to_markdown",
+        ] {
+            assert_eq!(
+                apply(&Step::current(id).unwrap(), &over, &ctx),
+                Err(TransformError::InputTooLarge {
+                    bytes: crate::MAX_TREE_INPUT_BYTES + 1,
+                    limit: crate::MAX_TREE_INPUT_BYTES,
+                }),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
     fn a_set_cancel_flag_stops_the_run() {
         let flag = AtomicBool::new(true);
         let ctx = Context::new().with_cancel(&flag);

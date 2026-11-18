@@ -86,20 +86,12 @@ impl SupabaseRest {
             validate_id(after)?;
             query.push(("device_id", format!("gt.{after}")));
         }
-        let body = self
-            .send(token, || {
-                self.http
-                    .get(url.clone())
-                    .query(&query)
-                    .header("Accept", "application/json")
-            })
-            .await?;
         // The transport page itself is bounded before parsing individual rows.
-        if body.len() > GROUP_CATALOG_PAGE_SIZE * 512 {
-            return Err(RestError::Malformed);
-        }
+        let body = self
+            .fetch_capped(token, &url, &query, GROUP_CATALOG_PAGE_SIZE * 512)
+            .await?;
         let rows: Vec<GroupVersion> =
-            serde_json::from_str(&body).map_err(|_| RestError::Malformed)?;
+            serde_json::from_slice(&body).map_err(|_| RestError::Malformed)?;
         if rows.len() > GROUP_CATALOG_PAGE_SIZE {
             return Err(RestError::Malformed);
         }
@@ -123,17 +115,15 @@ impl SupabaseRest {
             ("limit", GROUP_PAGE_SIZE.to_string()),
         ];
         let body = self
-            .send(token, || {
-                self.http
-                    .get(url.clone())
-                    .query(&query)
-                    .header("Accept", "application/json")
-            })
+            .fetch_capped(
+                token,
+                &url,
+                &query,
+                GROUP_PAGE_SIZE * (MAX_GROUP_BYTES * 2 + 512),
+            )
             .await?;
-        if body.len() > GROUP_PAGE_SIZE * (MAX_GROUP_BYTES * 2 + 512) {
-            return Err(RestError::Malformed);
-        }
-        let rows: Vec<GroupRow> = serde_json::from_str(&body).map_err(|_| RestError::Malformed)?;
+        let rows: Vec<GroupRow> =
+            serde_json::from_slice(&body).map_err(|_| RestError::Malformed)?;
         if rows.len() > GROUP_PAGE_SIZE
             || rows.iter().any(|row| !device_ids.contains(&row.device_id))
         {
@@ -153,5 +143,24 @@ impl SupabaseRest {
         })
         .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::testkit::{client, TOKEN};
+    use super::*;
+    use crate::auth::stub::{Reply, Stub};
+
+    #[tokio::test]
+    async fn a_catalog_page_over_its_cap_is_refused_while_streaming() {
+        let digest = "0".repeat(GROUP_CATALOG_PAGE_SIZE * 512);
+        let body = format!(r#"[{{"device_id":"a","ciphertext_digest":"{digest}"}}]"#);
+        let stub = Stub::start(vec![Reply::json(200, &body)], 1).await;
+        let err = client(&stub)
+            .fetch_group_catalog(TOKEN, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RestError::Malformed), "{err:?}");
     }
 }

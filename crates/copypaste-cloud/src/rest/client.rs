@@ -5,7 +5,9 @@
 //! each carries the bug it prevents.
 
 use std::fmt;
+use std::future::Future;
 
+use super::body::{read_capped, read_prefix, read_row_page, BodyError, RowPage};
 use super::error::{classify, RestError};
 use super::item::{validate_item_id, CloudItem};
 use super::{CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, UPSERT_CHUNK};
@@ -15,6 +17,9 @@ use backon::{ExponentialBuilder, Retryable};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
 use tokio_util::bytes::Bytes;
+
+/// Reply bytes a write drains before its connection is released.
+const WRITE_REPLY_BYTES: usize = 1024;
 
 /// PostgREST client for one Supabase project.
 #[derive(Clone)]
@@ -113,13 +118,15 @@ impl SupabaseRest {
     ///
     /// `limit` is clamped to [`MAX_PAGE_LIMIT`]; a full page means "there may
     /// be more", and the caller should drain rather than wait for the next tick.
+    /// So does a page cut at [`PAGE_BYTES`](super::body::PAGE_BYTES), which is
+    /// read as a stream and stops at the first row boundary past that budget.
     pub async fn fetch_since(
         &self,
         token: &str,
         since_ms: i64,
         after_item_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<CloudItem>, RestError> {
+    ) -> Result<RowPage, RestError> {
         let limit = limit.clamp(1, MAX_PAGE_LIMIT);
         let since_ms = since_ms.max(0);
         let url = self.table_url();
@@ -136,21 +143,25 @@ impl SupabaseRest {
             None => query.push(("created_at", format!("gte.{since_ms}"))),
         }
 
-        let body = self
-            .send(token, || {
-                self.http
-                    .get(url.clone())
-                    .query(&query)
-                    .header("Accept", "application/json")
-            })
+        let page = self
+            .send_reading(
+                token,
+                || {
+                    self.http
+                        .get(url.clone())
+                        .query(&query)
+                        .header("Accept", "application/json")
+                },
+                read_row_page,
+            )
             .await?;
-
-        let items: Vec<CloudItem> = serde_json::from_str(&body).map_err(|_| {
-            tracing::warn!("the row page was not the expected JSON array");
-            RestError::Malformed
-        })?;
-        tracing::debug!(rows = items.len(), since_ms, "fetched a page");
-        Ok(items)
+        tracing::debug!(
+            rows = page.rows.len(),
+            cut = page.cut,
+            since_ms,
+            "fetched a page"
+        );
+        Ok(page)
     }
 
     /// Write `items`, keyed on the conflict target.
@@ -211,11 +222,60 @@ impl SupabaseRest {
     /// call site can forget one: the `apikey` gets the request past the API
     /// gateway, and the user's JWT is what RLS pivots on — the anon key alone
     /// is refused outright by the policies in the module docs.
-    pub(super) async fn send<F>(&self, token: &str, build: F) -> Result<String, RestError>
+    pub(super) async fn send<F>(&self, token: &str, build: F) -> Result<(), RestError>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
+        // Writes ask for `return=minimal`; whatever comes back is not used.
+        self.send_reading(token, build, |response| async move {
+            read_prefix(response, WRITE_REPLY_BYTES).await;
+            Ok(())
+        })
+        .await
+    }
+
+    /// A GET whose JSON body is refused as soon as it passes `cap`.
+    pub(super) async fn fetch_capped(
+        &self,
+        token: &str,
+        url: &url::Url,
+        query: &[(&str, String)],
+        cap: usize,
+    ) -> Result<Vec<u8>, RestError> {
+        self.send_reading(
+            token,
+            || {
+                self.http
+                    .get(url.clone())
+                    .query(query)
+                    .header("Accept", "application/json")
+            },
+            |response| async move {
+                read_capped(response, cap)
+                    .await
+                    .map_err(|error| match error {
+                        BodyError::TooLarge => RestError::Malformed,
+                        BodyError::Network(error) => RestError::from_reqwest(error),
+                    })
+            },
+        )
+        .await
+    }
+
+    /// [`SupabaseRest::send`], with the successful body consumed by `read`.
+    pub(super) async fn send_reading<F, R, Fut, T>(
+        &self,
+        token: &str,
+        build: F,
+        read: R,
+    ) -> Result<T, RestError>
+    where
+        F: Fn() -> reqwest::RequestBuilder,
+        R: Fn(reqwest::Response) -> Fut,
+        Fut: Future<Output = Result<T, RestError>>,
+    {
         let build = &build;
+        let read = &read;
         let attempt = || async move {
             let sent = build()
                 .timeout(REST_TIMEOUT)
@@ -225,7 +285,7 @@ impl SupabaseRest {
                 .await;
 
             match sent {
-                Ok(response) => classify(response).await,
+                Ok(response) => read(classify(response).await?).await,
                 Err(err) => Err(RestError::from_reqwest(err)),
             }
         };
@@ -427,7 +487,8 @@ mod tests {
         let rows = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
-            .expect("fetch");
+            .expect("fetch")
+            .rows;
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].item_id, "a1");

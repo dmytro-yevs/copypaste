@@ -7,10 +7,12 @@ use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::Node;
 use copypaste_sync::cadence::AdaptiveCadence;
 use copypaste_sync::peer_driver::PeerSyncDriver;
+use tokio::sync::Notify;
 
 pub struct P2p {
     node: Arc<Node>,
     pub(crate) driver: Arc<PeerSyncDriver>,
+    sync_switch: Notify,
 }
 
 impl std::fmt::Debug for P2p {
@@ -24,6 +26,7 @@ impl P2p {
         Self {
             node: Arc::new(node),
             driver: PeerSyncDriver::new(),
+            sync_switch: Notify::new(),
         }
     }
 
@@ -68,8 +71,11 @@ impl P2p {
         self.driver.wake_signal().await;
     }
 
-    /// The relay runs only while sync is on and an address is set.
-    pub(crate) fn configure_relay(&self, config: &copypaste_ipc::ConfigData) {
+    /// The relay runs only while sync is on and an address is set; LAN
+    /// discovery and nearby pairing only while sync is on and visible.
+    pub(crate) fn apply_network_settings(&self, config: &copypaste_ipc::ConfigData) {
+        self.node
+            .set_lan_visibility(config.lan_visibility && config.sync_enabled);
         let url = (config.sync_enabled && !config.relay_url.is_empty())
             .then_some(config.relay_url.as_str());
         self.node.relay().set_port_mapping(config.port_mapping);
@@ -80,6 +86,12 @@ impl P2p {
 
     pub(crate) fn sync_enabled_changed(&self, enabled: bool) {
         self.driver.set_enabled(enabled);
+        self.sync_switch.notify_one();
+    }
+
+    /// Resolves after the sync switch changed; one change is stored.
+    pub(crate) async fn sync_switch_changed(&self) {
+        self.sync_switch.notified().await;
     }
 
     pub fn sync_cycle(&self) -> SyncCycle {

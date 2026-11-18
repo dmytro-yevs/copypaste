@@ -46,9 +46,9 @@ impl BaseNet for DbNet {
 }
 
 impl DbNet {
-    pub fn get_text_boxes(
+    pub fn get_text_boxes<I: image::GenericImageView<Pixel = image::Rgb<u8>>>(
         &mut self,
-        img_src: &image::RgbImage,
+        img_src: &I,
         scale: &ScaleParam,
         box_score_thresh: f32,
         box_thresh: f32,
@@ -58,15 +58,12 @@ impl DbNet {
             return Err(OcrError::SessionNotInitialized);
         };
 
-        let src_resize = image::imageops::resize(
-            img_src,
-            scale.dst_width,
-            scale.dst_height,
-            image::imageops::FilterType::Triangle,
-        );
+        let src_resize = Self::resize_input(img_src, scale);
 
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+        let (rows, cols) = (src_resize.height(), src_resize.width());
+        drop(src_resize);
 
         let tensor = Tensor::from_array(input_tensors)?;
 
@@ -74,8 +71,8 @@ impl DbNet {
 
         let text_boxes = Self::get_text_boxes_core(
             &outputs,
-            src_resize.height(),
-            src_resize.width(),
+            rows,
+            cols,
             &ScaleParam::new(
                 scale.src_width,
                 scale.src_height,
@@ -90,6 +87,19 @@ impl DbNet {
         )?;
 
         Ok(text_boxes)
+    }
+
+    /// The exact image the detection model receives.
+    pub fn resize_input<I: image::GenericImageView<Pixel = image::Rgb<u8>>>(
+        img_src: &I,
+        scale: &ScaleParam,
+    ) -> image::RgbImage {
+        image::imageops::resize(
+            img_src,
+            scale.dst_width,
+            scale.dst_height,
+            image::imageops::FilterType::Triangle,
+        )
     }
 
     fn get_text_boxes_core(

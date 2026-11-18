@@ -60,7 +60,7 @@ void main() {
     );
   });
 
-  test('memo does not retain oversized source or prior result', () {
+  test('memo reuses an oversized result and drops the prior one', () {
     final memo = HistoryCodeHighlightMemo();
     const theme = ThemeData();
     const small = 'fn main() {}';
@@ -68,8 +68,14 @@ void main() {
     final large = List.filled(200001, 'a').join();
     final oversized = memo.highlight(large, theme, json: true);
     expect(oversized.span.toPlainText(), large);
+    expect(identical(oversized.span.text, large), isTrue);
     expect(
       identical(memo.highlight(large, theme, json: true), oversized),
+      isTrue,
+    );
+    final reloaded = String.fromCharCodes(large.codeUnits);
+    expect(
+      identical(memo.highlight(reloaded, theme, json: true), oversized),
       isFalse,
     );
     expect(identical(memo.highlight(small, theme), first), isFalse);

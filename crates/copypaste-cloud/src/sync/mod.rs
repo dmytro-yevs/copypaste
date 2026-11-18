@@ -334,7 +334,7 @@ mod tests {
             since_ms: i64,
             after_item_id: Option<&str>,
             limit: u32,
-        ) -> Result<Vec<CloudItem>, TransportFault> {
+        ) -> Result<crate::rest::RowPage, TransportFault> {
             self.0
                 .fetch_since(token, since_ms, after_item_id, limit)
                 .await

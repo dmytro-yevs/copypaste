@@ -7,7 +7,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Condvar, Mutex,
+        mpsc, Arc, Condvar, Mutex, OnceLock,
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -17,7 +17,7 @@ type ProcessTermination = Arc<dyn Fn() + Send + Sync>;
 type ProcessControl = Option<(String, ProcessTermination)>;
 
 pub(crate) const IDLE_DELAY: Duration = Duration::from_secs(60);
-const REQUEST_LIMIT: Duration = Duration::from_secs(60);
+pub(crate) const REQUEST_LIMIT: Duration = Duration::from_secs(60);
 
 /// Platform adapters create one private channel and own process termination.
 pub trait InferenceLauncher: Send + Sync {
@@ -152,7 +152,8 @@ struct ClientState {
 
 pub(crate) struct InferenceClient {
     state: Arc<ClientState>,
-    reaper: Option<JoinHandle<()>>,
+    /// Started by the first request; `None` inside when it could not start.
+    reaper: OnceLock<Option<JoinHandle<()>>>,
 }
 
 impl InferenceClient {
@@ -165,12 +166,22 @@ impl InferenceClient {
             stopped: AtomicBool::new(false),
             wake: Condvar::new(),
         });
-        let owner = Arc::clone(&state);
-        let reaper = std::thread::Builder::new()
-            .name("inference-idle".into())
-            .spawn(move || reap_idle(owner))
-            .ok();
-        Self { state, reaper }
+        Self {
+            state,
+            reaper: OnceLock::new(),
+        }
+    }
+
+    fn reaper_started(&self) -> bool {
+        self.reaper
+            .get_or_init(|| {
+                let owner = Arc::clone(&self.state);
+                std::thread::Builder::new()
+                    .name("inference-idle".into())
+                    .spawn(move || reap_idle(owner))
+                    .ok()
+            })
+            .is_some()
     }
 
     pub fn set_launcher(&self, launcher: Arc<dyn InferenceLauncher>) {
@@ -199,7 +210,7 @@ impl InferenceClient {
             &request.invocation.preferences,
         ))
         .map_err(|_| ModuleError::State)?;
-        if self.reaper.is_none() {
+        if !self.reaper_started() {
             return Err(ModuleError::Load);
         }
         let mut active = self.state.active.lock().map_err(|_| ModuleError::State)?;
@@ -312,7 +323,7 @@ impl Drop for InferenceClient {
         self.state.stopped.store(true, Ordering::Release);
         self.stop(None);
         self.state.wake.notify_all();
-        if let Some(reaper) = self.reaper.take() {
+        if let Some(reaper) = self.reaper.take().flatten() {
             let _ = reaper.join();
         }
     }
@@ -530,6 +541,7 @@ pub(crate) mod tests {
     #[test]
     fn idle_deadline_releases_worker_and_next_request_reloads_without_losing_results() {
         let (client, launched, stopped, _) = fixture();
+        assert!(client.reaper.get().is_none());
         let expected = client
             .invoke(request("first"), client.generation())
             .unwrap();

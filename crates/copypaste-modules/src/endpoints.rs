@@ -138,6 +138,8 @@ struct Link {
     connection: String,
     instance: Arc<ModuleInstance>,
     closed: AtomicBool,
+    // Dropped after `instance`, so the idle period starts once it is released.
+    _use: crate::instances::SessionUse,
 }
 
 impl EndpointSession {
@@ -145,6 +147,7 @@ impl EndpointSession {
         connection: String,
         instance: Arc<ModuleInstance>,
         outbound: Outbound,
+        session_use: crate::instances::SessionUse,
     ) -> Self {
         Self {
             link: EndpointLink {
@@ -152,6 +155,7 @@ impl EndpointSession {
                     connection,
                     instance,
                     closed: AtomicBool::new(false),
+                    _use: session_use,
                 }),
             },
             outbound,

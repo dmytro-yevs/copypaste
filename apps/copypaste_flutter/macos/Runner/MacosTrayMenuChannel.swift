@@ -5,6 +5,8 @@ final class MacosTrayMenuChannel {
   typealias Activate = (NSRunningApplication?, NSRect) -> Void
   private let channel: FlutterMethodChannel
   private var binding: TrayQuickPasteBinding?
+  private weak var observedMenu: NSMenu?
+  private var closeObserver: NSObjectProtocol?
   private let activate: Activate
 
   init(binaryMessenger: FlutterBinaryMessenger, activate: @escaping Activate = { _, _ in }) {
@@ -41,6 +43,7 @@ final class MacosTrayMenuChannel {
         if call.method == "showImages" {
           let menu = Unmanaged<NSMenu>.fromOpaque(pointer).takeUnretainedValue()
           Self.showImages(in: menu)
+          if menu.supermenu == nil { self.observeClosing(of: menu) }
         } else {
           let item = Unmanaged<NSStatusItem>.fromOpaque(pointer).takeUnretainedValue()
           guard let button = item.button else {
@@ -63,6 +66,17 @@ final class MacosTrayMenuChannel {
   deinit {
     binding?.detach()
     channel.setMethodCallHandler(nil)
+    if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+  }
+
+  // A closed tray menu releases its rendered rows and glyph images at once.
+  private func observeClosing(of menu: NSMenu) {
+    guard menu !== observedMenu else { return }
+    if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+    observedMenu = menu
+    closeObserver = NotificationCenter.default.addObserver(
+      forName: NSMenu.didEndTrackingNotification, object: menu, queue: .main
+    ) { _ in MacosMemoryPressure.shared.releaseFreedMemory() }
   }
 
   static func isPrimaryActivation(

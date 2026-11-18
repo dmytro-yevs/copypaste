@@ -53,16 +53,19 @@ impl PeerSyncDriver {
             if *shutdown.borrow() {
                 return;
             }
-            let wait = if host.peers().is_empty() {
-                NO_PEERS_INTERVAL
+            // A disabled host waits for the wake that re-enabling sends.
+            let wait = if !host.enabled() {
+                None
+            } else if host.peers().is_empty() {
+                Some(NO_PEERS_INTERVAL)
             } else {
-                self.cadence.interval()
+                Some(self.cadence.interval())
             };
             let woke = tokio::select! {
                 biased;
                 _ = shutdown.changed() => return,
                 _ = self.wake.notified() => true,
-                _ = tokio::time::sleep(wait) => false,
+                _ = tokio::time::sleep(wait.unwrap_or_default()), if wait.is_some() => false,
             };
             if !host.enabled() {
                 continue;
@@ -137,9 +140,11 @@ mod tests {
     struct EmptyHost {
         enabled: AtomicBool,
         reconciled: AtomicUsize,
+        checks: AtomicUsize,
     }
     impl PeerSyncHost for EmptyHost {
         fn enabled(&self) -> bool {
+            self.checks.fetch_add(1, Ordering::SeqCst);
             self.enabled.load(Ordering::SeqCst)
         }
         fn peers(&self) -> Vec<Peer> {
@@ -161,6 +166,7 @@ mod tests {
         let host = Arc::new(EmptyHost {
             enabled: AtomicBool::new(true),
             reconciled: AtomicUsize::new(0),
+            checks: AtomicUsize::new(0),
         });
         let (stop, receiver) = watch::channel(false);
         let task = tokio::spawn(Arc::clone(&driver).run(Arc::clone(&host), receiver));
@@ -178,5 +184,28 @@ mod tests {
         stop.send(true).unwrap();
         task.await.unwrap();
         assert!(!driver.rounds.is_running());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_disabled_host_waits_for_a_wake_instead_of_ticking() {
+        let driver = PeerSyncDriver::new();
+        let host = Arc::new(EmptyHost {
+            enabled: AtomicBool::new(false),
+            reconciled: AtomicUsize::new(0),
+            checks: AtomicUsize::new(0),
+        });
+        let (stop, receiver) = watch::channel(false);
+        let task = tokio::spawn(Arc::clone(&driver).run(Arc::clone(&host), receiver));
+        tokio::task::yield_now().await;
+        let checks = host.checks.load(Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(host.checks.load(Ordering::SeqCst), checks);
+        host.enabled.store(true, Ordering::SeqCst);
+        driver.set_enabled(true);
+        tokio::task::yield_now().await;
+        assert_eq!(host.reconciled.load(Ordering::SeqCst), 1);
+        stop.send(true).unwrap();
+        task.await.unwrap();
     }
 }

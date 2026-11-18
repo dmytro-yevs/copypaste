@@ -90,6 +90,9 @@ macro_rules! version_columns {
     };
 }
 
+/// [`item_columns!`] with the payload, nonce and metadata read as empty.
+const HEADER_COLUMNS: &str = "id, X'' AS content_ciphertext, NULL AS shared_ciphertext, NULL AS nonce, content_type, content_hash, created_at, pinned, pin_order, pin_updated_at, deleted, origin_device_id, app_bundle_id, app_name, NULL AS payload_metadata, source_icon_id";
+
 const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
 
 /// Keeps only legacy-class organization records, as an equality so the read
@@ -336,6 +339,19 @@ impl Store {
 
     /// The rows behind a request, still encrypted. Unknown ids are omitted.
     pub fn versions(&self, ids: &[String]) -> Result<Vec<StoredItem>, StoreError> {
+        self.versions_projected(item_columns!(), ids)
+    }
+
+    /// [`Store::versions`] in the same order, with [`HEADER_COLUMNS`] only.
+    pub fn version_headers(&self, ids: &[String]) -> Result<Vec<StoredItem>, StoreError> {
+        self.versions_projected(HEADER_COLUMNS, ids)
+    }
+
+    fn versions_projected(
+        &self,
+        projection: &str,
+        ids: &[String],
+    ) -> Result<Vec<StoredItem>, StoreError> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -345,21 +361,51 @@ impl Store {
             ids.iter().filter(|id| seen.insert(id.as_str())).collect()
         };
         let conn = self.conn()?;
-        // One statement per batch size rather than a bound-parameter loop: the
-        // batch is at most `MAX_ITEMS_PER_MESSAGE`.
+        // One statement per batch size. A peer's batch sizes are few and
+        // repeat, so they stay cached; a larger one would only evict them.
+        let cached = unique.len() <= copypaste_p2p::protocol::MAX_ITEMS_PER_MESSAGE;
         let placeholders = std::iter::repeat_n("?", unique.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM sync_records AS clipboard_items WHERE id IN ({placeholders})",
-            item_columns!()
+            "SELECT {projection} FROM sync_records AS clipboard_items WHERE id IN ({placeholders})"
         );
-        let mut stmt = conn.prepare(&sql)?;
-        let columns = ItemColumns::resolve(&stmt)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(unique), |row| {
-            row_to_item(row, &columns)
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = ItemColumns::resolve(&stmt).and_then(|columns| {
+            stmt.query_map(rusqlite::params_from_iter(unique), |row| {
+                row_to_item(row, &columns)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        });
+        if !cached {
+            stmt.discard();
+        }
+        Ok(rows?)
+    }
+
+    /// The stored size (`content_bytes`) of each clip among `ids`. A size
+    /// bounds the row's plaintext from above, so a reader can group rows
+    /// into reads of a known size. Organization records are absent.
+    pub fn stored_sizes(&self, ids: &[String]) -> Result<HashMap<String, u64>, StoreError> {
+        let conn = self.conn()?;
+        let mut found = HashMap::with_capacity(ids.len());
+        for chunk in ids.chunks(SUMMARY_CHUNK) {
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT id, content_bytes FROM clipboard_items WHERE id IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (id, bytes) = row?;
+                found.insert(id, u64::try_from(bytes).unwrap_or(0));
+            }
+        }
+        Ok(found)
     }
 
     /// Every version stamped at or after `since_ms`, oldest first.
@@ -387,8 +433,29 @@ impl Store {
         after_id: Option<&str>,
         limit: i64,
     ) -> Result<Vec<StoredItem>, StoreError> {
+        self.versions_after_projected(item_columns!(), since_ms, after_id, limit)
+    }
+
+    /// [`Store::versions_after`] in the same order, with [`HEADER_COLUMNS`]
+    /// only, so a byte-bounded reader can load payloads one row at a time.
+    pub fn version_headers_after(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<StoredItem>, StoreError> {
+        self.versions_after_projected(HEADER_COLUMNS, since_ms, after_id, limit)
+    }
+
+    fn versions_after_projected(
+        &self,
+        projection: &str,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
-        let sql = format!("{} SELECT {} FROM sync_records AS clipboard_items WHERE id IN (SELECT id FROM bounded_versions)", version_ctes(false, false), item_columns!());
+        let sql = format!("{} SELECT {projection} FROM sync_records AS clipboard_items WHERE id IN (SELECT id FROM bounded_versions)", version_ctes(false, false));
         let mut stmt = conn.prepare_cached(&sql)?;
         let columns = ItemColumns::resolve(&stmt)?;
         let rows = stmt.query_map(params![since_ms, after_id, limit], |row| {
@@ -946,6 +1013,40 @@ mod tests {
             second.iter().map(|row| &row.id).collect::<Vec<_>>(),
             [&ids[2]]
         );
+    }
+
+    #[test]
+    fn version_headers_keep_the_order_and_keys_without_the_payload() {
+        let s = store();
+        for (id, at) in [("a", T0 + 1), ("b", T0), ("c", T0)] {
+            s.insert(item(id, at)).unwrap();
+        }
+        let full = s.versions_after(T0, None, 10).unwrap();
+        let headers = s.version_headers_after(T0, None, 10).unwrap();
+        let key = |row: &StoredItem| (row.id.clone(), row.created_at, row.content_type.clone());
+        assert_eq!(
+            headers.iter().map(key).collect::<Vec<_>>(),
+            full.iter().map(key).collect::<Vec<_>>()
+        );
+        assert!(full.iter().all(|row| !row.content_ciphertext.is_empty()));
+        assert!(headers.iter().all(|row| row.content_ciphertext.is_empty()));
+        let ids: Vec<String> = full.iter().map(|row| row.id.clone()).collect();
+        assert_eq!(
+            s.version_headers(&ids)
+                .unwrap()
+                .iter()
+                .map(key)
+                .collect::<Vec<_>>(),
+            s.versions(&ids)
+                .unwrap()
+                .iter()
+                .map(key)
+                .collect::<Vec<_>>()
+        );
+        let sizes = s.stored_sizes(&ids).unwrap();
+        assert!(full
+            .iter()
+            .all(|row| sizes[&row.id] >= row.content_ciphertext.len() as u64));
     }
 
     #[test]

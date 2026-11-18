@@ -9,6 +9,7 @@ class AppPageRoute<T> extends ShadcnPageRoute<T> {
     required this.disableAnimations,
     super.settings,
     bool? requestFocus,
+    this.passive,
   }) : _requestFocus = requestFocus,
        super(
          transitionDuration: AppMotion.resolveDisabled(
@@ -19,6 +20,10 @@ class AppPageRoute<T> extends ShadcnPageRoute<T> {
 
   final bool disableAnimations;
   final bool? _requestFocus;
+
+  /// Whether the page currently holds no unsaved input, so it may close while
+  /// the app is hidden. Null means it never may.
+  final ValueGetter<bool>? passive;
 
   /// Null follows the navigator.
   @override

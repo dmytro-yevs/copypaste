@@ -41,6 +41,11 @@ pub use params::{ParamKind, ParamSpec, Params, MAX_TEXT_PARAM_BYTES};
 /// Largest UTF-8 input a transform accepts.
 pub const MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
+/// Largest input of a transform that holds a whole-document tree, whose
+/// peak heap measures up to about 450 times the input. Equal to the stored
+/// text cap, so every stored clip still converts.
+const MAX_TREE_INPUT_BYTES: usize = 4 * 1024 * 1024;
+
 /// Largest UTF-8 output a transform may produce.
 pub const MAX_OUTPUT_BYTES: usize = 32 * 1024 * 1024;
 

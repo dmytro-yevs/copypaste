@@ -64,6 +64,10 @@ pub enum ClipOp {
     Trace {
         id: String,
     },
+    /// One clip in its History row form: a bounded preview, never the body.
+    Preview {
+        id: String,
+    },
     /// The newest clip that arrived from another device, optionally copied.
     LatestFromOtherDevice {
         copy: bool,
@@ -113,6 +117,8 @@ impl crate::OpGates for ClipOp {
             | Self::SaveEdit { .. }
             | Self::DeliverText { .. }
             | Self::LatestFromOtherDevice { .. } => crate::limits::content_weight_units(4),
+            // The whole payload is opened: its ciphertext and its plaintext.
+            Self::Preview { .. } => crate::limits::content_weight_units(2),
             _ => 0,
         }
     }

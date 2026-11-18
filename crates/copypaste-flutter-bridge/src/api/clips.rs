@@ -153,6 +153,11 @@ pub async fn clip_annotations(ids: Vec<String>) -> Result<Vec<ClipAnnotationEntr
         .collect())
 }
 
+/// One clip as a History row: a bounded preview, never the full body.
+pub async fn clip_preview(id: String) -> Result<Clip, RuntimeError> {
+    item_response(clip_op(ClipOp::Preview { id })).await
+}
+
 /// Clear any expiry and keep the clip.
 pub async fn keep_clip(id: String) -> Result<Clip, RuntimeError> {
     item_response(clip_op(ClipOp::Keep { id })).await

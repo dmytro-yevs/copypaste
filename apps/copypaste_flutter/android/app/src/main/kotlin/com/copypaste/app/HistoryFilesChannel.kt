@@ -19,6 +19,7 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
     private val staged = mutableMapOf<String, File>()
     private val leases = mutableMapOf<String, RandomAccessFile>()
     private var pending: MethodChannel.Result? = null
+    private var pendingOneShot = false
     @Volatile private var disposed = false
 
     init {
@@ -29,12 +30,14 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
                     if (pending != null) result.error("picker_busy", "The file picker is already open.", null)
                     else {
                         pending = result
+                        // A one-shot copy keeps only the picker's transient read grant.
+                        pendingOneShot = call.argument<Boolean>("oneShot") == true
                         try {
                             activity.willOpenHistoryFilePicker()
                             activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                                 addCategory(Intent.CATEGORY_OPENABLE)
                                 type = "*/*"
-                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, !pendingOneShot)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                             }, REQUEST)
                         } catch (_: Exception) {
@@ -63,43 +66,59 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
                 "materialize" -> {
                     val token = call.argument<String>("token")
                     val maxBytes = call.argument<Number>("maxBytes")?.toLong()
+                    val destination = call.argument<String>("destination")
                     worker.execute {
+                        var owned: File? = null
                         try {
                             val uri = selections[token] ?: error("Unknown selection")
-                            require(maxBytes != null && maxBytes > 0)
+                            // A caller-owned copy in the cache stays its caller's to delete.
+                            val target = destination?.let { File(it).canonicalFile }
+                            if (target != null) {
+                                require(target.path.startsWith(activity.cacheDir.canonicalPath + File.separator) && target.createNewFile())
+                                owned = target
+                            }
+                            val limit = maxBytes ?: target?.parentFile?.usableSpace
+                            require(limit != null && limit > 0)
+                            val tooLarge = { size: Long, prefix: String ->
+                                FileTooLarge(if (maxBytes == null) activity.getString(R.string.files_read_failed) else "The file is $prefix$size bytes; the file size limit in Settings is $maxBytes bytes.")
+                            }
                             activity.contentResolver.query(uri,arrayOf(OpenableColumns.SIZE),null,null,null)?.use { cursor ->
                                 if (cursor.moveToFirst() && !cursor.isNull(0)) {
                                     val size=cursor.getLong(0)
-                                    require(size<=maxBytes) { "The file is $size bytes; the file size limit in Settings is $maxBytes bytes." }
+                                    if (size > limit) throw tooLarge(size, "")
                                 }
                             }
-                            val file = File.createTempFile("history-import-", ".bin", activity.cacheDir)
-                            staged[token!!] = file
-                            activeImports.add(file.absolutePath)
-                            val lease = RandomAccessFile(file, "rw")
-                            leases[token] = lease
-                            lease.channel.lock()
+                            val file = target ?: File.createTempFile("history-import-", ".bin", activity.cacheDir).also {
+                                staged[token!!] = it
+                                activeImports.add(it.absolutePath)
+                                val lease = RandomAccessFile(it, "rw")
+                                leases[token] = lease
+                                lease.channel.lock()
+                            }
                             activity.contentResolver.openInputStream(uri).use { input ->
                                 requireNotNull(input)
-                                run {
-                                    val output = leases.getValue(token)
+                                val output = if (target != null) RandomAccessFile(target, "rw") else leases.getValue(token!!)
+                                try {
                                     val buffer = ByteArray(64 * 1024)
                                     var total = 0L
                                     while (true) {
                                         val count = input.read(buffer)
                                         if (count < 0) break
                                         total += count
-                                        require(total <= maxBytes) { "The file is at least $total bytes; the file size limit in Settings is $maxBytes bytes." }
+                                        if (total > limit) throw tooLarge(total, "at least ")
                                         output.write(buffer, 0, count)
                                     }
+                                } finally {
+                                    if (target != null) output.close()
                                 }
                             }
                             reply { result.success(file.absolutePath) }
                         } catch (error: Exception) {
+                            owned?.delete()
                             leases.remove(token)?.close()
                             staged.remove(token)?.let { activeImports.remove(it.absolutePath); it.delete() }
-                            val message = if (error is IllegalArgumentException && error.message?.startsWith("The file is ")==true) error.message else activity.getString(R.string.files_read_failed)
-                            reply { result.error("file_import_failed", message, null) }
+                            if (error is FileTooLarge) reply { result.error(if (maxBytes == null) "insufficient_space" else "file_too_large", error.message, null) }
+                            else reply { result.error("file_import_failed", activity.getString(R.string.files_read_failed), null) }
                         }
                     }
                 }
@@ -147,27 +166,30 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
             if (clips != null) for (index in 0 until clips.itemCount) add(clips.getItemAt(index).uri)
             else data.data?.let { add(it) }
         }
+        val oneShot = pendingOneShot
         worker.execute {
+            val added = mutableListOf<String>()
             try {
                 // Reclaim grants only for sources no live clip or pending selection owns.
                 val protectedUris = uris.toSet() + selections.values
-                activity.contentResolver.persistedUriPermissions.forEach { permission ->
+                if (!oneShot) activity.contentResolver.persistedUriPermissions.forEach { permission ->
                     if (permission.uri !in protectedUris && !permission.isWritePermission && !NativeRuntimeCapture.fileSourceRetained(permission.uri.toString())) {
                         runCatching { activity.contentResolver.releasePersistableUriPermission(permission.uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                     }
                 }
                 val files = uris.map { uri ->
-                    activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (!oneShot) activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     val metadata = FileReferenceMetadata.read(activity.contentResolver, uri, uri.lastPathSegment?.substringAfterLast('/') ?: "file")
                     val name = metadata.name
                     val size = metadata.size
                     val token = UUID.randomUUID().toString()
                     selections[token] = uri
+                    added += token
                     mapOf("token" to token, "name" to name, "mimeType" to (activity.contentResolver.getType(uri) ?: "application/octet-stream"), "uri" to uri.toString(), "sizeBytes" to size)
                 }
                 reply { result.success(files) }
             } catch (_: Exception) {
-                selections.clear()
+                if (oneShot) added.forEach { selections.remove(it) } else selections.clear()
                 reply { result.error("file_metadata_failed", "The selected files could not be read.", null) }
             }
         }
@@ -204,6 +226,8 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
             }
         }
     }
+
+    private class FileTooLarge(message: String) : Exception(message)
 
     companion object {
         private val activeImports = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()

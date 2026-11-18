@@ -9,6 +9,7 @@ import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate.InstallState
+import com.google.mlkit.common.MlKit
 import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -24,7 +25,7 @@ internal class PairingScannerChannel(
 ) {
     private val channel = MethodChannel(messenger, "com.copypaste.app/qr_scanner")
     private var pending: MethodChannel.Result? = null
-    private val modules = ModuleInstall.getClient(activity)
+    private val modules by lazy { ModuleInstall.getClient(activity) }
     private var installListener: InstallStatusListener? = null
     private var scanStarted = false
 
@@ -65,6 +66,7 @@ internal class PairingScannerChannel(
             .enableAutoZoom()
             .build()
         try {
+            initializeMlKit()
             val scanner = GmsBarcodeScanning.getClient(activity, options)
             val listener = InstallStatusListener { update ->
                 if (pending !== result) return@InstallStatusListener
@@ -142,7 +144,16 @@ internal class PairingScannerChannel(
         return pending.also { pending = null }
     }
 
+    private fun initializeMlKit() {
+        if (mlKitInitialized) return
+        MlKit.initialize(activity.applicationContext)
+        mlKitInitialized = true
+    }
+
     companion object {
         private const val logTag = "CopyPasteScanner"
+
+        // The manifest removes MlKitInitProvider, and MlKit.initialize throws when repeated in a process.
+        private var mlKitInitialized = false
     }
 }

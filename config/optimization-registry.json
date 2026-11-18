@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-13",
+  "date": "2026-11-17",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -4276,9 +4276,14 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart"
+        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart",
+        "crates/copypaste-ipc/src/clips.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/features/clips/mod.rs",
+        "crates/copypaste-flutter-bridge/src/api/clips.rs",
+        "apps/copypaste_flutter/lib/features/settings/repository/runtime_settings_repository.dart"
       ],
-      "invariant": "Normalization reads at most 2001 runes and yields the same output as full-length normalization; the bridge still reads the full clip.",
+      "invariant": "The capture notification reads a clip only through the bounded preview request, whose reply holds at most the list preview bytes and never a secret body; normalization reads at most 2001 runes and yields the same output as full-length normalization.",
       "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -6026,6 +6031,1480 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-154",
+      "title": "Passive overlays do not block hidden presentation suspension",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "CopyPasteRoot",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/main.dart",
+        "apps/copypaste_flutter/lib/app/ui_memory_controller.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_controller.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_host.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_page_route.dart",
+        "apps/copypaste_flutter/lib/app/theme/app_overlays.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
+        "apps/copypaste_flutter/lib/features/settings/view/settings_screen.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_module_action_runner.dart"
+      ],
+      "invariant": "At the hidden deadline the active drawer marked passive and nested routes whose passive predicate holds are dismissed before suspending; any other drawer, route, dialog or busy operation, including storage maintenance and a module action in flight, defers suspension. The observer that tracks nested routes holds them weakly: a navigator disposed by the suspension reports no removals, and a route held strongly keeps the whole unmounted presentation reachable through its builder.",
+      "next_step": "On an Android phone and a narrow desktop window, leave the History detail drawer or a Settings section open, hide the app for more than 60 s and record app footprint and Dart heap before and after, plus timer wakeups over 10 minutes.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-155",
+      "title": "Bounded bridge executor",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-flutter-bridge",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/api/handler.rs",
+        "crates/copypaste-flutter-bridge/src/frb_generated.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
+      ],
+      "invariant": "Generated bridge calls run on a fixed 4-thread synchronous pool and a 2-worker runtime with at most 16 blocking threads, whatever the core count; Android store requests take the runtime blocking route under their admission, never an async worker.",
+      "next_step": "Thread sample and footprint of the release UI process at idle on macOS and Windows; on Android scroll History while searching and record stream latency and thread count.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Bridge tests and Clippy passed on macOS and the Android arm64 bridge check compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-156",
+      "title": "Native pairing and SMS capture reuse the bridge runtime",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/native_pairing_abi.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
+      ],
+      "invariant": "Protected pairing and Android SMS ingest block on the bridge runtime from native threads and never build a runtime of their own.",
+      "next_step": "Thread count after a full pairing ceremony and after an SMS ingest returns to the idle baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Bridge tests passed on macOS and the Android arm64 bridge check compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-157",
+      "title": "Allocator relief on Android and Windows",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Native memory relief",
+      "platforms": [
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt",
+        "apps/copypaste_flutter/windows/runner/memory_relief_channel.cpp",
+        "apps/copypaste_flutter/windows/runner/memory_relief_channel.h",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/lib/platform/lifecycle/native_memory_relief.dart"
+      ],
+      "invariant": "Suspension, trim and low-memory requests reach a native release that returns freed heap pages: a bionic purge where mallopt exists, resolved at run time, and Windows heap optimization and compaction; both run off the UI thread and coalesce.",
+      "next_step": "PSS and native heap before and after onTrimMemory on API 26, 28 and 34 with the purge timed; private bytes and working set before and after suspension on Windows.",
+      "native_resource_qualification": {
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "main process native heap PSS bytes, application hidden 90 s",
+        "baseline": 43947008,
+        "candidate": 36717568,
+        "native_heap_bytes_hidden_10s_before": [
+          44991488,
+          44653568,
+          44622848
+        ],
+        "native_heap_bytes_hidden_90s_before": [
+          44327936,
+          43916288,
+          43947008
+        ],
+        "native_heap_bytes_hidden_10s_after": [
+          43176960,
+          44155904,
+          43098112
+        ],
+        "native_heap_bytes_hidden_90s_after": [
+          36869120,
+          36717568,
+          36597760
+        ],
+        "total_pss_bytes_hidden_90s_before": [
+          164836352,
+          164533248,
+          162999296
+        ],
+        "total_pss_bytes_hidden_90s_after": [
+          154872832,
+          157399040,
+          154021888
+        ],
+        "scenario": "API 34 arm64 emulator with 2 GB RAM and software rendering, release build signed with a debug key; about 48 clips with text, six images and one document; start, scroll the list to its end and back, press Home, sample with dumpsys meminfo. One fresh process per run; baseline and candidate are the medians. Before is origin/main, after is this branch.",
+        "repetitions_per_version": 3,
+        "attribution": "The two builds differ by every change on the branch, but native heap is level between them 10 s after hiding and falls only on the branch once the 60 s suspension has run the purge. The same build measured in another session differed by up to 4 MB in total PSS, so only the native heap figures are attributed.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "A release arm64 build ran on an API 34 emulator: native heap fell after the 60 s suspension and after a trim request, with no crash. Windows C++ not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-158",
+      "title": "macOS relief at Quick Paste retirement and tray close",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "MacosMemoryPressure",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/macos/Runner/MacosTrayMenuChannel.swift"
+      ],
+      "invariant": "Retiring Quick Paste and closing the tray menu each lead to one relief pass, and a request during a pass triggers exactly one more; no timers.",
+      "next_step": "footprint dirty bytes about one second after each event on a release build.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS debug build compiled; not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-159",
+      "title": "Quick Paste presentation is released without a Dart reply",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Quick Paste presentation",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift"
+      ],
+      "invariant": "A closed presentation with its panel, view controller, Flutter view and surfaces is released within about a second whether or not Dart answers shutdown, and the pairing window clears its first responder on close.",
+      "next_step": "Open and close Quick Paste repeatedly, including with a delayed Dart reply, and check that live panel, Flutter view and IOSurface counts return to baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS debug build compiled; not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-160",
+      "title": "Idle in-process module unload",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/instances.rs",
+        "crates/copypaste-modules/src/manager.rs",
+        "crates/copypaste-modules/src/endpoints.rs"
+      ],
+      "invariant": "An in-process instance is unloaded 1 hour after its last command or endpoint session ends, unless it is leased or running as a sync provider; the reaper does not wake while nothing can expire; a new instance of a module, and deletion of that module files, wait for its previous teardown for at most 60 s.",
+      "next_step": "Daemon and Android app-process footprint and thread count after a snippets or AI tools command, at 5 minutes and at 61 minutes idle; latency of a command issued during an update of the same module.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-161",
+      "title": "Verified manifest cache",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/manager.rs",
+        "crates/copypaste-modules/src/package.rs"
+      ],
+      "invariant": "A module manifest is read and signature-verified once per version and package-file fingerprint; load-time verification is unchanged.",
+      "next_step": "CPU and I/O per history query and per semantic-index iteration with modules installed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-162",
+      "title": "Module worker threads exist only while needed",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-modules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/inference/client.rs",
+        "crates/copypaste-modules/src/host.rs",
+        "crates/copypaste-modules/src/cloud_request.rs"
+      ],
+      "invariant": "The inference idle thread starts with the first inference request, the semantic index worker runs only while a search configuration exists, and cloud provider checks and teardown run off the reactor.",
+      "next_step": "Thread sample of the daemon with no OCR or semantic module in use and after disabling semantic search.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-163",
+      "title": "Sized daemon runtime",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-daemon",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/runtime.rs"
+      ],
+      "invariant": "The daemon runs 2 reactor workers and at most 128 blocking threads, above its 64-connection admission bound.",
+      "next_step": "Thread sample and footprint of the installed build at idle and under concurrent IPC load on a 10-core Mac and on Windows.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-164",
+      "title": "Oversized clip opens read-only without a full-text editor",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "History edit drawer",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/view/clip_edit_drawer.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_clip_menu.dart"
+      ],
+      "invariant": "A clip above the editable limit is rendered only through the sliced selectable text with no text controller or editable field, its size is decided once per drawer, and selection copies go through History transfers.",
+      "next_step": "UI footprint and Dart heap, peak and steady, while opening and scrolling a 4 MiB text clip in the edit drawer, before and after, on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-165",
+      "title": "Large code highlight memoized by identity",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "History inspector presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/history_code_highlighter.dart"
+      ],
+      "invariant": "The highlight memo returns the same result for a repeated source of any size, matches a large source only by identity and references the caller string rather than copying it.",
+      "next_step": "CPU time and allocations per inspector rebuild for a code or JSON clip above 200 k code units.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-166",
+      "title": "History rebuild stops once its anchors are provably gone",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "History controller",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart"
+      ],
+      "invariant": "A History rebuild follows its first anchor or another anchor that kept its place, and stops reading once a row ranked after every captured anchor in the old ledger, unmoved since then, has been read, or at the old ledger length when no anchor was in it; the Relevance sort and Quick Paste keep the unbounded walk.",
+      "next_step": "Count IPC page reads and peak resident pages per rebuild on a 10,000-row history with the anchor deleted remotely and with a 300-row insertion above it.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-167",
+      "title": "Streamed, size-limited document picking on Android",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Platform file adapters",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/HistoryFilesChannel.kt",
+        "apps/copypaste_flutter/lib/platform/files/history_file_picker.dart",
+        "apps/copypaste_flutter/lib/features/settings/repository/file_selector_settings_file_picker.dart",
+        "apps/copypaste_flutter/lib/features/modules/repository/file_selector_module_input_picker.dart"
+      ],
+      "invariant": "A picked restore or module file is streamed in 64 KiB chunks to a staged file under a transient grant and is never held whole in Java or Dart memory; it is refused before copying, or stopped during it, once it passes its size limit.",
+      "next_step": "Java heap and app peak while restoring a backup of at least 500 MB and installing a large module on an emulator, against the previous build.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Dart tests and analysis passed. On an API 34 emulator a picked 1.1 MB backup was streamed byte-exact to its staged file; the module-input picker was not exercised; native resource qualification pending."
+    },
+    {
+      "id": "RUN-168",
+      "title": "Android ordinary-PNG capture pass-through and single-buffer read",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AndroidClipboardReader",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt"
+      ],
+      "invariant": "A complete, static, non-interlaced PNG of at most 8 bits per sample that passes the byte and dimension caps is stored without a full-size bitmap or re-encode buffer, while every other image keeps the 8-bit transcode; the source is held in one buffer sized from the reported length when known, and the capture thread exits after 30 s idle.",
+      "next_step": "App peak heap and native memory while capturing a 1080p and a 1440p PNG screenshot on an emulator, before and after; thread count after 30 s idle.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "On an API 34 emulator PNG screenshots of 320x240, 1280x720 and 1080x1920 were stored through the screenshot observer; the build before this change refused the 1080x1920 one and retried it at every start. Native resource qualification pending."
+    },
+    {
+      "id": "RUN-169",
+      "title": "Windows paste-back borrows stored bytes and sizes the bitmap once",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "Windows clipboard",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows/transcode.rs",
+        "crates/copypaste-daemon/src/clipboard/windows.rs"
+      ],
+      "invariant": "PNG and TIFF paste-back never copies the stored bytes, and the BMP buffer is allocated once at its final size.",
+      "next_step": "Daemon peak working set while pasting a 3840x2160 RGBA PNG on Windows, before and after.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Transcoding functions compared byte for byte with the previous implementation in a portable harness; Windows-only call sites not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-170",
+      "title": "Row-streamed PNG capture validation and early DIB release",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Windows clipboard",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows/transcode.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/read.rs",
+        "crates/copypaste-daemon/Cargo.toml"
+      ],
+      "invariant": "A registered PNG is accepted or refused exactly as a full default-image decode would decide while holding one reused row and fixed decoder state, and a raw DIB is freed before PNG encoding starts; TIFF is still fully decoded.",
+      "next_step": "Daemon transient peak working set and CPU time while copying 1080p and 4K PNGs and during a 4K Print Screen capture on Windows, before and after.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Classification compared with the previous implementation on 660 corrupted and 336 valid cases in a portable harness; Windows-only call sites not compiled; native resource qualification pending."
+    },
+    {
+      "id": "RUN-171",
+      "title": "Byte-bounded upload scan before payload load",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-sync StoreView",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-sync/src/store.rs",
+        "crates/copypaste-core/src/storage/versions.rs"
+      ],
+      "invariant": "Each scan path reads at most 500 headers without payloads, opens one row at a time and holds plaintext only for rows it offers plus the one being decided; uploads within a round stay in ascending order.",
+      "next_step": "Daemon and Android process footprint, peak and steady, while draining a cloud backlog of about 500 one-megabyte images, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-172",
+      "title": "Size-grouped peer serving fetch",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p sync transfer",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/sync/transfer.rs",
+        "crates/copypaste-p2p/src/sync/source.rs",
+        "crates/copypaste-p2p/src/node/mod.rs",
+        "crates/copypaste-core/src/sync/source.rs",
+        "crates/copypaste-core/src/storage/versions.rs"
+      ],
+      "invariant": "Each serving fetch covers at most 8 items and at most one message of stored size, or a single item, so a session holds about one pending message plus one fetch.",
+      "next_step": "Daemon peak with 4 concurrent serving sessions of 4 MiB items, and serve time for an initial pairing with thousands of short text clips, against the 8-item baseline.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-173",
+      "title": "Streamed, byte-capped cloud pull page",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/body.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "crates/copypaste-cloud/src/sync/pull.rs"
+      ],
+      "invariant": "A pull page holds less than two maximal rows with oversized strings dropped and their rows refused, at most two items of plaintext wait to be merged, one pull makes at most 50 requests, and the cursor follows the order the server returned.",
+      "next_step": "Daemon and Android app peak, steady state and growth while catching up on 100 one-megabyte and 100 four-megabyte images, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-174",
+      "title": "Content-free realtime events",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud realtime",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/realtime/frame.rs",
+        "crates/copypaste-cloud/src/realtime/event.rs",
+        "crates/copypaste-cloud/src/realtime/channel.rs"
+      ],
+      "invariant": "A change event allocates only its item id, and no websocket message over 2 MiB is buffered.",
+      "next_step": "Peak footprint during bursts of one-megabyte realtime records.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-175",
+      "title": "Capped REST bodies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/body.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "crates/copypaste-cloud/src/rest/group.rs",
+        "crates/copypaste-cloud/src/rest/space.rs",
+        "crates/copypaste-cloud/src/rest/error.rs"
+      ],
+      "invariant": "Every REST body is refused at its cap while streaming, and error and write replies are read to at most 1 KiB.",
+      "next_step": "Peak during a full group page and a full space-envelope page.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-176",
+      "title": "Bounded copy and pin replies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime dispatch",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/features/delivery.rs"
+      ],
+      "invariant": "Copy, plain-text copy and pin replies never carry more than the list preview bytes of content, or any secret body.",
+      "next_step": "Daemon and app peak footprint and Dart heap while copying a 4 MiB text clip, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-177",
+      "title": "Byte-parsed IPC replies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge client",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/client.rs"
+      ],
+      "invariant": "A reply frame is parsed from its framed bytes with no string copy, and the read buffer is released before the response is mapped.",
+      "next_step": "App-process peak footprint on a large image preview or clip reply, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-178",
+      "title": "Duplicate capture without payload copies",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core ingest",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/ingest.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/storage/retention.rs"
+      ],
+      "invariant": "A duplicate capture is probed and restamped from metadata only, never sealed, and its payload is loaded only when an entry point that returns content asks for it.",
+      "next_step": "Daemon and Android process peak while re-copying a 4 MiB image 20 times, before and after.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-179",
+      "title": "Bounded legacy auto_vacuum conversion",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage space",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/space.rs"
+      ],
+      "invariant": "The one-time VACUUM runs only when its live data is at most 32 MiB, and only a process that died mid-conversion stops it from being tried again.",
+      "next_step": "Startup peak while opening legacy files of 30 MiB and 300 MiB on Android and macOS.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-180",
+      "title": "Peer networking follows the sync switch",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime peer_sync",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/peer_sync.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-runtime/src/p2p.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-sync/src/peer_driver.rs",
+        "crates/copypaste-daemon/src/main.rs",
+        "crates/copypaste-p2p/src/node/listen.rs",
+        "crates/copypaste-p2p/src/node/pairing_ceremony.rs"
+      ],
+      "invariant": "The peer port, accept loop, reachability probes, relay presence, outgoing scheduler and LAN discovery run only while sync is on, and start and stop with the switch without a restart; a paused scheduler waits for a wake instead of a timer; stopping the listener leaves no busy pairing state, no unconfirmed stored pairing and no advertised address.",
+      "next_step": "With sync off and a peer paired, record wakeups, open sockets, multicast membership and footprint over 10 idle minutes, before and after, on the Android app process and on the macOS and Windows daemon separately.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Runtime, peer and daemon tests passed and the Android arm64 bridge check compiled; daemon startup and shutdown not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-181",
+      "title": "In-process image preview without base64",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-flutter-bridge Android host",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "crates/copypaste-flutter-bridge/src/api/mod.rs",
+        "crates/copypaste-flutter-bridge/src/client.rs"
+      ],
+      "invariant": "On Android a clip image preview reaches Dart as the PNG bytes produced by the same admission-gated handler as the IPC method, with no text encoding or decoding in between.",
+      "next_step": "App process peak and steady native heap while scrolling an image-heavy History on a device, before and after.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Runtime test passed. On an API 34 emulator list thumbnails and inspector previews rendered; native resource qualification pending."
+    },
+    {
+      "id": "RUN-182",
+      "title": "OCR decode reuses the RGB8 buffer",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs"
+      ],
+      "invariant": "Image decoding for OCR never holds two full-resolution pixel buffers at once when the decoder already gives 8-bit RGB.",
+      "next_step": "OCR worker peak footprint on a 16-megapixel JPEG, before and after, on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Module compiled and passed Clippy offline; OCR results not run; native resource qualification pending."
+    },
+    {
+      "id": "RUN-183",
+      "title": "Settling frames release the hidden window surface on macOS",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/test/app/resource_policy_test.dart"
+      ],
+      "invariant": "After a suspension on macOS the presentation renders four forced frames 300 ms apart and stops as soon as it is shown again, so the window surface replaced by the suspension frame is not held while the window is hidden.",
+      "tradeoffs": "Four placeholder frames per suspension. One window-sized surface, the front buffer, still stays allocated while hidden on macOS 26. A sample of the installed application on macOS 27 held no window surface while hidden even without these frames, so no saving is expected there.",
+      "next_step": "Hidden-idle footprint of the application process on macOS 26 and macOS 27 hardware, before and after, with the IOSurface category recorded.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process IOSurface dirty bytes, window hidden 150 s",
+        "baseline": 11223040,
+        "candidate": 0,
+        "footprint_bytes_without_frames": [
+          100663296,
+          101711872,
+          103809024,
+          109051904
+        ],
+        "footprint_bytes_with_frames": [
+          88080384,
+          89128960,
+          89128960,
+          96468992
+        ],
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; close the window with the list at its top (the scripted scroll did not take effect), sample with footprint after 150 s. One fresh process per run; footprint totals are the tool's whole megabytes.",
+        "repetitions_per_version": 4,
+        "attribution": "The IOSurface category was 11 MB in every run without the frames and absent in every run with them. Whole-process footprint also moves with the Dart heap, which varied between 28 MB and 36 MB across runs for unrelated reasons. Three runs with frames and two without came from experimental builds; two of those with frames also forced a Dart collection, the other triggers changed no category.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-184",
+      "title": "Collect and compact the Dart heap after a suspension on macOS",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_navigation_controller.dart",
+        "apps/copypaste_flutter/test/app/resource_policy_test.dart"
+      ],
+      "invariant": "After a suspension on macOS the application runs up to four old-space collections before its settling frames. Each is started by large typed data that is allocated and dropped unwritten, so it counts as heap growth without being paged in; the steps stop at the first collection that does not complete, when the presentation is shown again, or when resident size rises by 16 MiB. The idle notifications of the settling frames then return the freed pages.",
+      "tradeoffs": "About 1.5 s of collector work per suspension and up to 192 MiB of address space per collection. It relies on the VM leaving the pages of large typed data unwritten. The collected heap still holds the compiled grammars of the syntax highlighter and the date symbols of every locale, which their packages keep in static fields.",
+      "next_step": "Hidden-idle footprint on macOS 26 and macOS 27 hardware, before and after. Measure Windows before enabling the collection there. On an API 34 arm64 emulator the same collection with its settling frames lowered a 41 MB Dart heap by 1.1 MB in three interleaved runs with no change in PSS beyond the run spread, so it stays off on Android; one unreplicated run of the collections without the frames lowered it by 8.5 MB and is the open lead there.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process physical footprint bytes, window hidden 100 to 150 s",
+        "baseline": 96468992,
+        "candidate": 90177536,
+        "footprint_bytes_before": [
+          92274688,
+          96468992,
+          96468992
+        ],
+        "footprint_bytes_after": [
+          89128960,
+          90177536,
+          90177536
+        ],
+        "dart_heap_bytes_before": [
+          32505856,
+          36700160,
+          36700160
+        ],
+        "dart_heap_bytes_after": [
+          29360128,
+          29360128,
+          30408704
+        ],
+        "live_heap_bytes_profile_build": {
+          "suspended_with_strong_route_observer": 30635424,
+          "suspended_with_weak_route_observer": 25160032
+        },
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release build on Flutter 3.47.6; 69 clips with text, code, emoji and three images; close the window with the list at its top (the scripted scroll did not take effect), sample with footprint. One fresh process per run; totals are the tool's whole megabytes, baseline and candidate are the medians. The profile-build figures are heap usage reported by the VM service after a forced collection.",
+        "repetitions_per_version": 3,
+        "attribution": "Before: settling frames only, with and without the weak route observer, which on its own changed no category because nothing collected the unmounted presentation. After: weak observer plus four collections. A single collection left the heap between 28 MB and 35 MB across four runs. Resident size did not rise during the collection steps in any traced run. With the list scrolled to its end and back (86 clips, a later build with the same presentation code, hidden 150 s) three runs measured 86 MB, 93 MB and 94 MB.",
+        "qualification": false,
+        "footprint_bytes_after_list_scrolled": [
+          90177536,
+          97517568,
+          98566144
+        ]
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-185",
+      "title": "Bound tree-building transforms to the stored text cap",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-transform",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-transform/src/lib.rs",
+        "crates/copypaste-transform/src/error.rs",
+        "crates/copypaste-transform/src/structure/yaml.rs",
+        "crates/copypaste-transform/src/markup/html.rs",
+        "crates/copypaste-transform/src/catalogue.rs"
+      ],
+      "invariant": "structure.yaml_to_json, markup.rich_to_plain and markup.html_to_markdown refuse input above 4 MiB before parsing. Every stored clip, which the text cap holds to 4 MiB, and every 64 KiB preview still converts with unchanged output.",
+      "tradeoffs": "Sample text or a chain intermediate between 4 MiB and 16 MiB is now refused by these three transforms with the input-size error. A 4 MiB input of repeated short elements still peaks at up to 0.77 GB for YAML, 1.86 GB for rich to plain and 0.34 GB for HTML to Markdown.",
+      "next_step": "Lower the 4 MiB peak: stream YAML events into the JSON writer (needs the parser as a direct dependency) and replace the html2text render with the crate's own tree walk (changes output). Measure the daemon and the Android process on each platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "peak heap bytes held during one apply call beyond the input, counting global allocator",
+        "baseline": 3726642056,
+        "candidate": 160,
+        "peak_bytes_before_at_16_mib": {
+          "yaml_to_json_flow_sequence": 3087009936,
+          "rich_to_plain_inline_tags": 3726642056,
+          "html_to_markdown_paragraphs": 1354761350
+        },
+        "peak_bytes_at_4_mib_unchanged": {
+          "yaml_to_json_flow_sequence": 771753616,
+          "rich_to_plain_paragraphs": 1863321992,
+          "html_to_markdown_paragraphs": 338690694
+        },
+        "scenario": "macOS 27.3 host, release build of a standalone harness that links the crate; synthetic inputs of repeated short elements at 1, 4 and 16 MiB. Baseline and candidate are rich to plain on 16 MiB of inline tags. Peaks grow linearly with the input, 42 to 444 times its size.",
+        "repetitions_per_version": 1,
+        "attribution": "Above 4 MiB the three transforms now return the input-size error before any parsing. Peaks at 1 and 4 MiB are unchanged within 512 bytes. The process was a harness, not the daemon.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-186",
+      "title": "OCR reads padding through a view and drops alpha in place",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/ocr_utils.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/db_net.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/scale_param.rs"
+      ],
+      "invariant": "Detection input and recognition crops stay byte-identical to the materialised padded image on all ten routes, while 8-bit RGB and RGBA decodes never hold a second full-resolution buffer.",
+      "tradeoffs": "Each pixel read through the padded view adds a bounds check. Releasing the alpha bytes relies on the allocator shrinking in place, seen on macOS only; one that copies restores the previous decode peak. The detection resize still builds a full-width floating-point temporary, about 136 MB at 16 megapixels, and the detection model's working memory keeps the process near 1.05 GB.",
+      "next_step": "Inference worker peak on Android and Windows. Resize the detection input in bands; find what the detection model holds.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l, full OCR of one image on all ten routes",
+        "baseline": 1154167603,
+        "candidate": 1104412672,
+        "peak_footprint_mib_before": {
+          "rgba_png_16_megapixels": [
+            1105.7,
+            1095.7
+          ],
+          "rgb_png_16_megapixels": [
+            1083.6,
+            1076.4
+          ],
+          "rgb_jpeg_16_megapixels": [
+            1073.1,
+            1084.1
+          ],
+          "rgba_png_1600_by_900": [
+            472.7,
+            464.3
+          ]
+        },
+        "peak_footprint_mib_after": {
+          "rgba_png_16_megapixels": [
+            1055.2,
+            1051.3
+          ],
+          "rgb_png_16_megapixels": [
+            1058.3,
+            1054.8
+          ],
+          "rgb_jpeg_16_megapixels": [
+            1045.0,
+            1053.0
+          ],
+          "rgba_png_1600_by_900": [
+            464.4,
+            465.8
+          ]
+        },
+        "pixel_stage_peak_mb": {
+          "decode_and_pad_rgba_png": [
+            108.4,
+            62.5
+          ],
+          "decode_and_pad_rgb_png": [
+            95.4,
+            47.2
+          ],
+          "through_detection_resize_rgba_png": [
+            251.0,
+            190.6
+          ],
+          "through_detection_resize_rgb_png": [
+            238.0,
+            189.9
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build, synthetic 4000 by 4000 images and the installed module package's models, read in place. Baseline and candidate are the means of the two RGBA PNG runs converted to bytes. Pixel-stage pairs are before and after for a harness that stops before inference. Taken with the default allocator, which keeps freed large blocks in the footprint; the inference worker inherits MallocLargeCache=0 and holds less.",
+        "repetitions_per_version": 2,
+        "attribution": "Recognised text was byte-identical before and after for all four images. The process was the module's evidence binary, not the application's inference worker. Session settings were measured as well: memory pattern off and optimisation level 1 or 3 changed nothing, and disabling the arena raised the peak by about 165 MB, so the builder is unchanged.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-187",
+      "title": "Initialize ML Kit only for a pairing scan",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "PairingScannerChannel",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/AndroidManifest.xml",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/PairingScannerChannel.kt"
+      ],
+      "invariant": "ML Kit and the module-install client are created only when a pairing QR scan starts, and ML Kit initializes once per process before every scanner client.",
+      "tradeoffs": "The first scan in a process pays the initialization that every process start paid before, including starts for the keyboard, tiles, widgets and restored services.",
+      "next_step": "Java heap and start time of the main process on a device with and without the provider, and one QR pairing on a device.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "On an API 34 emulator the installed package declares no ML Kit provider, two scan attempts ended in the scanner-unavailable state without a crash (the image has no Play Store), and ML Kit first wrote its preferences at the first scan. A QR pairing on a device is not done."
+    },
+    {
+      "id": "RUN-188",
+      "title": "Semantic session allocator settings measured",
+      "domain": "runtime",
+      "implementation_status": "documented_current_design",
+      "priority": "P2",
+      "owner_module": "Semantic search module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/semantic-search/src/lib.rs"
+      ],
+      "invariant": "The session keeps the runtime's default CPU arena, memory pattern and optimisation level 3: disabling the arena or the pattern, or using level 2, gave no peak or retained saving beyond the spread between runs, with bit-identical embeddings.",
+      "next_step": "The tokenizer holds about 334 MiB and the loaded session about 305 MiB for a 113 MiB model, so a smaller tokenizer representation is the lever to evaluate; disabling prepacking saved about 10 MiB in a probe. Android, Windows and the English model are not measured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint MiB reported by /usr/bin/time -l, median of five runs with minimum and maximum",
+        "baseline": null,
+        "candidate": null,
+        "peak_footprint_mib": {
+          "current": [
+            669,
+            659,
+            676
+          ],
+          "arena_off": [
+            680,
+            678,
+            683
+          ],
+          "memory_pattern_off": [
+            668,
+            663,
+            673
+          ],
+          "both_off": [
+            680,
+            678,
+            692
+          ],
+          "both_off_level_2": [
+            683,
+            677,
+            689
+          ]
+        },
+        "footprint_after_load_mib": {
+          "current": [
+            641,
+            631,
+            643
+          ],
+          "arena_off": [
+            635,
+            635,
+            637
+          ],
+          "memory_pattern_off": [
+            636,
+            635,
+            638
+          ],
+          "both_off": [
+            636,
+            635,
+            646
+          ],
+          "both_off_level_2": [
+            638,
+            635,
+            640
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build of a harness driving the module's public interface with the installed multilingual model: one query to load, then 40 requests in indexing order with passages up to 24,000 characters, 15 ms apart. Variants interleaved while other builds loaded the machine, so latency is not established. Taken with the default allocator, which keeps freed large blocks in the footprint; the inference worker inherits MallocLargeCache=0 and holds less.",
+        "repetitions_per_version": 5,
+        "attribution": "No variant lowers peak or retained footprint beyond the spread, and every variant's 116 vectors equal the current ones exactly. The harness is not in the repository.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "measurement_only_no_source_change"
+    },
+    {
+      "id": "RUN-189",
+      "title": "Persist a settled-row mark for Android screenshot scans",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "ScreenshotCaptureMonitor",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureMonitor.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureState.kt",
+        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ScreenshotCaptureTest.kt"
+      ],
+      "invariant": "A scan starts after a persisted row mark that advances only through a contiguous run of settled rows, so pending or failed screenshots, clock changes and a rebuilt media index are reconsidered and private-mode content is never replayed.",
+      "tradeoffs": "An image moved or renamed into a screenshots folder, or restored from trash, after it was settled is no longer captured. A screenshot that keeps failing holds the mark, so scans from that row on cost what they did before. Receipts are not pruned.",
+      "next_step": "Confirm on API 29 that another application's pending rows are visible through setIncludePending; only the API 30 and later query was exercised. If they are not, a screenshot published after a later image settled could be skipped on Android 10. Measure the scan cost on a device with a large photo library.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "The screenshot capture unit tests cover the mark. On an API 34 emulator, in one run, the query returned a pending row owned by another application, the mark held while a later settled image was captured, the pending screenshot was captured after publication, and a system screenshot appeared once in History and was not captured again after a restart. API 29 was not exercised."
+    },
+    {
+      "id": "RUN-190",
+      "title": "Compact Unigram tokenizer vocabulary",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Semantic search module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/semantic-search/src/unigram.rs",
+        "modules/semantic-search/src/tokenizer.rs",
+        "modules/semantic-search/src/lib.rs",
+        "modules/semantic-search/Cargo.toml"
+      ],
+      "invariant": "A Unigram tokenizer file loads straight into a flat sorted trie with contiguous piece, score and offset arrays, never into the library's per-node hash maps or an intermediate JSON value, and yields encodings identical to the library tokenizer. Other tokenizer kinds load through the library unchanged.",
+      "tradeoffs": "There is no word cache, so tokenizing repetitive text takes about a fifth longer, around 0.1 ms per embedded chunk of about 26 ms. The segmentation is a port of the library's and must follow it when the tokenizers dependency is upgraded; the equivalence tests guard that. About 16 MB of the remaining load footprint is the freed file text that the allocator keeps.",
+      "next_step": "Inference worker footprint on Android and Windows, and the English model, whose tokenizer takes the library path. The loaded session still holds about 305 MiB for a 113 MiB model.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l with MallocLargeCache=0, the policy the inference worker inherits; module harness with one query to load, then 40 requests in indexing order",
+        "baseline": 514641101,
+        "candidate": 244003635,
+        "module_footprint_after_load_kib_before": [
+          650625,
+          651137
+        ],
+        "module_footprint_after_load_kib_after": [
+          342736,
+          343488
+        ],
+        "tokenizer_alone_footprint_after_load_kib_before": [
+          343024,
+          343072
+        ],
+        "tokenizer_alone_footprint_after_load_kib_after": [
+          41824,
+          43456
+        ],
+        "tokenizer_live_malloc_at_load_mb": [
+          265.2,
+          12.8
+        ],
+        "module_load_ms_median": [
+          318,
+          172
+        ],
+        "tokenizer_encode_ms_per_request_median": [
+          0.084,
+          0.107
+        ],
+        "equivalence": {
+          "inputs_compared_on_installed_vocabulary": 6040,
+          "tokens_compared_on_installed_vocabulary": 1326116,
+          "embedding_vectors_sha256_equal": true
+        },
+        "scenario": "macOS 27.3 host, release build, installed multilingual model with 250,002 pieces read in place. Baseline and candidate are the medians of three runs per version under the worker policy, 490.8 and 232.7 MiB, converted to bytes. The other figures are five alternating runs per version with the default allocator, which keeps freed large blocks in the footprint; ranges are minimum and maximum, pairs are before and after.",
+        "repetitions_per_version": 3,
+        "attribution": "The library's trie had 782,761 nodes with one hash map each, and its deserializer built the vocabulary twice. The process was a harness driving the module's public interface, not the application's inference worker. Embedding vectors of the 40-request run are byte-identical before and after.",
+        "qualification": false,
+        "peak_footprint_mib_worker_policy": {
+          "before": [
+            491.4,
+            490.8,
+            490.5
+          ],
+          "after": [
+            232.7,
+            232.8,
+            232.7
+          ]
+        },
+        "module_footprint_after_load_kib_worker_policy": {
+          "before": [
+            398672,
+            397921,
+            397440
+          ],
+          "after": [
+            133904,
+            133936,
+            133696
+          ]
+        },
+        "peak_footprint_mib_default_allocator": [
+          669,
+          372
+        ]
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-191",
+      "title": "Release the OCR detector before recognition",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "OCR module",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/src/lib.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/db_net.rs"
+      ],
+      "invariant": "OCR creates the text-detection session for each recognition and drops it, with its arena, before line preparation and recognition, and frees the resized detection image before the detector runs, without changing recognised text or box geometry.",
+      "tradeoffs": "The detector session is created on every call, about 25 ms; the worker is torn down after each request, so it was never reused. A corrupt detector model now fails after the image is decoded instead of at engine load, in the same invocation.",
+      "next_step": "About 820 MiB of the 16-megapixel peak is the runtime's working memory inside the detector run, roughly 190 bytes per detection input pixel. Only a smaller detection size lowers it and that changes the text: a cap of 1,600 gave 602 MiB and 1,280 gave 458 MiB at 16 megapixels, with lines splitting, merging and small text lost. Android and Windows are not measured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "process peak physical footprint bytes reported by /usr/bin/time -l with MallocLargeCache=0, the policy the inference worker inherits; full OCR of one image on all ten routes",
+        "baseline": 1010512691,
+        "candidate": 980208845,
+        "peak_footprint_mib_median": {
+          "rendered_text_16_megapixels": [
+            963.7,
+            934.8
+          ],
+          "synthetic_rgba_16_megapixels": [
+            947.5,
+            934.9
+          ],
+          "rendered_text_2880_by_1800": [
+            569.1,
+            545.8
+          ],
+          "rendered_text_1600_by_900": [
+            401.1,
+            368.6
+          ]
+        },
+        "footprint_during_recognition_mib": {
+          "rendered_text_16_megapixels": [
+            900,
+            208
+          ],
+          "rendered_text_2880_by_1800": [
+            566,
+            126
+          ]
+        },
+        "scenario": "macOS 27.3 host, release build of the module's evidence binary, installed models read in place, images of rendered text in eight scripts. Pairs are before and after. Baseline and candidate are the 16-megapixel medians converted to bytes. The recognition figures are the highest footprint while the routes run, from an instrumented copy with phase markers.",
+        "repetitions_per_version": 5,
+        "attribution": "The peak sits inside the detector run, so releasing the detector lowers it only by what recognition used to add on top. The larger effect is that recognition, most of the run time, proceeds near 200 MiB instead of 900 MiB at 16 megapixels. Recognised text was byte-identical in every run.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-192",
+      "title": "Presentation stops animating before the window hides",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "DesktopWindowController",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/desktop/desktop_window_controller.dart",
+        "apps/copypaste_flutter/lib/main.dart"
+      ],
+      "invariant": "A close that hides the window reports the presentation hidden before the native window leaves the screen, and the presentation runs under a ticker mode that follows that visibility, so animations request no frames once the window is being hidden. A hide that fails reports the window visible again.",
+      "tradeoffs": "An animation in flight when the window hides pauses and resumes when the window is shown again instead of finishing off screen.",
+      "next_step": "Surface count and footprint peak at close on macOS 26 and macOS 27 hardware; the same on Windows, where the cost of a frame rendered for a hidden window is unmeasured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process IOSurface bytes at the peak after the window closes",
+        "baseline": 112197632,
+        "candidate": 33554432,
+        "iosurface_peak_bytes_before": [
+          112197632
+        ],
+        "iosurface_peak_bytes_after": [
+          33554432,
+          33554432,
+          45088768
+        ],
+        "surfaces_at_peak_before": [
+          13
+        ],
+        "surfaces_at_peak_after": [
+          7,
+          6,
+          7
+        ],
+        "footprint_peak_bytes_after_close_before": [
+          210763776
+        ],
+        "footprint_peak_bytes_after_close_after": [
+          154140672,
+          137363456,
+          140509184
+        ],
+        "earlier_session_before": {
+          "iosurface_peak_bytes": [
+            145752064,
+            145752064
+          ],
+          "surfaces_at_peak": [
+            20,
+            16
+          ],
+          "footprint_peak_bytes": [
+            254803968,
+            246415360
+          ]
+        },
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU, release builds on Flutter 3.47.6; 86 clips; History scrolled, the pointer resting over a clip card, the window closed with cmd+w, surfaces sampled through the close. One fresh process per run; values are the tools' whole megabytes, the candidate is the median.",
+        "repetitions_per_version": 3,
+        "attribution": "Before the change the close was followed by twelve frames in about 270 ms, ten of them from the hover-out animation of the card under the pointer, and each frame created a window-sized backing store. With it the close adds one to three surfaces instead of about nine. Both builds free the surfaces about a second later, so the saving is the transient peak and not the hidden footprint. Only one reference run of the earlier build was taken in the same session; two more come from an earlier session.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Controller tests passed. In the macOS guest animations ran again after the window was reopened, Quick Paste opened while the main window was hidden, and the presentation still suspended after 60 s hidden; Windows not built."
     }
   ]
 }

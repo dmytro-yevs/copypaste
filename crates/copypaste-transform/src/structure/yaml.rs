@@ -15,7 +15,7 @@ use super::json::string::{quoted, unescape};
 use super::json::writer::Writer;
 use super::{indent_unit, INDENT};
 use crate::catalogue::{Category, Context, Flags, Output, TransformDef};
-use crate::error::{check_output_len, Location, TransformError, Warning};
+use crate::error::{check_output_len, check_tree_input_len, Location, TransformError, Warning};
 use crate::params::{ParamSpec, Params};
 
 static TO_JSON_PARAMS: [ParamSpec; 1] = [INDENT];
@@ -104,6 +104,7 @@ fn scan_error(offsets: &CharOffsets, error: &ScanError) -> TransformError {
 }
 
 fn run_to_json(input: &str, params: &Params, ctx: &Context) -> Result<Output, TransformError> {
+    check_tree_input_len(input.len())?;
     let text = strip_bom(input);
     let offsets = CharOffsets::new(text);
     let documents =

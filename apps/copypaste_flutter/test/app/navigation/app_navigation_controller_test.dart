@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
+import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -62,6 +65,39 @@ void main() {
     expect(controller.bottomOverlayOpen, isTrue);
     controller.handleDrawerVisibilityChanged(false);
     expect(controller.bottomOverlayOpen, isFalse);
+  });
+
+  testWidgets('a drawer replacing a passive one blocks until marked passive', (
+    WidgetTester tester,
+  ) async {
+    final controller = AppNavigationController();
+    await tester.pumpWidget(_NavigationHarness(controller: controller));
+    final context = tester.element(find.text('Root'));
+
+    unawaited(
+      showOverlay<void>(
+        context,
+        AppOverlays.drawerConfiguration(context, passive: true),
+        builder: (context) => const Text('Detail'),
+      ).future,
+    );
+    await tester.pumpAndSettle();
+    expect(controller.overlaysPassive, isTrue);
+
+    // An editor opened from the detail replaces it and holds unsaved input.
+    unawaited(
+      showOverlay<void>(
+        context,
+        AppOverlays.drawerConfiguration(context, guarded: true),
+        builder: (context) => const Text('Editor'),
+      ).future,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Detail'), findsNothing);
+    expect(controller.overlaysPassive, isFalse);
+    controller.dismissPassiveOverlays();
+    await tester.pumpAndSettle();
+    expect(find.text('Editor'), findsOneWidget);
   });
 
   testWidgets('pops the top nested route before reaching the root', (

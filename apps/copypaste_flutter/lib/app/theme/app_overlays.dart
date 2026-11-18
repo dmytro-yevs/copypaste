@@ -40,6 +40,22 @@ abstract final class AppOverlays {
     return true;
   }
 
+  /// Whether the window has no open drawer or only one opened as passive.
+  static bool drawerPassiveOf(BuildContext context) {
+    final session = _AppDrawerConfiguration.sessionFor(context);
+    final active = session.active;
+    return active == null || active.isCompleted || session.passive;
+  }
+
+  /// Removes the window's open drawer if it was opened as passive.
+  static void closePassiveDrawer(BuildContext context) {
+    final session = _AppDrawerConfiguration.sessionFor(context);
+    final active = session.active;
+    if (session.passive && active != null && !active.isCompleted) {
+      active.remove();
+    }
+  }
+
   /// Binds Escape in drawer content to [onDismiss], which owns the drawer's
   /// close guards; the window's back actions take the same path.
   static Widget drawerDismissal({
@@ -49,9 +65,12 @@ abstract final class AppOverlays {
 
   /// [guarded] drawers close only through their own dismissal, so an
   /// unsaved-changes prompt cannot be skipped by a barrier tap or a drag.
+  /// Only [passive] drawers, which hold no work, may close while the window
+  /// is hidden; every other drawer defers presentation suspension.
   static DrawerConfiguration drawerConfiguration(
     BuildContext context, {
     bool guarded = false,
+    bool passive = false,
   }) {
     final registry = OverlayAnchorRegistry.of(context);
     final side =
@@ -74,6 +93,7 @@ abstract final class AppOverlays {
       surfaceOpacity: 1,
       surfaceBlur: 0,
       barrierColor: scrimColor,
+      passive: passive,
       // A side drawer sits flush under the header, so only its free bottom
       // corner is rounded.
       borderRadius: side ? _sideDrawerRadius : _bottomDrawerRadius,
@@ -601,10 +621,12 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
     super.barrierColor,
     super.borderRadius,
     this.contentRadius = BorderRadius.zero,
+    this.passive = false,
   });
 
   /// The library paints square content over the drawer's rounded corners.
   final BorderRadius contentRadius;
+  final bool passive;
 
   static final _sessions = Expando<_DrawerSession>();
 
@@ -644,12 +666,14 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
     session.active = drawer;
     session.scope = scope;
     session.opener = opener;
+    session.passive = passive;
     session.value = true;
     drawer.future.whenComplete(() {
       if (!identical(session.active, drawer)) return;
       session.active = null;
       session.scope = null;
       session.opener = null;
+      session.passive = false;
       session.value = false;
       // Focus the user already moved elsewhere stays where it is.
       final focusInDrawer =
@@ -744,4 +768,5 @@ class _DrawerSession extends ValueNotifier<bool> {
   OverlayCompleter? active;
   GlobalKey<_DrawerFocusScopeState>? scope;
   FocusNode? opener;
+  bool passive = false;
 }

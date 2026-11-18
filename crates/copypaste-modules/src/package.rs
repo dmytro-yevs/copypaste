@@ -212,6 +212,55 @@ fn read_regular(directory: &Path, name: &str, limit: u64) -> Result<Vec<u8>, Mod
     Ok(bytes)
 }
 
+/// Identifies the installed manifest and signature files by size, times and,
+/// where the platform reports them, inode and status-change time.
+#[derive(PartialEq, Eq)]
+pub(crate) struct PackageFingerprint(Vec<(u64, std::time::SystemTime, [i64; 3])>);
+
+/// `None` when the files are missing or not regular, so callers verify again.
+pub(crate) fn fingerprint(directory: &Path) -> Option<PackageFingerprint> {
+    let root = fs::symlink_metadata(directory).ok()?;
+    if !root.is_dir() || root.file_type().is_symlink() {
+        return None;
+    }
+    [MANIFEST, SIGNATURE]
+        .iter()
+        .map(|name| {
+            let metadata = fs::symlink_metadata(directory.join(name)).ok()?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return None;
+            }
+            Some((
+                metadata.len(),
+                metadata.modified().ok()?,
+                identity(&metadata),
+            ))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(PackageFingerprint)
+}
+
+#[cfg(unix)]
+fn identity(metadata: &fs::Metadata) -> [i64; 3] {
+    use std::os::unix::fs::MetadataExt;
+    [
+        metadata.ino() as i64,
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ]
+}
+
+#[cfg(windows)]
+fn identity(metadata: &fs::Metadata) -> [i64; 3] {
+    use std::os::windows::fs::MetadataExt;
+    [metadata.creation_time() as i64, 0, 0]
+}
+
+#[cfg(not(any(unix, windows)))]
+fn identity(_: &fs::Metadata) -> [i64; 3] {
+    [0; 3]
+}
+
 pub(crate) fn regular_path(directory: &Path, relative: &str) -> Result<(), ModuleError> {
     let root = fs::symlink_metadata(directory)?;
     if !root.is_dir() || root.file_type().is_symlink() {

@@ -1,3 +1,4 @@
+import '../../../platform/files/history_file_picker.dart';
 import '../../../platform/files/temporary_artifacts.dart';
 import '../../../l10n/l10n.dart';
 
@@ -53,12 +54,37 @@ _choosePrivateCopy({
   required int maxBytes,
   required String prefix,
 }) async {
+  if (Platform.isAndroid) {
+    TemporaryDirectoryLease? lease;
+    try {
+      final copy = await SystemHistoryFilePicker.copyChosenAndroidDocument(
+        maxBytes: maxBytes,
+        destination: (name) async {
+          final extension = _acceptedExtension(name, extensions, label);
+          lease = await TemporaryDirectoryLease.create(
+            await getTemporaryDirectory(),
+            prefix,
+          );
+          return '${lease!.directory.path}/input.$extension';
+        },
+      );
+      if (copy == null) return null;
+      return (path: copy.path, name: copy.name, dispose: lease!.dispose);
+    } on PlatformFileException catch (error) {
+      await lease?.dispose();
+      if (!error.tooLarge) rethrow;
+      throw ModulesException(AppStrings.current.modulesFileNotAccepted(label));
+    } catch (_) {
+      await lease?.dispose();
+      rethrow;
+    }
+  }
   final selected = await openFile(
     acceptedTypeGroups: [XTypeGroup(label: label, extensions: extensions)],
   );
   if (selected == null) return null;
-  final extension = selected.name.split('.').last.toLowerCase();
-  if (!extensions.contains(extension) || await selected.length() > maxBytes) {
+  final extension = _acceptedExtension(selected.name, extensions, label);
+  if (await selected.length() > maxBytes) {
     throw ModulesException(AppStrings.current.modulesFileNotAccepted(label));
   }
   final root = await getTemporaryDirectory();
@@ -72,4 +98,12 @@ _choosePrivateCopy({
     await lease.dispose();
     rethrow;
   }
+}
+
+String _acceptedExtension(String name, List<String> extensions, String label) {
+  final extension = name.split('.').last.toLowerCase();
+  if (!extensions.contains(extension)) {
+    throw ModulesException(AppStrings.current.modulesFileNotAccepted(label));
+  }
+  return extension;
 }

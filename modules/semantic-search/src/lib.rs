@@ -10,7 +10,11 @@ use ort::{
     value::Tensor,
 };
 use std::{collections::BTreeMap, fs, path::PathBuf};
-use tokenizers::{Tokenizer, TruncationParams};
+use tokenizer::TextTokenizer;
+use tokenizers::TruncationParams;
+
+mod tokenizer;
+mod unigram;
 
 pub struct SemanticSearchModule {
     environment: ModuleEnvironment,
@@ -95,7 +99,7 @@ impl Module for SemanticSearchModule {
 
 struct Engine {
     model: SearchModel,
-    tokenizer: Tokenizer,
+    tokenizer: TextTokenizer,
     session: Session,
 }
 
@@ -119,7 +123,7 @@ impl Engine {
         let directory = PathBuf::from(&environment.data_dir)
             .join("models")
             .join(model.resource_directory_name());
-        let mut tokenizer = Tokenizer::from_file(directory.join("tokenizer.json"))
+        let mut tokenizer = TextTokenizer::from_file(&directory.join("tokenizer.json"))
             .map_err(|_| "The search tokenizer could not be loaded. Download its model again.")?;
         tokenizer
             .with_truncation(Some(TruncationParams {
@@ -128,7 +132,7 @@ impl Engine {
                 ..Default::default()
             }))
             .map_err(|_| "The search tokenizer configuration is invalid.")?;
-        tokenizer.with_padding(None);
+        tokenizer.without_padding();
         let session = Session::builder()
             .map_err(model_failed)?
             .with_intra_threads(2)

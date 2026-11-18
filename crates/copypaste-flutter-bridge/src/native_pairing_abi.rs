@@ -6,7 +6,6 @@
 //! this binding before it can consider a context active.
 
 use std::ffi::{c_char, CStr};
-use std::sync::OnceLock;
 
 #[repr(C)]
 pub struct ProtectedPairingBuffer {
@@ -80,11 +79,9 @@ pub unsafe extern "C" fn copypaste_flutter_reveal_protected_pairing_qr_png(
     else {
         return false;
     };
-    let Some(mut bytes) = native_runtime().block_on(crate::protected::reveal_qr_png(
-        &ceremony_id,
-        &context_id,
-        generation,
-    )) else {
+    let Some(mut bytes) = crate::api::handler::async_runtime().block_on(
+        crate::protected::reveal_qr_png(&ceremony_id, &context_id, generation),
+    ) else {
         return false;
     };
     bytes.shrink_to_fit();
@@ -115,8 +112,8 @@ pub unsafe extern "C" fn copypaste_flutter_reveal_protected_pairing_sas(
     let Some(context_id) = (unsafe { read_identifier(context_id) }) else {
         return false;
     };
-    let Some(mut bytes) =
-        native_runtime().block_on(crate::protected::reveal_sas(&context_id, generation))
+    let Some(mut bytes) = crate::api::handler::async_runtime()
+        .block_on(crate::protected::reveal_sas(&context_id, generation))
     else {
         return false;
     };
@@ -146,7 +143,7 @@ pub unsafe extern "C" fn copypaste_flutter_protected_pairing_join(
     }) else {
         return false;
     };
-    native_runtime().block_on(crate::protected::native_join(
+    crate::api::handler::async_runtime().block_on(crate::protected::native_join(
         &context, generation, code, addr,
     ))
 }
@@ -161,7 +158,8 @@ pub unsafe extern "C" fn copypaste_flutter_protected_pairing_join_uri(
     else {
         return false;
     };
-    native_runtime().block_on(crate::protected::native_join_uri(&context, generation, uri))
+    crate::api::handler::async_runtime()
+        .block_on(crate::protected::native_join_uri(&context, generation, uri))
 }
 
 #[no_mangle]
@@ -176,8 +174,8 @@ pub unsafe extern "C" fn copypaste_flutter_protected_pairing_status(
     let Some(context) = (unsafe { read_identifier(context) }) else {
         return false;
     };
-    let Some((state, expires_in_ms)) =
-        native_runtime().block_on(crate::protected::native_status(&context, generation))
+    let Some((state, expires_in_ms)) = crate::api::handler::async_runtime()
+        .block_on(crate::protected::native_status(&context, generation))
     else {
         return false;
     };
@@ -201,7 +199,7 @@ pub unsafe extern "C" fn copypaste_flutter_protected_pairing_decide(
     else {
         return false;
     };
-    native_runtime().block_on(crate::protected::native_decision(
+    crate::api::handler::async_runtime().block_on(crate::protected::native_decision(
         &context,
         generation,
         zeroize::Zeroizing::new(sas),
@@ -270,17 +268,8 @@ pub unsafe extern "C" fn copypaste_flutter_cancel_protected_pairing_context(
     let Some(context_id) = (unsafe { read_identifier(context_id) }) else {
         return false;
     };
-    native_runtime().block_on(crate::protected::cancel_native_context(&context_id))
-}
-
-fn native_runtime() -> &'static tokio::runtime::Runtime {
-    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("native protected pairing runtime initializes")
-    })
+    crate::api::handler::async_runtime()
+        .block_on(crate::protected::cancel_native_context(&context_id))
 }
 
 unsafe fn read_identifier(pointer: *const c_char) -> Option<String> {

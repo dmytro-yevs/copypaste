@@ -9,7 +9,7 @@ use html2text::render::TrivialDecorator;
 use html2text::{Comment, Document, Element, Handle};
 
 use crate::catalogue::Context;
-use crate::error::{check_output_len, TransformError};
+use crate::error::{check_output_len, check_tree_input_len, TransformError};
 
 /// Below this depth content is kept as plain text instead of recursing.
 const MAX_DEPTH: usize = 128;
@@ -53,6 +53,7 @@ fn unreadable() -> TransformError {
 }
 
 pub(super) fn to_plain(input: &str, ctx: &Context) -> Result<String, TransformError> {
+    check_tree_input_len(input.len())?;
     ctx.check()?;
     let rendered = html2text::config::with_decorator(TrivialDecorator::new())
         .raw_mode(true)
@@ -63,6 +64,7 @@ pub(super) fn to_plain(input: &str, ctx: &Context) -> Result<String, TransformEr
 }
 
 pub(super) fn to_markdown(input: &str, ctx: &Context) -> Result<String, TransformError> {
+    check_tree_input_len(input.len())?;
     ctx.check()?;
     let dom = html2text::config::plain()
         .parse_html(input.as_bytes())

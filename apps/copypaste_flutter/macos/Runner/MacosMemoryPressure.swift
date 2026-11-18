@@ -19,6 +19,7 @@ final class MacosMemoryPressure {
   private var clients: [Client] = []
   private var source: DispatchSourceMemoryPressure?
   private var reliefScheduled = false
+  private var reliefRequested = false
 
   func register(engine: FlutterEngine) {
     unregister(engine: engine)
@@ -30,7 +31,7 @@ final class MacosMemoryPressure {
         result(FlutterMethodNotImplemented)
         return
       }
-      self?.scheduleRelief()
+      self?.releaseFreedMemory()
       result(nil)
     }
     clients.append(Client(engine: engine, channel: channel))
@@ -65,12 +66,24 @@ final class MacosMemoryPressure {
 
   // Returns dirty free pages kept by the tiny and small allocators. It does not
   // drain the large-block cache, which Info.plist disables before launch.
-  private func scheduleRelief() {
-    guard !reliefScheduled else { return }
+  // Requests made during a pass coalesce into one more pass after it, so
+  // memory freed by an asynchronous teardown is still returned.
+  func releaseFreedMemory() {
+    guard !reliefScheduled else {
+      reliefRequested = true
+      return
+    }
     reliefScheduled = true
     DispatchQueue.global(qos: .utility).async { [weak self] in
       _ = malloc_zone_pressure_relief(nil, 0)
-      DispatchQueue.main.async { self?.reliefScheduled = false }
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.reliefScheduled = false
+        if self.reliefRequested {
+          self.reliefRequested = false
+          self.releaseFreedMemory()
+        }
+      }
     }
   }
 }

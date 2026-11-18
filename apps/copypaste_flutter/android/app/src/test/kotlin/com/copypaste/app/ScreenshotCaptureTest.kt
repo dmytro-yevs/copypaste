@@ -50,6 +50,31 @@ class ScreenshotCaptureTest {
         } finally { monitor.close() }
     }
 
+    @Test fun scanMarkSkipsSettledRowsButHoldsPendingAndAcceptsBackdatedInserts() {
+        provider.rows = listOf(
+            row(1, "IMG_camera.jpg", since + 1000),
+            row(2, "Screenshot_pending.png", since + 2000, pending = 1),
+            row(3, "Screenshot_new.png", since + 3000),
+        )
+        val reader = Reader()
+        val monitor = ScreenshotCaptureMonitor(app, reader)
+        try {
+            monitor.scan()
+            assertEquals(listOf(3L), reader.ids)
+            assertEquals(1L, ScreenshotCaptureState.scanMark(app).id)
+
+            provider.rows = provider.rows.map { it.toMutableMap().apply { put(MediaStore.Images.Media.IS_PENDING, 0) } }
+            monitor.scan()
+            assertEquals(listOf(3L, 2L), reader.ids)
+            assertEquals(3L, ScreenshotCaptureState.scanMark(app).id)
+
+            provider.rows = provider.rows + row(4, "Screenshot_clock_back.png", since + 500)
+            monitor.scan()
+            assertEquals(3L, provider.lastArguments[1])
+            assertEquals(listOf(3L, 2L, 4L), reader.ids)
+        } finally { monitor.close() }
+    }
+
     @Test fun enabledByDefaultAndPersistsWithoutReinitializingCutoff() {
         assertTrue(ScreenshotCaptureState.enabled(app))
         ScreenshotCaptureState.initialize(app, since + 1000)
@@ -295,18 +320,19 @@ class ScreenshotCaptureTest {
     private class ImagesProvider : ContentProvider() {
         var rows: List<Map<String, Any>> = emptyList()
         var queries = 0
+        var lastArguments: List<Long> = emptyList()
         override fun onCreate() = true
         override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
             queries++
             val columns = projection!!.map { it }.toTypedArray()
+            // since, mark _ID, mark DATE_ADDED, continuation _ID
+            val args = selectionArgs!!.map { it.toLong() }
+            lastArguments = args
             val selected = rows.filter { row ->
                 val added = (row[MediaStore.Images.Media.DATE_ADDED] as Number).toLong()
                 val id = (row[MediaStore.Images.Media._ID] as Number).toLong()
-                val args = selectionArgs!!
-                added >= args[0].toLong() && (args.size == 1 ||
-                    added > args[1].toLong() || (added == args[2].toLong() && id > args[3].toLong()))
-            }.sortedWith(compareBy({ (it[MediaStore.Images.Media.DATE_ADDED] as Number).toLong() },
-                { (it[MediaStore.Images.Media._ID] as Number).toLong() }))
+                added >= args[0] && (id > args[1] || added >= args[2]) && id > args[3]
+            }.sortedBy { (it[MediaStore.Images.Media._ID] as Number).toLong() }
             return MatrixCursor(columns).apply { for (row in selected) addRow(columns.map { row[it] ?: 0 }.toTypedArray()) }
         }
         override fun getType(uri: Uri) = "image/png"

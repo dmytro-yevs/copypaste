@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::MAX_OUTPUT_BYTES;
+use crate::{MAX_OUTPUT_BYTES, MAX_TREE_INPUT_BYTES};
 
 /// A position in the input: byte offset plus 1-based line and column, where
 /// the column counts Unicode scalar values from the start of the line.
@@ -124,6 +124,18 @@ impl TransformError {
             location: Some(Location::of(text, offset)),
         }
     }
+}
+
+/// Fails before a transform that builds a whole-document tree reads more
+/// than [`MAX_TREE_INPUT_BYTES`].
+pub(crate) fn check_tree_input_len(len: usize) -> Result<(), TransformError> {
+    if len > MAX_TREE_INPUT_BYTES {
+        return Err(TransformError::InputTooLarge {
+            bytes: len,
+            limit: MAX_TREE_INPUT_BYTES,
+        });
+    }
+    Ok(())
 }
 
 /// Fails once a growing output would pass [`MAX_OUTPUT_BYTES`]. Transforms

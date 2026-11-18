@@ -7,8 +7,13 @@ use std::{
 };
 
 use copypaste_module_sdk::{Module, ModuleEnvironment, ModuleInvocation, ModuleOutput};
+use image::{GenericImageView, Rgb};
 use paddle_ocr_rs::{
-    base_net::BaseNet, crnn_net::CrnnNet, db_net::DbNet, ocr_result::TextBox, ocr_utils::OcrUtils,
+    base_net::BaseNet,
+    crnn_net::CrnnNet,
+    db_net::DbNet,
+    ocr_result::TextBox,
+    ocr_utils::{OcrUtils, PaddedImage},
     scale_param::ScaleParam,
 };
 
@@ -81,7 +86,6 @@ impl Module for OcrModule {
 }
 
 struct OcrEngine {
-    detector: DbNet,
     models: PathBuf,
 }
 
@@ -94,25 +98,25 @@ impl OcrEngine {
             require_file(&models.join(route.model), route.id)?;
             require_file(&models.join(route.dictionary), route.id)?;
         }
-
-        let mut detector = DbNet::new();
-        detector
-            .init_model(path_string(&models.join(DETECTOR))?.as_str(), 2, None)
-            .map_err(ocr_error)?;
-        Ok(Self { detector, models })
+        Ok(Self { models })
     }
 
     fn recognize(&mut self, image_path: &Path) -> Result<String, String> {
-        let image = decode_image(image_path)?;
         let padding = 50;
-        let padded = OcrUtils::make_padding(&image, padding).map_err(ocr_error)?;
-        drop(image);
+        let padded = PaddedImage::new(decode_image(image_path)?, padding);
         let longest_side = padded.width().max(padded.height()).min(2_000);
         let scale = ScaleParam::get_scale_param(&padded, longest_side + (padding * 2));
-        let boxes = self
-            .detector
-            .get_text_boxes(&padded, &scale, 0.5, 0.3, 1.6)
-            .map_err(ocr_error)?;
+        // The detector's arena keeps its peak working memory until the session
+        // is dropped, so release it before recognition allocates on top of it.
+        let boxes = {
+            let mut detector = DbNet::new();
+            detector
+                .init_model(path_string(&self.models.join(DETECTOR))?.as_str(), 2, None)
+                .map_err(ocr_error)?;
+            detector
+                .get_text_boxes(&padded, &scale, 0.5, 0.3, 1.6)
+                .map_err(ocr_error)?
+        };
         validate_text_regions(&boxes, &padded)?;
         if boxes.is_empty() {
             return Ok(String::new());
@@ -174,7 +178,7 @@ impl OcrEngine {
 
 // Keep only bounded, resized RGB lines; large lines are prepared on demand.
 fn prepare_lines(
-    padded: &image::RgbImage,
+    padded: &(impl GenericImageView<Pixel = Rgb<u8>> + 'static),
     boxes: &[TextBox],
     limit: u64,
 ) -> Vec<Option<image::RgbImage>> {
@@ -417,13 +421,29 @@ fn decode_image(path: &Path) -> Result<image::RgbImage, String> {
     limits.max_image_height = Some(MAX_IMAGE_SIDE);
     limits.max_alloc = Some(MAX_DECODE_ALLOC_BYTES);
     reader.limits(limits);
-    reader
+    let image = reader
         .decode()
-        .map_err(|_| "The selected image is too large or malformed for OCR.".to_owned())
-        .map(|image| image.to_rgb8())
+        .map_err(|_| "The selected image is too large or malformed for OCR.".to_owned())?;
+    Ok(match image {
+        image::DynamicImage::ImageRgba8(rgba) => drop_alpha(rgba),
+        other => other.into_rgb8(),
+    })
 }
 
-fn validate_text_regions(boxes: &[TextBox], image: &image::RgbImage) -> Result<(), String> {
+// Same pixels as `into_rgb8`, compacted in place so no second full-size buffer exists.
+fn drop_alpha(rgba: image::RgbaImage) -> image::RgbImage {
+    let (width, height) = rgba.dimensions();
+    let mut bytes = rgba.into_raw();
+    let pixels = bytes.len() / 4;
+    for pixel in 1..pixels {
+        bytes.copy_within(pixel * 4..pixel * 4 + 3, pixel * 3);
+    }
+    bytes.truncate(pixels * 3);
+    bytes.shrink_to_fit();
+    image::RgbImage::from_raw(width, height, bytes).expect("RGB buffer matches its dimensions")
+}
+
+fn validate_text_regions(boxes: &[TextBox], image: &impl GenericImageView) -> Result<(), String> {
     if boxes.len() > MAX_TEXT_REGIONS {
         return Err("The selected image contains too many text regions for OCR.".into());
     }
@@ -701,6 +721,69 @@ mod tests {
         assert!(uncached[0].is_none());
         let crop = OcrUtils::get_rotate_crop_image(&image, &boxes[0].points);
         assert_eq!(cached[0].as_ref().unwrap(), &CrnnNet::prepare_image(&crop));
+    }
+
+    #[test]
+    fn dropping_alpha_in_place_matches_rgb_conversion() {
+        let rgba = image::RgbaImage::from_fn(37, 23, |x, y| {
+            image::Rgba([x as u8, y as u8, (x * y) as u8, (x * 31 + y * 7) as u8])
+        });
+        let expected = image::DynamicImage::ImageRgba8(rgba.clone()).into_rgb8();
+        assert_eq!(drop_alpha(rgba), expected);
+    }
+
+    #[test]
+    fn padded_view_matches_materialized_padding_for_detection_and_crops() {
+        use paddle_ocr_rs::ocr_result::Point;
+        let padding = 50;
+        for (width, height) in [(1, 1), (97, 41), (2_300, 900)] {
+            let mut seed = width * 31 + height;
+            let source = image::RgbImage::from_fn(width, height, |_, _| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                image::Rgb([(seed >> 8) as u8, (seed >> 16) as u8, (seed >> 24) as u8])
+            });
+            let padded = OcrUtils::make_padding(&source, padding).unwrap();
+            let view = PaddedImage::new(source, padding);
+            assert_eq!(view.dimensions(), padded.dimensions());
+            assert!(
+                padded
+                    .enumerate_pixels()
+                    .all(|(x, y, pixel)| view.get_pixel(x, y) == *pixel)
+            );
+
+            let longest_side = padded.width().max(padded.height()).min(2_000);
+            let scale = ScaleParam::get_scale_param(&view, longest_side + padding * 2);
+            assert_eq!(
+                DbNet::resize_input(&view, &scale),
+                DbNet::resize_input(&padded, &scale)
+            );
+
+            let (right, bottom) = (padded.width() - 1, padded.height() - 1);
+            let quads = [
+                [(0, 0), (right, 0), (right, bottom), (0, bottom)],
+                [(0, 0), (60, 0), (60, 8), (0, 8)],
+                [
+                    (right - 70, bottom - 9),
+                    (right, bottom - 12),
+                    (right, bottom),
+                    (right - 70, bottom),
+                ],
+                [
+                    (40, 45),
+                    (right.min(140), 52),
+                    (right.min(135), 80),
+                    (35, 73),
+                ],
+                [(45, 30), (55, 30), (55, bottom), (45, bottom)],
+            ];
+            for quad in quads {
+                let points: Vec<Point> = quad.iter().map(|&(x, y)| Point { x, y }).collect();
+                assert_eq!(
+                    OcrUtils::get_rotate_crop_image(&view, &points),
+                    OcrUtils::get_rotate_crop_image(&padded, &points)
+                );
+            }
+        }
     }
 
     #[test]

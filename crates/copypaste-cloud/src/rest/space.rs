@@ -45,18 +45,15 @@ impl SupabaseRest {
             ("limit", SPACE_PAGE_SIZE.to_string()),
         ];
         let body = self
-            .send(token, || {
-                self.http
-                    .get(url.clone())
-                    .query(&query)
-                    .header("Accept", "application/json")
-            })
+            .fetch_capped(
+                token,
+                &url,
+                &query,
+                SPACE_PAGE_SIZE * (copypaste_sync::space::MAX_ENVELOPE_CIPHERTEXT + 512),
+            )
             .await?;
-        if body.len() > SPACE_PAGE_SIZE * (copypaste_sync::space::MAX_ENVELOPE_CIPHERTEXT + 512) {
-            return Err(RestError::Malformed);
-        }
         let rows: Vec<SpaceEnvelope> =
-            serde_json::from_str(&body).map_err(|_| RestError::Malformed)?;
+            serde_json::from_slice(&body).map_err(|_| RestError::Malformed)?;
         if rows.len() > SPACE_PAGE_SIZE {
             return Err(RestError::Malformed);
         }
@@ -81,18 +78,10 @@ impl SupabaseRest {
             ("limit", SPACE_INDEX_SIZE.to_string()),
         ];
         let body = self
-            .send(token, || {
-                self.http
-                    .get(url.clone())
-                    .query(&query)
-                    .header("Accept", "application/json")
-            })
+            .fetch_capped(token, &url, &query, SPACE_INDEX_SIZE * 512)
             .await?;
-        if body.len() > SPACE_INDEX_SIZE * 512 {
-            return Err(RestError::Malformed);
-        }
         let rows: Vec<SpaceIndexEntry> =
-            serde_json::from_str(&body).map_err(|_| RestError::Malformed)?;
+            serde_json::from_slice(&body).map_err(|_| RestError::Malformed)?;
         if rows.len() > SPACE_INDEX_SIZE {
             return Err(RestError::Malformed);
         }

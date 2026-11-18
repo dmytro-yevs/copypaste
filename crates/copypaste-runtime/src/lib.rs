@@ -97,6 +97,8 @@ pub struct Runtime {
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
+    peer_supervisor_started: AtomicBool,
+    peer_session: tokio::sync::Mutex<Option<peer_sync::PeerSession>>,
     download_resume_started: AtomicBool,
     module_sync_started: AtomicBool,
     capture_running: AtomicBool,
@@ -319,7 +321,7 @@ impl Runtime {
             port,
             settings.get().lan_visibility,
         ));
-        p2p.configure_relay(&settings.get());
+        p2p.apply_network_settings(&settings.get());
         copypaste_runtime_log::set_level(settings.get().log_level);
         let modules = Arc::new(copypaste_modules::ModuleHost::new(&data_dir));
         let events = broadcast::channel(EVENT_BUFFER).0;
@@ -424,6 +426,8 @@ impl Runtime {
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
+            peer_supervisor_started: AtomicBool::new(false),
+            peer_session: tokio::sync::Mutex::default(),
             download_resume_started: AtomicBool::new(false),
             module_sync_started: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
@@ -657,38 +661,18 @@ impl Runtime {
         }))
     }
 
-    /// Bind the peer port and start serving, forwarding and scheduling peer
-    /// sync until [`Runtime::shutdown`]. Idempotent while the listener runs.
+    /// Start the background work and, while sync is on, the peer listener and
+    /// the outgoing scheduler, which then follow the sync switch until
+    /// [`Runtime::shutdown`]. Fails only when sync is on and the port is busy.
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
         self.start_module_sync();
         self.start_deadlines();
         self.start_download_resume();
-        if self.listener_started.swap(true, Ordering::AcqRel) {
+        self.start_peer_network();
+        if self.listener_started.load(Ordering::Acquire) || !self.settings.get().sync_enabled {
             return Ok(());
         }
-        let listener = match self
-            .p2p
-            .node()
-            .bind_listener()
-            .and_then(tokio::net::TcpListener::from_std)
-        {
-            Ok(listener) => listener,
-            Err(_) => {
-                self.listener_started.store(false, Ordering::Release);
-                return Err(RuntimeError::Listener);
-            }
-        };
-        let runtime = Arc::clone(self);
-        let shutdown = self.shutdown.subscribe();
-        tokio::spawn(async move {
-            Arc::clone(&runtime).listen(listener, shutdown).await;
-            runtime.listener_started.store(false, Ordering::Release);
-        });
-        tokio::spawn(self.forward_changes(self.shutdown.subscribe()));
-        self.p2p
-            .sync_enabled_changed(self.settings.get().sync_enabled);
-        tokio::spawn(Arc::clone(self).run_peer_sync(self.shutdown.subscribe()));
-        Ok(())
+        self.try_start_peer_session()
     }
 
     /// Accept peer connections until shutdown, serving them from this history.

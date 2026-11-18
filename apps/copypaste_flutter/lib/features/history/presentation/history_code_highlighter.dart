@@ -37,6 +37,10 @@ class HighlightedHistoryCode {
 }
 
 /// Holds only the current presentation result, for the lifetime of its owner.
+/// It references the caller's source string rather than copying it, so a
+/// large source is also detected once instead of on every build. A large
+/// source matches only by identity: an equal reloaded string must replace
+/// the result whose span still references the previous copy.
 class HistoryCodeHighlightMemo {
   String? _source;
   ThemeData? _theme;
@@ -48,20 +52,19 @@ class HistoryCodeHighlightMemo {
     ThemeData theme, {
     bool json = false,
   }) {
-    if (_source == source &&
-        _theme == theme &&
-        _json == json &&
-        _result != null) {
+    final sameSource =
+        source.length > HistoryCodeHighlighter._maxHighlightedCodeUnits
+        ? identical(_source, source)
+        : _source == source;
+    if (sameSource && _theme == theme && _json == json && _result != null) {
       return _result!;
     }
     clear();
     final result = HistoryCodeHighlighter.highlight(source, theme, json: json);
-    if (source.length <= HistoryCodeHighlighter._maxHighlightedCodeUnits) {
-      _source = source;
-      _theme = theme;
-      _json = json;
-      _result = result;
-    }
+    _source = source;
+    _theme = theme;
+    _json = json;
+    _result = result;
     return result;
   }
 

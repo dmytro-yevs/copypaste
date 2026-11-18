@@ -89,6 +89,8 @@ windows-sys = { version = "0.61", features = [
 # support for imported/synced JPEG, GIF and WebP. Target-gated so other platforms
 # do not acquire Windows interoperability dependencies.
 image = { workspace = true, features = ["bmp", "jpeg", "gif", "webp"] }
+# Validates a copied PNG row by row; `image` only decodes into a full-size buffer.
+png.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"

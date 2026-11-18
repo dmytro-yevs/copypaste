@@ -13,7 +13,9 @@ impl ModuleHost {
         }
     }
     async fn cloud_operation(self: &Arc<Self>, method: Method) -> Result<ResponseData, String> {
-        if matches!(method, Method::CloudStatus) && !self.cloud_provider_available()? {
+        if matches!(method, Method::CloudStatus)
+            && !self.blocking(Self::cloud_provider_available).await?
+        {
             return Ok(signed_out_status());
         }
         if matches!(method, Method::CloudSignOut) {
@@ -21,15 +23,33 @@ impl ModuleHost {
             // its credentials are host-owned encrypted state and must still be
             // forgotten. The normal provider path remains responsible for its
             // best-effort remote revocation when it is available.
-            if !self.cloud_provider_available().unwrap_or(false) {
-                self.stop_cloud_provider(MODULE_ID)?;
-                self.clear_cloud_credentials(MODULE_ID)
-                    .map_err(|error| error.to_string())?;
+            if !self
+                .blocking(Self::cloud_provider_available)
+                .await
+                .unwrap_or(false)
+            {
+                self.blocking(|host| {
+                    host.stop_cloud_provider(MODULE_ID)?;
+                    host.clear_cloud_credentials(MODULE_ID)
+                        .map_err(|error| error.to_string())
+                })
+                .await?;
                 return Ok(signed_out_status());
             }
             return self.invoke_cloud_provider(method).await;
         }
         self.invoke_cloud_provider(method).await
+    }
+
+    /// Registry reads and module teardown stay off the reactor threads.
+    async fn blocking<T: Send + 'static>(
+        self: &Arc<Self>,
+        work: impl FnOnce(&Self) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let host = Arc::clone(self);
+        tokio::task::spawn_blocking(move || work(&host))
+            .await
+            .map_err(|error| error.to_string())?
     }
 
     fn cloud_provider_available(&self) -> Result<bool, String> {

@@ -133,6 +133,10 @@ rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
 comfy-table = "7"
 flutter_rust_bridge = "=2.13.0-beta.5"
+# Sizes the bridge handler pool; flutter_rust_bridge does not re-export it.
+threadpool = "1.8.1"
+# dlsym for Android calls above the minimum API level; rustix has no dlsym.
+libc = "0.2"
 # macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }

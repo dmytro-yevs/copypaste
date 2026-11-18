@@ -396,6 +396,7 @@ Future<void> _editClip(
       text: detail.body ?? detail.preview,
       rich: type.contains('html') || type.contains('rtf'),
     ),
+    onCopy: (text) => controller.transfers.copyTextFrom(detail.id, text),
   );
   if (id != null && context.mounted) {
     _toast(context, true, success: context.l10n.historyEditSaved);

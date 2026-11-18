@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'app_destination.dart';
 import 'app_page_route.dart';
 import '../theme/app_motion.dart';
+import '../theme/app_overlays.dart';
 
 /// Owns shell destination selection and the nested content navigation stack.
 class AppNavigationController extends ChangeNotifier {
@@ -76,6 +77,29 @@ class AppNavigationController extends ChangeNotifier {
 
   bool get bottomOverlayOpen => _bottomOverlayOpen || _visibleDrawers > 0;
 
+  final _NestedRouteStack _routes = _NestedRouteStack();
+
+  /// Observes the nested navigator; the navigation host attaches it.
+  NavigatorObserver get routeObserver => _routes;
+
+  /// Whether the open drawer and every nested route can close without losing
+  /// work. Overlays not marked passive never are.
+  bool get overlaysPassive {
+    final context = navigatorKey.currentContext;
+    return !_bottomOverlayOpen &&
+        (context == null || AppOverlays.drawerPassiveOf(context)) &&
+        _routes.pushed.every(
+          (route) => route is AppPageRoute && (route.passive?.call() ?? false),
+        );
+  }
+
+  /// Closes the overlays that [overlaysPassive] reports as passive.
+  void dismissPassiveOverlays() {
+    final context = navigatorKey.currentContext;
+    if (context != null) AppOverlays.closePassiveDrawer(context);
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+  }
+
   void handleDrawerVisibilityChanged(bool visible) {
     final wasOpen = bottomOverlayOpen;
     if (visible) {
@@ -140,5 +164,44 @@ class AppNavigationController extends ChangeNotifier {
     if (_selectedDestination == AppDestination.history) return false;
     selectDestination(AppDestination.history);
     return true;
+  }
+}
+
+class _NestedRouteStack extends NavigatorObserver {
+  // Weak, because a navigator disposed with its presentation reports no
+  // removals and a route's builder keeps the whole unmounted tree reachable.
+  final List<WeakReference<Route<dynamic>>> _routes = [];
+
+  /// Routes above the destinations' root that are still on the stack.
+  Iterable<Route<dynamic>> get pushed => _routes
+      .map((entry) => entry.target)
+      .whereType<Route<dynamic>>()
+      .where((route) => route.isActive && !route.isFirst);
+
+  void _forget(Route<dynamic>? route) {
+    _routes.removeWhere((entry) {
+      final target = entry.target;
+      return target == null || target == route || !target.isActive;
+    });
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _forget(null);
+    _routes.add(WeakReference(route));
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _forget(route);
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _forget(route);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _forget(oldRoute);
+    if (newRoute != null) _routes.add(WeakReference(newRoute));
   }
 }

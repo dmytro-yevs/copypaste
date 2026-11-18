@@ -27,9 +27,8 @@ impl ScaleParam {
         }
     }
 
-    pub fn get_scale_param(src: &image::RgbImage, target_size: u32) -> Self {
-        let src_width = src.width();
-        let src_height = src.height();
+    pub fn get_scale_param(src: &impl image::GenericImageView, target_size: u32) -> Self {
+        let (src_width, src_height) = src.dimensions();
         let mut dst_width;
         let mut dst_height;
 

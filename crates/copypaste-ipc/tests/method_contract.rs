@@ -215,6 +215,7 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             ids: vec![id()],
             hidden: false,
         },
+        clips::ClipOp::Preview { id: id() },
     ];
     let queue_ops = vec![
         paste_queue::PasteQueueOp::Add {
@@ -286,6 +287,11 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             .map(|op| Method::Storage { op }),
         )
         .collect();
+    assert_eq!(
+        copypaste_ipc::OpGates::blocking_weight(&clips::ClipOp::Preview { id: id() }),
+        copypaste_ipc::limits::content_weight_units(2),
+        "a preview opens a whole payload and must be admitted for it"
+    );
     for method in methods {
         let encoded = serde_json::to_value(&method).unwrap();
         let decoded: Method = serde_json::from_value(encoded.clone()).unwrap();

@@ -169,17 +169,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   List<(String, double)> _mutationAnchors = const [];
+  int _restoreGeneration = 0;
 
   Future<Set<String>> _captureMutationAnchor() async {
-    final viewport = _listKey.currentState?.viewportBounds;
-    if (viewport == null) return const {};
+    final list = _listKey.currentState;
+    final extent = list?.visibleExtent;
+    if (list == null || extent == null) return const {};
     final anchors = <(String, double)>[];
-    for (final entry in _listKey.currentState!._clipKeys.entries) {
-      final box = entry.value.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-      final rect = box.localToGlobal(Offset.zero) & box.size;
-      if (rect.overlaps(viewport)) {
-        anchors.add((entry.key, rect.top - viewport.top));
+    for (final id in list._clipKeys.keys) {
+      final span = list.rowSpan(id);
+      if (span != null && span.$1 < extent && span.$2 > 0) {
+        anchors.add((id, span.$1));
       }
     }
     anchors.sort((left, right) => left.$2.compareTo(right.$2));
@@ -191,30 +191,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final anchors = _mutationAnchors;
     if (anchors.isEmpty) return;
     _mutationAnchors = const [];
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final viewport = _listKey.currentState?.viewportBounds;
-        final scroll = _scrollController;
-        if (viewport == null || scroll?.hasClients != true) return;
-        for (final anchor in anchors) {
-          final box = _listKey
-              .currentState
-              ?._clipKeys[anchor.$1]
-              ?.currentContext
-              ?.findRenderObject();
-          if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-          final delta =
-              box.localToGlobal(Offset.zero).dy - viewport.top - anchor.$2;
-          final position = scroll!.position;
-          scroll.jumpTo(
-            (position.pixels + delta).clamp(
-              position.minScrollExtent,
-              position.maxScrollExtent,
-            ),
-          );
-          break;
+    final generation = ++_restoreGeneration;
+    void restore() {
+      final list = _listKey.currentState;
+      final scroll = _scrollController;
+      if (list == null || scroll?.hasClients != true) return;
+      // A destination retained off screen is not laid out. Restore once it
+      // shows again; waiting for a frame never schedules one.
+      if (list.offScreen) {
+        if (generation == _restoreGeneration) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => restore());
         }
-      });
+        return;
+      }
+      for (final (id, top) in anchors) {
+        final span = list.rowSpan(id);
+        if (span == null) continue;
+        final position = scroll!.position;
+        scroll.jumpTo(
+          (position.pixels + span.$1 - top).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+        );
+        break;
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => restore());
     });
   }
 
@@ -400,7 +405,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       var drawerCloseScheduled = false;
       await showOverlay<void>(
         context,
-        AppOverlays.drawerConfiguration(context),
+        // The detail is read-only; the selection survives its dismissal.
+        AppOverlays.drawerConfiguration(context, passive: true),
         builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('history-detail-drawer'),
           constraints: AppOverlays.drawerContentConstraints(context),
@@ -460,11 +466,45 @@ class _HistoryListState extends State<_HistoryList> {
   List<String> orderedIds = const [];
   double _bottomClearance = 0;
 
-  Rect? get viewportBounds {
+  RenderBox? get _viewport {
     final viewport = _viewportKey.currentContext?.findRenderObject();
-    if (viewport is! RenderBox || !viewport.hasSize || !viewport.attached) {
+    return viewport is RenderBox && viewport.hasSize && viewport.attached
+        ? viewport
+        : null;
+  }
+
+  /// Whether the list keeps its last layout in a destination retained off
+  /// screen, where it has no finite global position.
+  bool get offScreen => _viewport?.localToGlobal(Offset.zero).isFinite == false;
+
+  double? get visibleExtent {
+    final viewport = _viewport;
+    if (viewport == null) return null;
+    final extent = viewport.size.height - _bottomClearance;
+    return extent <= AppSpacing.xs ? null : extent;
+  }
+
+  /// A row's vertical span in viewport coordinates from its latest layout,
+  /// which stays measurable while the list is off screen.
+  (double, double)? rowSpan(String id) {
+    final viewport = _viewport;
+    final box = _clipKeys[id]?.currentContext?.findRenderObject();
+    if (viewport == null ||
+        box is! RenderBox ||
+        !box.attached ||
+        !box.hasSize) {
       return null;
     }
+    final top = MatrixUtils.transformPoint(
+      box.getTransformTo(viewport),
+      Offset.zero,
+    ).dy;
+    return top.isFinite ? (top, top + box.size.height) : null;
+  }
+
+  Rect? get viewportBounds {
+    final viewport = _viewport;
+    if (viewport == null) return null;
     final rect = viewport.localToGlobal(Offset.zero) & viewport.size;
     final visible = Rect.fromLTRB(
       rect.left,

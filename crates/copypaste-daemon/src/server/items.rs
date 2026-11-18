@@ -351,7 +351,7 @@ mod tests {
     /// Reading must never have the side effect of copying: `get` returns the
     /// content, and the clipboard is untouched by it.
     #[test]
-    fn list_bounds_bodies_while_get_and_copy_still_answer_in_full() {
+    fn list_and_copy_answer_previews_while_get_and_the_clipboard_keep_the_full_body() {
         let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("list-preview");
         let long = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 3);
         let added = match add(&state, 1, &long).data {
@@ -387,7 +387,11 @@ mod tests {
         }
 
         match copy(&state, 4, &added.id).data {
-            Some(ResponseData::Item(item)) => assert_eq!(item.content, long),
+            Some(ResponseData::Item(item)) => {
+                assert_eq!(item.content.len(), LIST_PREVIEW_BYTES);
+                assert!(item.truncated);
+                assert!(long.starts_with(&item.content));
+            }
             other => panic!("{other:?}"),
         }
         assert_eq!(
@@ -616,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn pinning_an_ordinary_body_keeps_its_full_response() {
+    fn pinning_answers_with_the_bounded_row_preview() {
         let (state, _dir) = test_state("ordinary-pin-response");
         let body = "x".repeat(LIST_PREVIEW_BYTES * 2);
         let item = match add(&state, 1, &body).data {
@@ -630,8 +634,8 @@ mod tests {
                 Some(ResponseData::Item(item)) => item,
                 _ => panic!("pin must return its item"),
             };
-            assert_eq!(updated.content.len(), body.len());
-            assert!(!updated.truncated);
+            assert_eq!(updated.content.len(), LIST_PREVIEW_BYTES);
+            assert!(updated.truncated);
         }
     }
 

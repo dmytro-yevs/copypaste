@@ -9,8 +9,8 @@ mod worker;
 #[cfg(target_os = "android")]
 pub use android::AndroidInferenceLauncher;
 
-pub(crate) use client::InferenceClient;
 pub use client::{DesktopInferenceLauncher, InferenceConnection, InferenceLauncher};
+pub(crate) use client::{InferenceClient, REQUEST_LIMIT};
 pub(crate) use protocol::{InferenceRequest, WorkerIdentity};
 pub use worker::run_inference_worker;
 

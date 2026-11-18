@@ -437,10 +437,10 @@ fn dib(policy: CapturePolicy<'_>, format: u32, clipboard: Clipboard) -> Reading 
         return Reading::Nothing;
     }
     drop(clipboard);
-    dib_read(policy, &dib)
+    dib_read(policy, dib)
 }
 
-fn dib_read(policy: CapturePolicy<'_>, dib: &[u8]) -> Reading {
+fn dib_read(policy: CapturePolicy<'_>, dib: Vec<u8>) -> Reading {
     if dib.len() as u64 > dib_allocation_limit(policy) {
         return Reading::DecodedTooLarge {
             megabytes: policy.settings.max_decoded_image_mb,
@@ -503,7 +503,7 @@ mod dib_tests {
         dib.extend_from_slice(&[51, 34, 17, 63]);
         let settings = copypaste_ipc::ConfigData::default();
         let Reading::Got(Representation::Image { bytes, .. }) =
-            dib_read(CapturePolicy::new(&settings), &dib)
+            dib_read(CapturePolicy::new(&settings), dib)
         else {
             panic!("a Windows DIBV5 screenshot must survive native capture");
         };
@@ -527,7 +527,7 @@ mod dib_tests {
         let Reading::Got(Representation::Image {
             bytes,
             content_type,
-        }) = dib_read(policy, &dib)
+        }) = dib_read(policy, dib)
         else {
             panic!("a normal screenshot must survive the complete DIB read boundary");
         };
@@ -544,7 +544,7 @@ mod dib_tests {
             ..Default::default()
         };
         assert!(matches!(
-            dib_read(CapturePolicy::new(&settings), &screenshot()),
+            dib_read(CapturePolicy::new(&settings), screenshot()),
             Reading::DecodedTooLarge { megabytes: 1 }
         ));
     }
@@ -556,7 +556,7 @@ mod dib_tests {
             ..Default::default()
         };
         assert!(matches!(
-            dib_read(CapturePolicy::new(&settings), &screenshot()),
+            dib_read(CapturePolicy::new(&settings), screenshot()),
             Reading::TooLarge { cap: 64, .. }
         ));
     }

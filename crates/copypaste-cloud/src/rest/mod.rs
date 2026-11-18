@@ -20,7 +20,8 @@
 //!     user_id           uuid not null default auth.uid()
 //!                           references auth.users (id) on delete cascade,
 //!     -- CRDT identity: stable across devices, the upsert conflict key.
-//!     item_id           text not null,
+//!     -- "C" so the pull order and its keyset bound compare ids as bytes.
+//!     item_id           text collate "C" not null,
 //!     -- Sealed on the client. base64 in a `text` column, deliberately not
 //!     -- `bytea`: assigning a bare base64 string to a bytea column stores the
 //!     -- ASCII bytes of the base64 text and reads back as `\x…` hex instead of
@@ -153,6 +154,7 @@
 
 use std::time::Duration;
 
+pub mod body;
 pub mod client;
 pub mod error;
 pub mod group;
@@ -163,6 +165,7 @@ pub use group::GroupRow;
 #[cfg(test)]
 mod testkit;
 
+pub use body::RowPage;
 pub use client::SupabaseRest;
 pub use error::RestError;
 pub use item::CloudItem;

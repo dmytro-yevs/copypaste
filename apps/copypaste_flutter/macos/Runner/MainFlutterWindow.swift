@@ -855,6 +855,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     controller.view.removeFromSuperview()
     engine.viewController = nil
     engine.shutDownEngine()
+    MacosMemoryPressure.shared.releaseFreedMemory()
   }
 
   private func close() {
@@ -864,10 +865,12 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     pasteSession.invalidate()
     onClose(inspectorPinned)
     // Drop the Dart/Rust watch lease before terminating its isolate. The
-    // deadline also retires a context that failed during Dart startup.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.stopEngine() }
-    contextChannel?.invokeMethod("shutdown", arguments: nil) { [self] _ in
-      DispatchQueue.main.async { [self] in stopEngine() }
+    // deadline also retires a context that failed during Dart startup, and is
+    // the only strong owner until then: a reply still pending at engine
+    // shutdown is never released, so it must not retain the presentation.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in stopEngine() }
+    contextChannel?.invokeMethod("shutdown", arguments: nil) { [weak self] _ in
+      DispatchQueue.main.async { self?.stopEngine() }
     }
   }
 
@@ -1067,6 +1070,9 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
   func windowWillClose(_ notification: Notification) {
     guard !closed else { return }
     closed = true
+    // As for Quick Paste: AppKit retains the last first responder, and with
+    // it the Flutter view and its surfaces, until another responder change.
+    _ = window.makeFirstResponder(nil)
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
     MacosMemoryPressure.shared.unregister(engine: controller.engine)

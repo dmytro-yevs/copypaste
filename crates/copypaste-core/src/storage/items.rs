@@ -15,6 +15,7 @@ use super::model::{
 use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_representation};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
+use crate::ingest::DuplicatePayload;
 
 /// Runs on a row a capture just stored or promoted, inside its transaction.
 pub(crate) type AfterWrite<'a> = &'a dyn Fn(&rusqlite::Connection, &str) -> Result<(), StoreError>;
@@ -121,6 +122,58 @@ fn refresh_privacy(
     Ok(())
 }
 
+/// Fills in the payload the metadata-only dedup probe leaves out.
+fn load_payload(conn: &rusqlite::Connection, item: &mut StoredItem) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare_cached(concat!(
+        "SELECT ",
+        item_columns!(),
+        " FROM clipboard_items WHERE id = ?1"
+    ))?;
+    let columns = ItemColumns::resolve(&stmt)?;
+    item.content_ciphertext = stmt
+        .query_row([&item.id], |row| row_to_item(row, &columns))?
+        .content_ciphertext;
+    Ok(())
+}
+
+/// Rewrites the tombstone that holds this capture's id as the capture itself,
+/// returning its `created_at` and `pin_updated_at`. The stamp passes the
+/// delete's, so the capture also wins the merge on a peer holding the tombstone.
+fn revive_in_tx(
+    tx: &rusqlite::Connection,
+    item: &NewItem,
+    nonce: &[u8],
+    content_ciphertext: &[u8],
+    fts_rowid: Option<i64>,
+    source_icon_id: Option<&str>,
+) -> rusqlite::Result<Option<(i64, i64)>> {
+    tx.query_row(
+        "UPDATE clipboard_items \
+            SET content_ciphertext = ?2, nonce = ?3, content_type = ?4, content_hash = ?5, \
+                created_at = MAX(?6, created_at + 1), deleted = 0, origin_device_id = '', \
+                pinned = 0, pin_order = NULL, app_bundle_id = ?7, app_name = ?8, \
+                payload_metadata = ?9, fts_rowid = ?10, source_icon_id = ?11, \
+                content_bytes = LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?9, '')) \
+          WHERE id = ?1 AND deleted = 1 AND created_at < 9223372036854775807 \
+          RETURNING created_at, pin_updated_at",
+        params![
+            &item.id,
+            content_ciphertext,
+            nonce,
+            &item.content_type,
+            &item.content_hash,
+            item.created_at,
+            &item.app_bundle_id,
+            &item.app_name,
+            &item.payload_metadata,
+            fts_rowid,
+            source_icon_id,
+        ],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+}
+
 const LIVE_ITEMS_SQL: &str = concat!(
     "SELECT ",
     item_columns!(),
@@ -194,33 +247,33 @@ impl Store {
     /// A bump only ever moves the stamp *forward* (T-37), and it leaves
     /// `pinned` / `pin_order` alone: a re-copied pin keeps its slot in the
     /// pinned section rather than jumping to the top (manifest 06 INV-31).
-    pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
-        self.insert_or_bump_with(item, None)
-    }
-
-    /// [`Store::insert_or_bump`], running `after` on the stored row before
-    /// the transaction commits.
-    pub(crate) fn insert_or_bump_with(
-        &self,
-        mut item: NewItem,
-        after: Option<AfterWrite<'_>>,
-    ) -> Result<Ingest, StoreError> {
+    pub fn insert_or_bump(&self, mut item: NewItem) -> Result<Ingest, StoreError> {
         let sealed = (
             std::mem::take(&mut item.nonce),
             std::mem::take(&mut item.content_ciphertext),
         );
         let search_text = item.search_text.take();
-        self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed), after)
-            .map(|(ingested, _)| ingested)
+        self.insert_or_bump_late_sealed(
+            item,
+            search_text.as_deref(),
+            move || Ok(sealed),
+            None,
+            DuplicatePayload::Load,
+        )
+        .map(|(ingested, _)| ingested)
     }
 
     /// Returns the row and whether its durable version changed, in one transaction.
+    /// `seal` runs only when a new row is written. A promoted row carries its
+    /// payload with [`DuplicatePayload::Load`]; otherwise its ciphertext is
+    /// empty and [`Store::get`] loads it on demand.
     pub(crate) fn insert_or_bump_late_sealed<E, F>(
         &self,
         mut item: NewItem,
         search_text: Option<&str>,
         seal: F,
         after: Option<AfterWrite<'_>>,
+        duplicate_payload: DuplicatePayload,
     ) -> Result<(Ingest, bool), E>
     where
         E: From<StoreError>,
@@ -260,9 +313,10 @@ impl Store {
             newest_live_with_representation(&tx, &item.content_hash, &item.content_type, i64::MIN)
                 .map_err(StoreError::from)?
         {
+            let previous = (existing.created_at, existing.payload_metadata.clone());
             let mut bumped = bump_in_tx(
                 &tx,
-                &existing,
+                existing,
                 item.created_at,
                 &item.app_bundle_id,
                 &item.app_name,
@@ -273,10 +327,13 @@ impl Store {
                 .map_err(StoreError::from)?;
             super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                 .map_err(StoreError::from)?;
+            if duplicate_payload == DuplicatePayload::Load {
+                load_payload(&tx, &mut bumped).map_err(StoreError::from)?;
+            }
             run_after(after, &tx, &bumped.id)?;
             tx.commit().map_err(StoreError::from)?;
-            let changed = bumped.created_at != existing.created_at
-                || bumped.payload_metadata != existing.payload_metadata;
+            let changed =
+                (bumped.created_at, &bumped.payload_metadata) != (previous.0, &previous.1);
             return Ok((Ingest::Bumped(bumped), changed));
         }
 
@@ -313,13 +370,9 @@ impl Store {
             ],
         );
 
-        match insert {
-            Ok(_) => {}
+        let (created_at, pin_updated_at) = match insert {
+            Ok(_) => (item.created_at, 0),
             Err(e) if is_constraint_violation(&e) => {
-                if let Some(rowid) = fts_rowid {
-                    tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
-                        .map_err(StoreError::from)?;
-                }
                 // The dedup backstop fired: a concurrent capture of the same
                 // content committed between the probe above and this INSERT.
                 // Resolve the winner *inside* the same transaction so there is
@@ -327,32 +380,52 @@ impl Store {
                 let existing =
                     find_in_bucket(&tx, &item.content_hash, &item.content_type, item.created_at)
                         .map_err(StoreError::from)?;
-                return match existing {
-                    Some(existing) => {
-                        let mut bumped = bump_in_tx(
-                            &tx,
-                            &existing,
-                            item.created_at,
-                            &item.app_bundle_id,
-                            &item.app_name,
-                            &source_icon_id,
-                        )
-                        .map_err(StoreError::from)?;
-                        super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                if let Some(existing) = existing {
+                    if let Some(rowid) = fts_rowid {
+                        tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
                             .map_err(StoreError::from)?;
-                        refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
-                            .map_err(StoreError::from)?;
-                        run_after(after, &tx, &bumped.id)?;
-                        tx.commit().map_err(StoreError::from)?;
-                        let changed = bumped.created_at != existing.created_at
-                            || bumped.payload_metadata != existing.payload_metadata;
-                        Ok((Ingest::Bumped(bumped), changed))
                     }
-                    None => Err(StoreError::from(e).into()),
-                };
+                    let previous = (existing.created_at, existing.payload_metadata.clone());
+                    let mut bumped = bump_in_tx(
+                        &tx,
+                        existing,
+                        item.created_at,
+                        &item.app_bundle_id,
+                        &item.app_name,
+                        &source_icon_id,
+                    )
+                    .map_err(StoreError::from)?;
+                    super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                        .map_err(StoreError::from)?;
+                    refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
+                        .map_err(StoreError::from)?;
+                    if duplicate_payload == DuplicatePayload::Load {
+                        load_payload(&tx, &mut bumped).map_err(StoreError::from)?;
+                    }
+                    run_after(after, &tx, &bumped.id)?;
+                    tx.commit().map_err(StoreError::from)?;
+                    let changed =
+                        (bumped.created_at, &bumped.payload_metadata) != (previous.0, &previous.1);
+                    return Ok((Ingest::Bumped(bumped), changed));
+                }
+                // A content-addressed id outlives its delete: the row is still
+                // there as a tombstone, and this capture takes it back.
+                let revived = revive_in_tx(
+                    &tx,
+                    &item,
+                    &nonce,
+                    &content_ciphertext,
+                    fts_rowid,
+                    source_icon_id.as_deref(),
+                )
+                .map_err(StoreError::from)?;
+                match revived {
+                    Some(stamps) => stamps,
+                    None => return Err(StoreError::from(e).into()),
+                }
             }
             Err(e) => return Err(StoreError::from(e).into()),
-        }
+        };
 
         run_after(after, &tx, &id)?;
         tx.commit().map_err(StoreError::from)?;
@@ -365,10 +438,10 @@ impl Store {
                 nonce,
                 content_type: item.content_type,
                 content_hash: item.content_hash,
-                created_at: item.created_at,
+                created_at,
                 pinned: false,
                 pin_order: None,
-                pin_updated_at: 0,
+                pin_updated_at,
                 deleted: false,
                 // A capture on this device. The empty sentinel rather than a device
                 // id the store has no business knowing — see `versions::origin_or`.
@@ -597,6 +670,7 @@ mod tests {
         fts_dump, fts_row_count, item, plant_fts_row, store, KEY, T0,
     };
     use super::super::{Store, StoreError};
+    use crate::ingest::DuplicatePayload;
 
     #[test]
     fn copied_rows_rise_without_replacing_payload_source_or_pin_order() {
@@ -629,6 +703,39 @@ mod tests {
 
         s.delete(&second.id).unwrap();
         assert_eq!(s.promote_copied(&second.id, T0 + 20).unwrap(), None);
+    }
+
+    #[test]
+    fn a_duplicate_is_promoted_without_sealing_and_loads_its_payload_on_request() {
+        let s = store();
+        let first = s.insert(item("same bytes", T0)).unwrap();
+        let recopy = |created_at, load| {
+            s.insert_or_bump_late_sealed::<StoreError, _>(
+                item("same bytes", created_at),
+                Some("same bytes"),
+                || panic!("a duplicate must not be sealed"),
+                None,
+                load,
+            )
+            .unwrap()
+        };
+
+        let (loaded, changed) = recopy(T0 + 1, DuplicatePayload::Load);
+        assert!(changed && loaded.is_bump());
+        assert_eq!(loaded.item(), &s.get(&first.id).unwrap().unwrap());
+        assert_eq!(loaded.item().content_ciphertext, first.content_ciphertext);
+
+        let (omitted, _) = recopy(T0 + 2, DuplicatePayload::Omit);
+        let stored = s.get(&first.id).unwrap().unwrap();
+        assert_eq!(stored.created_at, T0 + 2);
+        assert_eq!(stored.content_ciphertext, first.content_ciphertext);
+        assert_eq!(
+            omitted.into_item(),
+            super::super::StoredItem {
+                content_ciphertext: Vec::new(),
+                ..stored
+            }
+        );
     }
     fn source_icon() -> crate::SourceAppIconMetadata {
         let image = ImageBuffer::from_pixel(64, 64, Rgba([0x24u8, 0x65, 0xa8, 0xff]));

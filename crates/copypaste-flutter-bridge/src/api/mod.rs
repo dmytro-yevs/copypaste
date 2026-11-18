@@ -13,6 +13,7 @@ pub mod applications;
 pub mod clips;
 pub mod device_sync;
 pub mod diagnostics;
+pub mod handler;
 pub mod paste_queue;
 pub mod rules;
 pub mod space;
@@ -1646,18 +1647,25 @@ pub async fn clip_image_preview(
     max_edge: Option<u32>,
     bounds: Option<ClipImagePreviewBounds>,
 ) -> Result<ClipImagePreview, RuntimeError> {
-    let response = client::request(Method::ImagePreview {
-        id,
-        max_edge,
-        bounds: bounds.map(|bounds| copypaste_ipc::ImagePreviewBounds {
-            width: bounds.width,
-            height: bounds.height,
-        }),
-    })
-    .await?;
-    image_preview_response(response.data)
+    let bounds = bounds.map(|bounds| copypaste_ipc::ImagePreviewBounds {
+        width: bounds.width,
+        height: bounds.height,
+    });
+    #[cfg(target_os = "android")]
+    return crate::runtime_android::image_preview(id, max_edge, bounds).await;
+    #[cfg(not(target_os = "android"))]
+    {
+        let response = client::request(Method::ImagePreview {
+            id,
+            max_edge,
+            bounds,
+        })
+        .await?;
+        image_preview_response(response.data)
+    }
 }
 
+#[cfg(any(not(target_os = "android"), test))]
 fn image_preview_response(data: Option<ResponseData>) -> Result<ClipImagePreview, RuntimeError> {
     match data {
         Some(ResponseData::ImagePreview(preview)) => image_preview(preview),

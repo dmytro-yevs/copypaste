@@ -13,6 +13,7 @@ add_executable(${BINARY_NAME} WIN32
   "device_authentication.cpp"
   "flutter_window.cpp"
   "memory_pressure_monitor.cpp"
+  "memory_relief_channel.cpp"
   "screenshot_protection.cpp"
   "startup_channel.cpp"
   "main.cpp"

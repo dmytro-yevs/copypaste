@@ -433,6 +433,13 @@ impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
         let _operation = self.operation()?;
         self.source.file_size(id, sha256)
     }
+    fn stored_sizes(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.stored_sizes(ids)
+    }
     fn observe_member_transfer(
         &self,
         id: &str,

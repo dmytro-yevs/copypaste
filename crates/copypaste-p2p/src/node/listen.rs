@@ -114,6 +114,10 @@ pub async fn listen<S, F, P>(
 
     sessions.shutdown().await;
     let _ = presence.await;
+    // Sessions stop offering an address nobody serves.
+    for addr in [&node.bound_addr, &node.listen_addr] {
+        *addr.write().unwrap_or_else(|error| error.into_inner()) = None;
+    }
     info!("peer listener stopped");
 }
 

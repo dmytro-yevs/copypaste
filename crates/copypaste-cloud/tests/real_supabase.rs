@@ -105,10 +105,20 @@ async fn real_supabase_contract() {
         .expect("Realtime event timeout")
         .expect("Realtime stream ended")
         .expect("Realtime event");
-    let row = match event {
-        RealtimeEvent::Insert(row) | RealtimeEvent::Update(row) => row,
+    match event {
+        RealtimeEvent::Insert { item_id } | RealtimeEvent::Update { item_id } => {
+            assert_eq!(item_id, "real-convergence");
+        }
         other => panic!("unexpected Realtime event: {other:?}"),
-    };
+    }
+    let row = rest
+        .fetch_since(&alice.access_token, created_at, None, 10)
+        .await
+        .expect("Alice's page")
+        .rows
+        .into_iter()
+        .find(|row| row.item_id == "real-convergence")
+        .expect("the announced row");
     row.verify(crypto.key())
         .expect("Realtime metadata signature");
     assert_eq!(
@@ -123,6 +133,7 @@ async fn real_supabase_contract() {
         .fetch_since(&bob.access_token, created_at, None, 200)
         .await
         .expect("Bob's RLS page")
+        .rows
         .is_empty());
 
     let mut page_rows = Vec::new();
@@ -146,7 +157,8 @@ async fn real_supabase_contract() {
     let first = rest
         .fetch_since(&alice.access_token, created_at + 1, None, 200)
         .await
-        .expect("first page");
+        .expect("first page")
+        .rows;
     assert_eq!(first.len(), 200);
     let last = first.last().expect("first page has a cursor");
     let second = rest
@@ -157,7 +169,8 @@ async fn real_supabase_contract() {
             200,
         )
         .await
-        .expect("second page");
+        .expect("second page")
+        .rows;
     assert_eq!(second.len(), 5);
 
     let mut tombstone =
@@ -170,7 +183,7 @@ async fn real_supabase_contract() {
         .fetch_since(&alice.access_token, created_at + 2, None, 10)
         .await
         .expect("read tombstone");
-    assert!(deleted.iter().any(|row| {
+    assert!(deleted.rows.iter().any(|row| {
         row.item_id == "real-convergence" && row.deleted && row.ciphertext.is_empty()
     }));
 
@@ -207,6 +220,7 @@ async fn real_supabase_contract() {
         )
         .await
         .expect("credential-shaped query")
+        .rows
         .iter()
         .any(|row| row.item_id == "real-credential-shaped"));
 

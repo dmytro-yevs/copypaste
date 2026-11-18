@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use reqwest::{header::CONTENT_TYPE, StatusCode};
 
+use crate::rest::body::{read_capped, BodyError};
 use crate::{crypto::file::OBJECT_PLAINTEXT_BYTES, CloudConfig, HttpClient};
 
 pub const FILE_BUCKET: &str = "clipboard-files";
@@ -81,7 +82,7 @@ impl SupabaseStorage {
     }
 
     pub async fn download(&self, token: &str, path: &str) -> Result<Vec<u8>, StorageError> {
-        let mut response = self
+        let response = self
             .request(
                 reqwest::Method::GET,
                 &format!("storage/v1/object/authenticated/{FILE_BUCKET}/{path}"),
@@ -98,17 +99,12 @@ impl SupabaseStorage {
                 status => classify(status),
             });
         }
-        // Sized once from the declared length: growing by doubling would end
-        // a full object at 8 MiB of capacity.
-        let declared = response.content_length().unwrap_or(0);
-        let mut body = Vec::with_capacity(declared.min(MAX_OBJECT_BYTES as u64) as usize);
-        while let Some(chunk) = response.chunk().await.map_err(|_| StorageError::Network)? {
-            if body.len() + chunk.len() > MAX_OBJECT_BYTES {
-                return Err(StorageError::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(body)
+        read_capped(response, MAX_OBJECT_BYTES)
+            .await
+            .map_err(|error| match error {
+                BodyError::TooLarge => StorageError::TooLarge,
+                BodyError::Network(_) => StorageError::Network,
+            })
     }
 
     /// Removes objects; names that are already gone are not an error.

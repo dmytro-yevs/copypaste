@@ -39,11 +39,11 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 388861441;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1748833901;
 
 // Section: executor
 
-flutter_rust_bridge::frb_generated_default_handler!();
+pub use crate::api::handler::FLUTTER_RUST_BRIDGE_HANDLER;
 
 // Section: wire_funcs
 
@@ -678,6 +678,42 @@ fn wire__crate__api__clip_image_preview_impl(
                         let output_ok =
                             crate::api::clip_image_preview(api_id, api_max_edge, api_bounds)
                                 .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__clips__clip_preview_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "clip_preview",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok = crate::api::clips::clip_preview(api_id).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -9252,336 +9288,337 @@ fn pde_ffi_dispatcher_primary_impl(
         }
         16 => wire__crate__api__clips__clip_annotations_impl(port, ptr, rust_vec_len, data_len),
         17 => wire__crate__api__clip_image_preview_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__clips__clip_rule_trace_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__clipboard_available_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__cloud_account_status_impl(port, ptr, rust_vec_len, data_len),
-        21 => {
+        18 => wire__crate__api__clips__clip_preview_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__clips__clip_rule_trace_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__clipboard_available_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__cloud_account_status_impl(port, ptr, rust_vec_len, data_len),
+        22 => {
             wire__crate__api__space__cloud_change_passphrase_impl(port, ptr, rust_vec_len, data_len)
         }
-        22 => wire__crate__api__cloud_sign_in_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__cloud_sign_out_impl(port, ptr, rust_vec_len, data_len),
-        24 => {
+        23 => wire__crate__api__cloud_sign_in_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__cloud_sign_out_impl(port, ptr, rust_vec_len, data_len),
+        25 => {
             wire__crate__api__space__cloud_sign_out_others_impl(port, ptr, rust_vec_len, data_len)
         }
-        25 => wire__crate__api__cloud_sign_up_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__cloud_sync_now_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__confirm_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__paste_queue__confirm_paste_queue_delivery_impl(
+        26 => wire__crate__api__cloud_sign_up_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__cloud_sync_now_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__confirm_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__paste_queue__confirm_paste_queue_delivery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        29 => wire__crate__api__rules__content_rule_apply_progress_impl(
+        30 => wire__crate__api__rules__content_rule_apply_progress_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => {
+        31 => {
             wire__crate__api__rules__content_rule_skip_log_impl(port, ptr, rust_vec_len, data_len)
         }
-        31 => wire__crate__api__rules__content_rules_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__copy_clip_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__copy_clip_as_plain_text_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__copy_clip_text_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__count_clip_groups_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__clips__create_manual_clip_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__create_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__transforms__default_transform_pipeline_for_impl(
+        32 => wire__crate__api__rules__content_rules_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__copy_clip_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__copy_clip_as_plain_text_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__copy_clip_text_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__count_clip_groups_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__clips__create_manual_clip_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__create_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__transforms__default_transform_pipeline_for_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__delete_clip_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__delete_clips_through_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__rules__delete_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__delete_history_tag_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__transforms__delete_transform_pipeline_impl(
+        40 => wire__crate__api__delete_clip_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__delete_clips_through_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__rules__delete_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__delete_history_tag_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__transforms__delete_transform_pipeline_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => wire__crate__api__paste_queue__deliver_from_paste_queue_impl(
+        45 => wire__crate__api__paste_queue__deliver_from_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__clips__deliver_text_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__desktop_runtime_endpoint_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__device_sync__device_sync_preferences_impl(
+        46 => wire__crate__api__clips__deliver_text_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__desktop_runtime_endpoint_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__device_sync__device_sync_preferences_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => {
+        49 => {
             wire__crate__api__diagnostics__diagnostic_events_impl(port, ptr, rust_vec_len, data_len)
         }
-        49 => wire__crate__api__dispose_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__downloaded_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__paste_queue__edit_paste_queue_entry_impl(
+        50 => wire__crate__api__dispose_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__downloaded_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__paste_queue__edit_paste_queue_entry_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__diagnostics__export_diagnostics_impl(
+        53 => wire__crate__api__diagnostics__export_diagnostics_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        53 => wire__crate__api__export_text_history_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__file_operations_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__get_clip_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__get_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__get_spoiler_state_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
-        60 => {
+        54 => wire__crate__api__export_text_history_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__file_operations_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__get_clip_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__get_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__get_spoiler_state_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
+        61 => {
             wire__crate__api__history_file_import_max_bytes_impl(port, ptr, rust_vec_len, data_len)
         }
-        61 => wire__crate__api__history_tags_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__import_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__incoming_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__applications__installed_application_impl(
+        62 => wire__crate__api__history_tags_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__import_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__incoming_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__applications__installed_application_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        65 => wire__crate__api__applications__installed_application_icon_impl(
+        66 => wire__crate__api__applications__installed_application_icon_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => wire__crate__api__applications__installed_applications_impl(
+        67 => wire__crate__api__applications__installed_applications_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__clips__keep_clip_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__clips__latest_clip_from_other_device_impl(
+        68 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__clips__keep_clip_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__clips__latest_clip_from_other_device_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        71 => wire__crate__api__space__leave_space_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__module_answer_prompt_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__module_prompts_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__module_set_locale_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__api__module_stage_update_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__api__paste_queue__move_paste_queue_entry_impl(
+        72 => wire__crate__api__space__leave_space_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__module_answer_prompt_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__module_prompts_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__module_set_locale_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__module_stage_update_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__api__paste_queue__move_paste_queue_entry_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        86 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
-        87 => wire__crate__api__paste_queue__paste_queue_preferences_impl(
+        87 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
+        88 => wire__crate__api__paste_queue__paste_queue_preferences_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        88 => {
+        89 => {
             wire__crate__api__paste_queue__paste_queue_state_impl(port, ptr, rust_vec_len, data_len)
         }
-        89 => wire__crate__api__platform_capabilities_json_impl(port, ptr, rust_vec_len, data_len),
-        90 => wire__crate__api__rules__preview_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        91 => {
+        90 => wire__crate__api__platform_capabilities_json_impl(port, ptr, rust_vec_len, data_len),
+        91 => wire__crate__api__rules__preview_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        92 => {
             wire__crate__api__transforms__preview_transform_impl(port, ptr, rust_vec_len, data_len)
         }
-        92 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
-        93 => {
+        93 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
+        94 => {
             wire__crate__api__diagnostics__record_app_event_impl(port, ptr, rust_vec_len, data_len)
         }
-        94 => wire__crate__api__release_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        95 => wire__crate__api__paste_queue__remove_paste_queue_entries_impl(
+        95 => wire__crate__api__release_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        96 => wire__crate__api__paste_queue__remove_paste_queue_entries_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        96 => wire__crate__api__paste_queue__remove_pasted_queue_entries_impl(
+        97 => wire__crate__api__paste_queue__remove_pasted_queue_entries_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        97 => wire__crate__api__rules__reorder_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        98 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
-        99 => wire__crate__api__request_nearby_pairing_impl(port, ptr, rust_vec_len, data_len),
-        100 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
-        101 => wire__crate__api__rules__reset_builtin_content_rule_impl(
+        98 => wire__crate__api__rules__reorder_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        99 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
+        100 => wire__crate__api__request_nearby_pairing_impl(port, ptr, rust_vec_len, data_len),
+        101 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
+        102 => wire__crate__api__rules__reset_builtin_content_rule_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        102 => wire__crate__api__clips__restore_clipboard_impl(port, ptr, rust_vec_len, data_len),
-        103 => wire__crate__api__storage__restore_clipboard_on_start_impl(
+        103 => wire__crate__api__clips__restore_clipboard_impl(port, ptr, rust_vec_len, data_len),
+        104 => wire__crate__api__storage__restore_clipboard_on_start_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        104 => {
+        105 => {
             wire__crate__api__rules__restore_content_rule_impl(port, ptr, rust_vec_len, data_len)
         }
-        105 => wire__crate__api__rules__restore_content_rule_conflict_impl(
+        106 => wire__crate__api__rules__restore_content_rule_conflict_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        106 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
-        107 => wire__crate__api__reveal_pairing_invitation_impl(port, ptr, rust_vec_len, data_len),
-        108 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
-        109 => wire__crate__api__paste_queue__reverse_paste_queue_impl(
+        107 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
+        108 => wire__crate__api__reveal_pairing_invitation_impl(port, ptr, rust_vec_len, data_len),
+        109 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
+        110 => wire__crate__api__paste_queue__reverse_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        110 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
-        111 => wire__crate__api__transforms__run_transform_impl(port, ptr, rust_vec_len, data_len),
-        112 => {
+        111 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
+        112 => wire__crate__api__transforms__run_transform_impl(port, ptr, rust_vec_len, data_len),
+        113 => {
             wire__crate__api__runtime_settings_patch_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        113 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
-        114 => wire__crate__api__clips__save_clip_edit_impl(port, ptr, rust_vec_len, data_len),
-        115 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        116 => wire__crate__api__rules__save_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        117 => wire__crate__api__save_history_tag_impl(port, ptr, rust_vec_len, data_len),
-        118 => wire__crate__api__transforms__save_transform_pipeline_impl(
+        114 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
+        115 => wire__crate__api__clips__save_clip_edit_impl(port, ptr, rust_vec_len, data_len),
+        116 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        117 => wire__crate__api__rules__save_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        118 => wire__crate__api__save_history_tag_impl(port, ptr, rust_vec_len, data_len),
+        119 => wire__crate__api__transforms__save_transform_pipeline_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        119 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
-        120 => wire__crate__api__send_clips_to_devices_impl(port, ptr, rust_vec_len, data_len),
-        121 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
-        122 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
-        123 => wire__crate__api__set_clip_secret_impl(port, ptr, rust_vec_len, data_len),
-        124 => wire__crate__api__rules__set_content_rule_enabled_impl(
+        120 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
+        121 => wire__crate__api__send_clips_to_devices_impl(port, ptr, rust_vec_len, data_len),
+        122 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
+        123 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
+        124 => wire__crate__api__set_clip_secret_impl(port, ptr, rust_vec_len, data_len),
+        125 => wire__crate__api__rules__set_content_rule_enabled_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        125 => wire__crate__api__device_sync__set_device_sync_policy_impl(
+        126 => wire__crate__api__device_sync__set_device_sync_policy_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        126 => wire__crate__api__paste_queue__set_paste_queue_collecting_impl(
+        127 => wire__crate__api__paste_queue__set_paste_queue_collecting_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        127 => wire__crate__api__paste_queue__set_paste_queue_preferences_impl(
+        128 => wire__crate__api__paste_queue__set_paste_queue_preferences_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        128 => wire__crate__api__set_spoiler_revealed_impl(port, ptr, rust_vec_len, data_len),
-        129 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        130 => wire__crate__api__device_sync__set_this_device_sync_impl(
+        129 => wire__crate__api__set_spoiler_revealed_impl(port, ptr, rust_vec_len, data_len),
+        130 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        131 => wire__crate__api__device_sync__set_this_device_sync_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        131 => wire__crate__api__transforms__set_transform_preference_impl(
+        132 => wire__crate__api__transforms__set_transform_preference_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        132 => wire__crate__api__transforms__set_transform_set_member_impl(
+        133 => wire__crate__api__transforms__set_transform_set_member_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        133 => wire__crate__api__paste_queue__skip_paste_queue_entry_impl(
+        134 => wire__crate__api__paste_queue__skip_paste_queue_entry_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        134 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
-        135 => wire__crate__api__space__space_status_impl(port, ptr, rust_vec_len, data_len),
-        136 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        137 => wire__crate__api__start_file_download_impl(port, ptr, rust_vec_len, data_len),
-        138 => wire__crate__api__paste_queue__step_back_paste_queue_impl(
+        135 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
+        136 => wire__crate__api__space__space_status_impl(port, ptr, rust_vec_len, data_len),
+        137 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        138 => wire__crate__api__start_file_download_impl(port, ptr, rust_vec_len, data_len),
+        139 => wire__crate__api__paste_queue__step_back_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        139 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        140 => wire__crate__api__storage__storage_breakdown_impl(port, ptr, rust_vec_len, data_len),
-        141 => {
+        140 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        141 => wire__crate__api__storage__storage_breakdown_impl(port, ptr, rust_vec_len, data_len),
+        142 => {
             wire__crate__api__transforms__suggest_transforms_impl(port, ptr, rust_vec_len, data_len)
         }
-        142 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        143 => wire__crate__api__rules__test_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        144 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        145 => wire__crate__api__transforms__transform_catalogue_impl(
+        143 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        144 => wire__crate__api__rules__test_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        145 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        146 => wire__crate__api__transforms__transform_catalogue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        146 => wire__crate__api__transforms__transform_pipelines_impl(
+        147 => wire__crate__api__transforms__transform_pipelines_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        147 => wire__crate__api__transforms__transform_preferences_impl(
+        148 => wire__crate__api__transforms__transform_preferences_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        148 => wire__crate__api__paste_queue__undo_clear_paste_queue_impl(
+        149 => wire__crate__api__paste_queue__undo_clear_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        149 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
-        150 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        151 => wire__crate__api__storage__upgrade_backups_impl(port, ptr, rust_vec_len, data_len),
-        152 => {
+        150 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
+        151 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
+        152 => wire__crate__api__storage__upgrade_backups_impl(port, ptr, rust_vec_len, data_len),
+        153 => {
             wire__crate__api__rules__validate_content_rule_impl(port, ptr, rust_vec_len, data_len)
         }
-        153 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
+        154 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

@@ -23,8 +23,9 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
 use super::event::RealtimeError;
@@ -32,6 +33,21 @@ use super::frame::parse_frame;
 use super::{JOIN_TIMEOUT, TABLE, TOPIC};
 
 pub(super) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// The largest message or frame accepted, instead of the library's 64 MiB.
+/// Realtime sends no change whose WAL record exceeds `max_record_bytes`, 1 MiB
+/// by default (`supabase/migrations/*_realtime.sql`); twice that leaves room
+/// for the envelope and escaping. A larger message ends the socket, and the
+/// reconnect's [`Resubscribed`](super::RealtimeEvent::Resubscribed) runs a poll.
+const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+
+fn ws_config() -> WebSocketConfig {
+    WebSocketConfig {
+        max_message_size: Some(MAX_MESSAGE_BYTES),
+        max_frame_size: Some(MAX_MESSAGE_BYTES),
+        ..WebSocketConfig::default()
+    }
+}
 
 /// Open the socket and join the channel, returning only once the server has
 /// confirmed the join and its PostgreSQL replication subscription is ready.
@@ -74,7 +90,7 @@ pub(super) async fn open_channel_scoped(
     );
 
     let connect = async {
-        let (mut ws, _) = connect_async(request)
+        let (mut ws, _) = connect_async_with_config(request, Some(ws_config()), false)
             .await
             .map_err(|_| RealtimeError::Connect("the websocket could not be opened"))?;
 

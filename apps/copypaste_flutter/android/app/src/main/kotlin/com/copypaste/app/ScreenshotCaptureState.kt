@@ -41,6 +41,18 @@ internal object ScreenshotCaptureState {
         preferences(context).edit().putLong("since", maxOf(since(context), now)).commit()
     }
 
+    /** MediaStore rows with `_ID <= id` and `DATE_ADDED < addedSeconds` are settled. */
+    data class ScanMark(val id: Long, val addedSeconds: Long)
+
+    fun scanMark(context: Context): ScanMark = preferences(context).let {
+        ScanMark(it.getLong("scan-mark-id", 0L), it.getLong("scan-mark-added", 0L))
+    }
+
+    fun setScanMark(context: Context, mark: ScanMark) {
+        preferences(context).edit().putLong("scan-mark-id", mark.id)
+            .putLong("scan-mark-added", mark.addedSeconds).commit()
+    }
+
     fun paused(context: Context): Boolean = preferences(context).getBoolean("paused", false)
 
     fun pause(context: Context) {

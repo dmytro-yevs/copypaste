@@ -322,10 +322,13 @@ class DesktopWindowController implements TrayMenuSurface {
       );
     }
     if (action == DesktopCloseAction.hide) {
+      // Presentation hears it first: a frame rendered after the window has
+      // left the screen takes a new window-sized surface.
+      _visibilityChanged(false);
       try {
         await _host.hide();
-        _visibilityChanged(false);
       } catch (_) {
+        if (!_disposed) _isVisible.value = true;
         _setIssue(DesktopWindowSetupIssue.windowUnavailable);
       }
       return;

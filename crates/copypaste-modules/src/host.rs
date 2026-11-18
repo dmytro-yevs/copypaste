@@ -141,6 +141,13 @@ impl ModuleHost {
 
     fn search_service(&self) -> Option<Arc<crate::semantic_search::SemanticSearch>> {
         let mut active = self.search.lock().ok()?;
+        self.start_search(&mut active)
+    }
+
+    fn start_search(
+        &self,
+        active: &mut Option<Arc<crate::semantic_search::SemanticSearch>>,
+    ) -> Option<Arc<crate::semantic_search::SemanticSearch>> {
         if let Some(service) = active.as_ref() {
             return Some(Arc::clone(service));
         }
@@ -153,6 +160,35 @@ impl ModuleHost {
         let service = crate::semantic_search::SemanticSearch::start(manager, binding.as_ref()?);
         *active = Some(Arc::clone(&service));
         Some(service)
+    }
+
+    /// Stops the index worker once no search configuration remains; the next
+    /// configured query or mutation starts it again. The decision is made
+    /// under the search lock, so the last refresh reflects the last change.
+    fn refresh_search(&self) {
+        let mut active = self
+            .search
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let configured = self
+            .manager()
+            .ok()
+            .and_then(|manager| manager.search_configuration().ok().flatten())
+            .is_some();
+        if configured {
+            let service = self.start_search(&mut active);
+            drop(active);
+            if let Some(service) = service {
+                service.notify();
+            }
+        } else {
+            let retired = active.take();
+            drop(active);
+            // Joining the worker outside the lock keeps queries responsive.
+            if let Some(service) = retired {
+                service.shutdown();
+            }
+        }
     }
 
     pub fn history_changed(&self) {
@@ -502,9 +538,7 @@ impl ModuleHost {
                 }
             };
             if changed {
-                if let Some(service) = host.search_service() {
-                    service.notify();
-                }
+                host.refresh_search();
                 if let Some(binding) = host
                     .binding
                     .lock()
@@ -588,7 +622,7 @@ impl Drop for ModuleHost {
 mod native_supabase;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::SyncServices;
     use copypaste_core::{
@@ -609,14 +643,14 @@ mod tests {
 
     const MODULE_ID: &str = "copypaste.text-tools";
 
-    fn target() -> ModuleTarget {
+    pub(crate) fn target() -> ModuleTarget {
         ModuleTarget::current().unwrap_or(ModuleTarget {
             platform: ModulePlatform::Macos,
             architecture: ModuleArchitecture::Aarch64,
         })
     }
 
-    fn package(directory: &Path, key: &KeyPair) -> PathBuf {
+    pub(crate) fn package(directory: &Path, key: &KeyPair) -> PathBuf {
         let extension = if cfg!(windows) {
             "dll"
         } else if cfg!(target_os = "macos") {
@@ -897,6 +931,70 @@ mod tests {
         let waiting = std::pin::pin!(ModuleHost::wait_for_sync_wake(&wake, &mut shutdown, false));
         stop.send(true).unwrap();
         assert!(!waiting.await);
+    }
+
+    #[tokio::test]
+    async fn semantic_index_worker_runs_only_while_search_is_configured() {
+        let directory = tempfile::tempdir().unwrap();
+        let key = KeyPair::generate_unencrypted_keypair().unwrap();
+        let root = directory.path().join("modules");
+        let manager =
+            Arc::new(ModuleManager::open(&root, "1.0.0", target(), &key.pk.to_base64()).unwrap());
+        let hash = hex::encode(Sha256::digest(b"fixture"));
+        let manifest = json!({
+            "schema_version": 5, "api_version": 1, "id": "copypaste.fixture-search",
+            "title": "Fixture", "description": "Fixture.", "version": "0.1.0",
+            "app_versions": ">=1.0.0, <2.0.0",
+            "supported_platforms": ["macos", "android", "windows", "linux"],
+            "commands": [{"id": "embed", "title": "Embed", "description": "Fixture.", "arguments": [
+                {"id": "text", "title": "Text", "kind": "text", "default": "", "required": true},
+                {"id": "role", "title": "Role", "kind": "text", "default": "", "required": true}
+            ]}],
+            "preferences": [{"id": "languages", "title": "Languages", "kind": "choices",
+                "options": [{"id": "en", "title": "English"}], "default": ["en"], "required": true}],
+            "search_provider": {"command": "embed", "language_field": "languages", "models": [{
+                "id": "fixture", "title": "Fixture", "languages": ["en"], "dimensions": 2,
+                "max_tokens": 16, "query_prefix": "", "passage_prefix": "", "minimum_similarity": 0.8,
+                "files": [{"path": "model.onnx", "url": "https://huggingface.co/fixture/resolve/0000000000000000000000000000000000000000/model.onnx", "sha256": hash, "size_bytes": 7}, {"path": "tokenizer.json", "url": "https://huggingface.co/fixture/resolve/0000000000000000000000000000000000000000/tokenizer.json", "sha256": hash, "size_bytes": 7}]
+            }]}
+        });
+        let provider: copypaste_module_sdk::ModuleSearchProvider =
+            serde_json::from_value(manifest["search_provider"].clone()).unwrap();
+        let assets = root
+            .join("data/copypaste.fixture-search/models")
+            .join(provider.models[0].resource_directory_name());
+        fs::create_dir_all(&assets).unwrap();
+        for file in ["model.onnx", "tokenizer.json"] {
+            fs::write(assets.join(file), b"fixture").unwrap();
+        }
+        manager
+            .install(&package_with_manifest(
+                directory.path(),
+                &key,
+                manifest,
+                b"fixture",
+            ))
+            .unwrap();
+        let host = Arc::new(ModuleHost::new(directory.path()));
+        *host.manager.lock().unwrap() = Some(manager);
+        let keyring = Keyring::from_secret(&[5; 32]);
+        host.bind_search(
+            Store::open_in_memory(&keyring.db_key()).unwrap(),
+            Arc::new(|| {}),
+        );
+        for enabled in [true, false, true] {
+            host.request(
+                ModuleOperation::SetEnabled {
+                    id: "copypaste.fixture-search".into(),
+                    enabled,
+                    capabilities: Vec::new(),
+                },
+                ModuleCaller::App,
+            )
+            .await
+            .unwrap();
+            assert_eq!(host.search.lock().unwrap().is_some(), enabled);
+        }
     }
 
     #[tokio::test]

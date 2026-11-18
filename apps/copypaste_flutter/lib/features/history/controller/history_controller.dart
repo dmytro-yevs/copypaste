@@ -178,7 +178,21 @@ class HistoryController extends ChangeNotifier {
   Future<void>? _watchCancellation;
   int _watchGeneration = 0;
 
+  int _moduleActionsInFlight = 0;
+
+  /// Runs a module action's request, deferring suspension until it settles
+  /// so its result still has a presentation to land in.
+  Future<T> runModuleAction<T>(Future<T> Function() request) async {
+    _moduleActionsInFlight++;
+    try {
+      return await request();
+    } finally {
+      _moduleActionsInFlight--;
+    }
+  }
+
   bool get canSuspend =>
+      _moduleActionsInFlight == 0 &&
       !bulk.isBulkDragSelecting &&
       !bulk.isBulkMutating &&
       !transfers.isImportingFiles &&

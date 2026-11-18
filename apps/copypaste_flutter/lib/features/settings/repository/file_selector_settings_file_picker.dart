@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:file_selector/file_selector.dart';
 
+import '../../../platform/files/history_file_picker.dart';
 import '../../../platform/files/platform_file_gateway.dart';
 import 'settings_repository.dart';
 
@@ -45,14 +46,14 @@ class FileSelectorSettingsFilePicker implements SettingsFilePicker {
 
   @override
   Future<String?> chooseRestorePath() async {
-    final selected = await openFile(acceptedTypeGroups: [_backup]);
-    if (selected == null) return null;
-    if (!Platform.isAndroid) return selected.path;
-    final staged = await fileGateway.androidStagingPath(
-      'restore.copypaste-backup',
-    );
-    await selected.saveTo(staged);
-    return staged;
+    if (Platform.isAndroid) {
+      final copy = await SystemHistoryFilePicker.copyChosenAndroidDocument(
+        destination: (_) =>
+            fileGateway.androidStagingPath('restore.copypaste-backup'),
+      );
+      return copy?.path;
+    }
+    return (await openFile(acceptedTypeGroups: [_backup]))?.path;
   }
 
   @override

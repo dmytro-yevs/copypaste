@@ -387,6 +387,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _uiMemory = UiMemoryController(
       visible: _visibility,
       canSuspend: _canSuspendPresentation,
+      beforeSuspend: _navigation.dismissPassiveOverlays,
       startHidden: _desktopWindow?.startHidden ?? false,
     )..addListener(_memoryStateChanged);
     _pairingLinksChannel.setMethodCallHandler(_handlePairingLinkCall);
@@ -456,10 +457,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       !(_devicesController?.systemScanInFlight ?? false) &&
       !(_devicesController?.actionInFlight ?? false) &&
       !(_settingsController?.busy ?? false) &&
+      !(_storage?.busy ?? false) &&
       !(_modulesController?.busy ?? false) &&
       !(_appUpdateController?.busy ?? false) &&
-      !_navigation.bottomOverlayOpen &&
-      !(_navigation.navigatorKey.currentState?.canPop() ?? false) &&
+      _navigation.overlaysPassive &&
       !(_rootNavigatorKey.currentState?.canPop() ?? false);
 
   void _presentationVisibilityChanged() {
@@ -959,7 +960,14 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       explicitChildNodes: true,
       label: 'CopyPaste',
       textDirection: TextDirection.ltr,
-      child: _buildPresentation(windowReady: windowReady),
+      // Until the engine reports the application hidden, a hidden window
+      // still renders every frame its animations ask for.
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _visibility,
+        builder: (context, visible, child) =>
+            TickerMode(enabled: visible, child: child!),
+        child: _buildPresentation(windowReady: windowReady),
+      ),
     );
   }
 

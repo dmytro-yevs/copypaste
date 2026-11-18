@@ -173,15 +173,6 @@ async fn run() -> anyhow::Result<()> {
     );
 
     let listener = server::bind(&socket_path)?;
-    // A peer port already in use is not fatal: the rest of the daemon is still
-    // worth running, and this device can still sync by dialling out.
-    let peer_listener = match state.p2p.node().bind_listener() {
-        Ok(listener) => tokio::net::TcpListener::from_std(listener).ok(),
-        Err(e) => {
-            warn!(error = %e, port = args.port, "could not bind the peer port; not accepting peers");
-            None
-        }
-    };
     let shutdown_rx = state.shutdown_rx();
 
     let device_names = tokio::spawn(meta::run_name_refresh(
@@ -193,10 +184,19 @@ async fn run() -> anyhow::Result<()> {
     let _ =
         tokio::task::spawn_blocking(move || restoring.runtime.restore_clipboard_on_start()).await;
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
-    let pairing_events = tokio::spawn(state.runtime.forward_changes(shutdown_rx.clone()));
-    let peers_task = peer_listener.map(|listener| {
-        tokio::spawn(Arc::clone(&state.runtime).listen(listener, shutdown_rx.clone()))
-    });
+    // The peer port and the outgoing scheduler run only while sync is on.
+    let peer_network = state
+        .runtime
+        .start_peer_network()
+        .context("start peer networking once")?;
+    // A peer port already in use is not fatal: the rest of the daemon is still
+    // worth running, and this device can still sync by dialling out.
+    if state.runtime.start_peer_session().await.is_err() {
+        warn!(
+            port = args.port,
+            "could not bind the peer port; not accepting peers"
+        );
+    }
     let module_sync = state
         .start_module_sync()
         .context("start module sync once")?;
@@ -213,9 +213,6 @@ async fn run() -> anyhow::Result<()> {
         warn!("no system resume signal; deadlines due within the hour are re-checked every minute");
     }
     state.runtime.set_resume_signal(resume);
-    // Peer sync on a cadence. Without it a paired device only ever syncs when
-    // the *other* side dials in or a human runs `copypaste sync`.
-    let peer_sync = tokio::spawn(Arc::clone(&state.runtime).run_peer_sync(shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
     announce_listening();
 
@@ -234,12 +231,10 @@ async fn run() -> anyhow::Result<()> {
     let loops = vec![
         ("device names", device_names),
         ("module sync", module_sync),
-        ("peer sync", peer_sync),
-        ("pairing events", pairing_events),
+        ("peer network", peer_network),
         ("deadlines", deadlines),
     ];
     let mut loops = loops;
-    loops.extend(peers_task.map(|task| ("peer listener", task)));
     loops.extend(downloads.map(|task| ("download resume", task)));
     shutdown::stop_loops(loops).await;
     let capture_result = capture

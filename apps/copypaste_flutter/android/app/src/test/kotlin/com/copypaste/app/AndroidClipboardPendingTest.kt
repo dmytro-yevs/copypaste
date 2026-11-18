@@ -259,7 +259,7 @@ class AndroidClipboardPendingTest {
             override fun close() { closeAttempts.incrementAndGet() }
         }
         f.pending.enqueue(AndroidClipboardReader.Snapshot(text = "provider")) {
-            var payload: ByteArray? = null
+            var payload: AndroidClipboardReader.BinaryPayload? = null
             val read = f.pending.read("application/pdf") {
                 f.pending.input(input)
                 try { payload = AndroidClipboardReader.readBounded(input, 4096, f.pending) }
