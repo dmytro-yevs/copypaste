@@ -335,6 +335,18 @@ fn push_after_pinned(
     ]);
 }
 
+/// How the list statement reaches each item's index row. FTS5 seeks only on
+/// MATCH or `rowid`, so its UNINDEXED `id` is the join key only where a MATCH
+/// on the joined table drives the read.
+fn list_index_join(searching: bool, merging: bool, classifying: bool) -> &'static str {
+    match (searching, merging, classifying) {
+        (true, false, _) => " JOIN clipboard_fts ON ci.id = clipboard_fts.id",
+        (true, true, _) => " JOIN clipboard_fts ON clipboard_fts.rowid = ci.fts_rowid",
+        (false, _, true) => " LEFT JOIN clipboard_fts ON clipboard_fts.rowid = ci.fts_rowid",
+        (false, _, false) => "",
+    }
+}
+
 impl Store {
     /// List selectable source and origin facets from the complete live history.
     ///
@@ -848,11 +860,11 @@ impl Store {
             sql.push_str("SELECT ");
             sql.push_str(&projection);
             sql.push_str(" FROM clipboard_items ci");
-            if search.is_some() {
-                sql.push_str(" JOIN clipboard_fts ON ci.id = clipboard_fts.id");
-            } else if !semantic_kinds.is_empty() {
-                sql.push_str(" LEFT JOIN clipboard_fts ON ci.id = clipboard_fts.id");
-            }
+            sql.push_str(list_index_join(
+                search.is_some(),
+                semantic.is_some(),
+                !semantic_kinds.is_empty(),
+            ));
             sql.push_str(" WHERE ");
             sql.push_str(&filters);
             if let Some(cursor) = after {
@@ -1229,6 +1241,57 @@ mod tests {
                 ..HistoryQuery::default()
             };
             assert_eq!(walk(&store, &query), vec![expected], "{kind:?}");
+        }
+    }
+
+    /// A join on the UNINDEXED `id` scans every indexed text once per history
+    /// row unless a MATCH on the joined table drives the read.
+    #[test]
+    fn list_joins_seek_the_text_index() {
+        let store = store();
+        let conn = store.conn().unwrap();
+        conn.execute_batch(
+            "CREATE TEMP TABLE copypaste_semantic_hits(id TEXT PRIMARY KEY, relevance REAL NOT NULL)",
+        )
+        .unwrap();
+        for (join, filter) in [
+            (
+                list_index_join(false, false, true),
+                "copypaste_semantic_kind(ci.content_type, clipboard_fts.content_text) IN (?1)",
+            ),
+            (
+                list_index_join(true, true, false),
+                "(ci.fts_rowid IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?1) \
+                 OR ci.id IN (SELECT id FROM temp.copypaste_semantic_hits))",
+            ),
+            (
+                list_index_join(true, false, false),
+                "clipboard_fts MATCH ?1",
+            ),
+        ] {
+            let mut statement = conn
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN SELECT ci.id FROM clipboard_items ci{join} \
+                     WHERE ci.deleted = 0 AND {filter} ORDER BY ci.pinned DESC, \
+                     ci.pin_order ASC, ci.created_at DESC, ci.id DESC LIMIT 51"
+                ))
+                .unwrap();
+            let plan = statement
+                .query_map([rusqlite::types::Null], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let reads = plan
+                .iter()
+                .filter(|step| step.contains("clipboard_fts VIRTUAL TABLE"))
+                .collect::<Vec<_>>();
+            assert!(
+                !reads.is_empty()
+                    && reads
+                        .iter()
+                        .all(|step| step.contains("INDEX 0:=") || step.contains("INDEX 0:M")),
+                "{join} must seek the index, got {plan:?}"
+            );
         }
     }
 
