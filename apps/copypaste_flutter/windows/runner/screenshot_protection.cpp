@@ -16,6 +16,8 @@ bool ReadBlocked() {
 
 bool blocked = ReadBlocked();
 std::set<HWND> windows;
+// Windows whose capture affinity was refused, e.g. under Remote Desktop.
+std::set<HWND> unprotected;
 
 bool ApplyValue(HWND window, bool value) {
   return SetWindowDisplayAffinity(window, value ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE) != FALSE;
@@ -23,20 +25,24 @@ bool ApplyValue(HWND window, bool value) {
 }  // namespace
 
 namespace ScreenshotProtection {
-bool Blocked() { return blocked; }
+bool Blocked() { return blocked && unprotected.empty(); }
 
 bool Apply(HWND window) { return !blocked || ApplyValue(window, true); }
 
 bool Register(HWND window) {
-  if (!Apply(window)) return false;
   windows.insert(window);
-  return true;
+  if (Apply(window)) return true;
+  unprotected.insert(window);
+  return false;
 }
 
-void Unregister(HWND window) { windows.erase(window); }
+void Unregister(HWND window) {
+  windows.erase(window);
+  unprotected.erase(window);
+}
 
 bool SetBlocked(bool value) {
-  if (value == blocked) return true;
+  if (value == blocked && (!value || unprotected.empty())) return true;
   for (HWND window : windows) {
     if (!ApplyValue(window, value)) {
       for (HWND restore : windows) ApplyValue(restore, blocked);
@@ -58,6 +64,7 @@ bool SetBlocked(bool value) {
     return false;
   }
   blocked = value;
+  unprotected.clear();
   return true;
 }
 }  // namespace ScreenshotProtection

@@ -5,8 +5,10 @@
 
 // One device policy owns capture affinity for every application window.
 namespace ScreenshotProtection {
+// True only while blocking is enabled and applied to every registered window.
 bool Blocked();
 bool SetBlocked(bool blocked);
+// Tracks the window even when its protection is refused; returns whether it applied.
 bool Register(HWND window);
 void Unregister(HWND window);
 bool Apply(HWND window);

@@ -98,9 +98,12 @@ class Access implements ModuleAccessRepository {
   }
 
   @override
-  Future<bool> synchronize() async {
+  Future<SmsMonitoringStatus> synchronize() async {
     synchronizations++;
-    return starts;
+    if (starts) return SmsMonitoringStatus.ready;
+    return granted
+        ? SmsMonitoringStatus.serviceRefused
+        : SmsMonitoringStatus.accessMissing;
   }
 }
 
@@ -585,6 +588,67 @@ void main() {
     expect(repository.calls, ['enabled:true', 'enabled:false']);
     expect(controller.modules.single.enabled, isFalse);
     expect(controller.errorMessage, contains('could not be started'));
+  });
+
+  test('lost SMS access keeps the module list available', () async {
+    final repository = MemoryModulesRepository()
+      ..modules = [
+        const InstalledModule(
+          id: 'copypaste.sms-codes',
+          title: 'SMS Codes',
+          description: 'Copy SMS codes.',
+          version: '0.1.0',
+          enabled: true,
+          sizeBytes: 100,
+          commands: [],
+          preferenceFields: [],
+          preferences: {},
+          events: [ModuleEventKind.smsReceived],
+        ),
+      ];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: Access()..starts = false,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+
+    expect(controller.state, ModulesLoadState.ready);
+    expect(controller.modules.single.enabled, isTrue);
+    expect(controller.errorMessage, 'SMS monitoring needs setup.');
+  });
+
+  test('lost SMS access does not fail a successful module change', () async {
+    final repository = MemoryModulesRepository()
+      ..modules = [
+        const InstalledModule(
+          id: 'copypaste.sms-codes',
+          title: 'SMS Codes',
+          description: 'Copy SMS codes.',
+          version: '0.1.0',
+          enabled: true,
+          sizeBytes: 100,
+          commands: [],
+          preferenceFields: [],
+          preferences: {},
+          events: [ModuleEventKind.smsReceived],
+        ),
+      ];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: Access()..starts = false,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.setPreferences(sms.id, {'mode': 'all'});
+
+    expect(repository.calls, ['preferences']);
+    expect(controller.errorMessage, isNull);
+    expect(controller.monitoringNotice, 'SMS monitoring needs setup.');
   });
 
   test('failed SMS rollback reports the persisted enabled state', () async {

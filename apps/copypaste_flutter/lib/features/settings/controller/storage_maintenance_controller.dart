@@ -37,12 +37,16 @@ class StorageMaintenanceController extends ChangeNotifier {
   bool get canOpenFolders => _folders.supported;
 
   Future<void> refresh() => _run(StorageMaintenanceOperation.refresh, () async {
-    final (breakdown, backups) = await (
-      _repository.breakdown(),
-      _repository.upgradeBackups(),
-    ).wait;
-    _breakdown = breakdown;
-    _upgradeBackups = backups;
+    // Backups are optional: either read failing keeps the other one.
+    final backups = _repository.upgradeBackups().then<List<UpgradeBackup>?>(
+      (backups) => backups,
+      onError: (Object _) => null,
+    );
+    try {
+      _breakdown = await _repository.breakdown();
+    } finally {
+      if (await backups case final loaded?) _upgradeBackups = loaded;
+    }
   }, AppStrings.current.settingsStorageUsageUnavailable);
 
   /// Previews, decoded images and abandoned temporary files; never history.

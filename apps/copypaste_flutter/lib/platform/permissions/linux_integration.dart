@@ -165,15 +165,26 @@ class LinuxIntegrationStatus {
     }
     final result = <LinuxCapabilityKind, LinuxCapabilityStatus>{};
     for (final entry in value.entries) {
-      final kind = _enumValue(LinuxCapabilityKind.values, entry.key);
-      if (entry.value is! Map) {
-        throw const FormatException('Invalid Linux capability.');
+      // An unknown or invalid entry is skipped on its own; [capability]
+      // reports it as unavailable without failing the whole status.
+      final kind = LinuxCapabilityKind.values
+          .where((kind) => kind.name == entry.key)
+          .firstOrNull;
+      if (kind == null) continue;
+      if (_capabilityOrNull(entry.value) case final status?) {
+        result[kind] = status;
       }
-      result[kind] = LinuxCapabilityStatus.fromMap(
-        Map<String, Object?>.from(entry.value as Map),
-      );
     }
     return Map.unmodifiable(result);
+  }
+
+  static LinuxCapabilityStatus? _capabilityOrNull(Object? value) {
+    if (value is! Map) return null;
+    try {
+      return LinuxCapabilityStatus.fromMap(Map<String, Object?>.from(value));
+    } on FormatException {
+      return null;
+    }
   }
 
   static T _enumValue<T extends Enum>(List<T> values, Object? value) {
@@ -343,14 +354,14 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
           'secure_storage' => LinuxCapabilityKind.secureStorage,
           'desktop_integration' => LinuxCapabilityKind.desktopIntegration,
           'updates' => LinuxCapabilityKind.updates,
-          _ => throw const FormatException('Unknown daemon capability.'),
+          _ => null,
         };
-        if (entry.value is! Map) {
-          throw const FormatException('Invalid daemon capability.');
+        // An unknown or invalid entry is skipped without losing the report.
+        if (kind == null) continue;
+        if (LinuxIntegrationStatus._capabilityOrNull(entry.value)
+            case final status?) {
+          capabilities[kind] = status;
         }
-        capabilities[kind] = LinuxCapabilityStatus.fromMap(
-          Map<String, Object?>.from(entry.value as Map),
-        );
       }
       return (
         available: decoded['clipboard_available'] as bool,

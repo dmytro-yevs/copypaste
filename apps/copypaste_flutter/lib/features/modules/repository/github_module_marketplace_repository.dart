@@ -233,8 +233,10 @@ class ModuleCatalogParser {
               ? null
               : Version.parse(artifact['minimum_system_version'] as String);
           validateModuleAssetUri(uri);
-          if (!{'macos', 'windows', 'android', 'linux'}.contains(platform) ||
-              !{'x86', 'x86_64', 'arm', 'aarch64'}.contains(architecture) ||
+          // A newer catalog may name systems this build does not know; such
+          // an artifact is never selected, so the module stays listed.
+          if (!_targetName.hasMatch(platform) ||
+              !_targetName.hasMatch(architecture) ||
               !targets.add('$platform/$architecture') ||
               !uri.path.endsWith('.cpmodule') ||
               size <= 0 ||
@@ -269,9 +271,10 @@ class ModuleCatalogParser {
                     .isNotEmpty)) {
           throw const FormatException();
         }
-        final supportedPlatforms = List<ModulePlatform>.unmodifiable(
-          platformNames.map(ModulePlatform.values.byName),
-        );
+        final supportedPlatforms = List<ModulePlatform>.unmodifiable([
+          for (final name in platformNames)
+            ?ModulePlatform.values.asNameMap()[name],
+        ]);
         var availability = ModuleAvailability.available;
         String? reason;
         final minimum = selected?.minimumSystemVersion;
@@ -340,6 +343,8 @@ class ModuleCatalogParser {
     }
   }
 
+  static final _targetName = RegExp(r'^[a-z][a-z0-9_]{0,31}$');
+
   static Map<String, Map<String, String>> _localizations(Object? value) {
     if (value == null) return const {};
     final locales = value as Map<String, dynamic>;
@@ -350,13 +355,15 @@ class ModuleCatalogParser {
           for (final MapEntry(:key, :value)
               in (strings as Map<String, dynamic>).entries)
             if (key == 'title' || key == 'description')
-              key: _translation(value as String, key == 'title' ? 200 : 4000),
+              key: ?_translation(value as String, key == 'title' ? 200 : 4000),
         }),
     });
   }
 
-  static String _translation(String value, int maximum) =>
-      value.trim().isEmpty || value.length > maximum
+  /// A translation longer than this build shows falls back to English.
+  static String? _translation(String value, int maximum) => value.trim().isEmpty
       ? throw const FormatException()
+      : value.length > maximum
+      ? null
       : value;
 }

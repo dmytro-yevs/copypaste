@@ -233,9 +233,6 @@ class SettingsController extends ChangeNotifier {
       final values = await Future.wait<Object>([
         _repository.settings(),
         _repository.captureState(),
-        _screenshotProtection.supported
-            ? _screenshotProtection.blocked()
-            : Future<bool>.value(false),
       ]);
       if (_disposed) return;
       _settings = values[0] as RuntimeSettings;
@@ -244,9 +241,19 @@ class SettingsController extends ChangeNotifier {
       _setCapture(values[1] as CaptureSettingsState);
       _acceptSyncStatus(_capture!.syncStatus);
       _setHealthNotice(_settingsHealthMessage(_capture!.settingsHealth));
-      _blockScreenshots = values[2] as bool;
+      if (_screenshotProtection.supported) {
+        try {
+          _blockScreenshots = await _screenshotProtection.blocked();
+        } catch (_) {
+          // Screenshot protection is optional; its row keeps the last value.
+        }
+      }
       if (_screenshotCapture.supported) {
-        _screenshotStatus = await _screenshotCapture.status();
+        try {
+          _screenshotStatus = await _screenshotCapture.status();
+        } catch (_) {
+          // Screenshot capture is optional; its row keeps the last status.
+        }
       }
       if (_backgroundSync.supported) {
         try {
@@ -938,7 +945,11 @@ class SettingsController extends ChangeNotifier {
       }
       var screenshotStatus = _screenshotStatus;
       if (_presentationActive && _screenshotCapture.supported) {
-        screenshotStatus = await _screenshotCapture.status();
+        try {
+          screenshotStatus = await _screenshotCapture.status();
+        } catch (_) {
+          // Keep the last screenshot status and still apply the capture state.
+        }
       }
       if (_disposed ||
           _captureWriteInFlight ||

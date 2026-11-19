@@ -4139,6 +4139,10 @@ class AppLocalizationsUk extends AppLocalizations {
       'Відстеження SMS потребує налаштування.';
 
   @override
+  String get modulesSmsMonitoringUnavailable =>
+      'Не вдалося перевірити відстеження SMS.';
+
+  @override
   String get modulesOperationIncomplete =>
       'Не вдалося завершити операцію з модулем.';
 

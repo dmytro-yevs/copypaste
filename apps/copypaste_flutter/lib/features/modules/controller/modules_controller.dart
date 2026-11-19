@@ -212,8 +212,10 @@ class ModulesController extends ChangeNotifier {
       final modules = await _repository.list();
       if (!_disposed) {
         _modules = modules;
-        await _refreshAccess();
+        // Lost SMS access is reported, but the list stays usable so the
+        // module's settings can set the access up again.
         _state = ModulesLoadState.ready;
+        await _refreshAccess();
       }
     }, refresh: false);
     if (!_disposed && _state == ModulesLoadState.loading) {
@@ -222,7 +224,9 @@ class ModulesController extends ChangeNotifier {
     }
     // The language resolved while the first list was in flight.
     if (!_disposed && _locale != listedLocale) unawaited(_applyLocale());
-    await _chooseSearchLanguages();
+    // Choosing languages can download a search model, which must not hold
+    // up startup; setPreferences reports its own failures.
+    unawaited(_chooseSearchLanguages());
   }
 
   /// A search module needs languages before it can search; one installed
@@ -368,7 +372,9 @@ class ModulesController extends ChangeNotifier {
       enabled,
       capabilities: enabled ? confirmed : const [],
     );
-    if (sms && _access != null && !await _access.synchronize()) {
+    if (sms &&
+        _access != null &&
+        await _access.synchronize() != SmsMonitoringStatus.ready) {
       if (enabled) {
         try {
           await _repository.setEnabled(id, false);
@@ -450,16 +456,38 @@ class ModulesController extends ChangeNotifier {
   Future<void> refreshSmsAccess() => _perform(_refreshAccess, refresh: false);
 
   Future<void> _refreshAccess() async {
-    if (_access == null) return;
-    if (!await _access.synchronize() &&
-        _modules.any(
-          (module) =>
-              module.enabled &&
-              module.events.contains(ModuleEventKind.smsReceived),
-        )) {
-      throw ModulesException(AppStrings.current.modulesSmsMonitoringNeedsSetup);
+    if (await _monitoringProblem() case final problem?) {
+      throw ModulesException(problem);
     }
   }
+
+  /// Applies the enabled SMS modules to native monitoring and explains why
+  /// an enabled one is not monitored, if it is not.
+  Future<String?> _monitoringProblem() async {
+    if (_access == null) return null;
+    final status = await _access.synchronize();
+    if (!_modules.any(
+      (module) =>
+          module.enabled && module.events.contains(ModuleEventKind.smsReceived),
+    )) {
+      return null;
+    }
+    return switch (status) {
+      SmsMonitoringStatus.ready => null,
+      SmsMonitoringStatus.accessMissing =>
+        AppStrings.current.modulesSmsMonitoringNeedsSetup,
+      SmsMonitoringStatus.serviceRefused =>
+        AppStrings.current.modulesSmsMonitoringFailed,
+      SmsMonitoringStatus.unavailable =>
+        AppStrings.current.modulesSmsMonitoringUnavailable,
+    };
+  }
+
+  String? _monitoringNotice;
+
+  /// A monitoring problem found after an operation succeeded. It does not
+  /// fail that operation, so it is reported apart from [errorMessage].
+  String? get monitoringNotice => _monitoringNotice;
 
   Future<void> setPreferences(String id, Map<String, Object> values) async {
     if (_busy || _disposed) return;
@@ -539,6 +567,7 @@ class ModulesController extends ChangeNotifier {
     if (_busy || _disposed) return null;
     _busy = true;
     _error = null;
+    _monitoringNotice = null;
     if (_operation?.failed ?? false) _operation = null;
     notifyListeners();
     T? result;
@@ -546,8 +575,14 @@ class ModulesController extends ChangeNotifier {
       result = await operation();
       if (refresh && !_disposed) {
         _modules = await _repository.list();
-        await _refreshAccess();
         _state = ModulesLoadState.ready;
+        try {
+          _monitoringNotice = await _monitoringProblem();
+        } catch (error) {
+          _monitoringNotice =
+              ErrorText.reason(error) ??
+              AppStrings.current.modulesSmsMonitoringUnavailable;
+        }
       }
     } catch (error) {
       if (!_disposed) {

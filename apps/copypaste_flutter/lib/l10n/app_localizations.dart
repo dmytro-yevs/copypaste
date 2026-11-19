@@ -6909,6 +6909,12 @@ abstract class AppLocalizations {
   /// **'SMS monitoring needs setup.'**
   String get modulesSmsMonitoringNeedsSetup;
 
+  /// Notice shown when the app could not check whether an enabled SMS module is being monitored.
+  ///
+  /// In en, this message translates to:
+  /// **'SMS monitoring could not be checked.'**
+  String get modulesSmsMonitoringUnavailable;
+
   /// Error shown when a module action failed for an unknown reason.
   ///
   /// In en, this message translates to:

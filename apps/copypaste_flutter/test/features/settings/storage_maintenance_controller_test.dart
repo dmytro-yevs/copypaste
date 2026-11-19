@@ -33,6 +33,21 @@ void main() {
     await controller.refresh();
     expect(controller.error, isNotNull);
   });
+
+  test('unreadable backups keep the storage breakdown', () async {
+    final repository = _Repository()..failBackups = true;
+    final controller = StorageMaintenanceController(
+      repository: repository,
+      folders: _Folders(),
+    );
+    addTearDown(controller.dispose);
+
+    await controller.refresh();
+
+    expect(controller.error, isNull);
+    expect(controller.breakdown!.cacheBytes, 30);
+    expect(controller.upgradeBackups, isEmpty);
+  });
 }
 
 StorageBreakdown _breakdown({required int cache}) => StorageBreakdown(
@@ -47,6 +62,7 @@ class _Repository implements StorageMaintenanceRepository {
   final restored = <String>[];
   var cache = 30;
   var failBreakdown = false;
+  var failBackups = false;
 
   @override
   Future<StorageBreakdown> breakdown() async {
@@ -67,14 +83,17 @@ class _Repository implements StorageMaintenanceRepository {
   Future<void> restore(UpgradeBackup backup) async => restored.add(backup.path);
 
   @override
-  Future<List<UpgradeBackup>> upgradeBackups() async => [
-    UpgradeBackup(
-      path: '/data/upgrade-backups/1-v10.copypaste-backup',
-      createdAt: DateTime(2026, 11, 15),
-      fromVersion: 10,
-      sizeBytes: 40,
-    ),
-  ];
+  Future<List<UpgradeBackup>> upgradeBackups() async {
+    if (failBackups) throw StateError('unreadable');
+    return [
+      UpgradeBackup(
+        path: '/data/upgrade-backups/1-v10.copypaste-backup',
+        createdAt: DateTime(2026, 11, 15),
+        fromVersion: 10,
+        sizeBytes: 40,
+      ),
+    ];
+  }
 }
 
 class _Folders implements FolderReveal {

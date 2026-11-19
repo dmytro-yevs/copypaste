@@ -274,9 +274,15 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
 
-  if (!ScreenshotProtection::Register(GetHandle()) ||
-      (is_protected_pairing_context_ && !BeginProtectedPairingContext())) {
+  const bool capture_protected = ScreenshotProtection::Register(GetHandle());
+  if (is_protected_pairing_context_ &&
+      (!capture_protected || !BeginProtectedPairingContext())) {
     return false;
+  }
+  if (!capture_protected) {
+    // Remote Desktop and some VMs refuse capture affinity; the window still
+    // opens so the setting stays reachable, and Blocked() reports it.
+    OutputDebugStringW(L"Screenshot protection could not be applied\n");
   }
 
   RECT frame = GetClientArea();

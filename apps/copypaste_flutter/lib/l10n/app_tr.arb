@@ -1131,6 +1131,7 @@
   "modulesSmsMonitoringFailed": "SMS izleme başlatılamadı.",
   "modulesSmsAndroidOnly": "SMS erişimi yalnızca Android'de kullanılabilir.",
   "modulesSmsMonitoringNeedsSetup": "SMS izlemenin ayarlanması gerekiyor.",
+  "modulesSmsMonitoringUnavailable": "SMS izleme denetlenemedi.",
   "modulesOperationIncomplete": "Modül işlemi tamamlanamadı.",
   "modulesUnsupportedEvent": "Modül desteklenmeyen bir olay kullanıyor.",
   "modulesUnsupportedResult": "Modül desteklenmeyen bir sonuç döndürdü.",

@@ -94,7 +94,7 @@ class QuickPasteSettingsController extends ChangeNotifier
         if (_linuxIntegrationPort != null) {
           await _refreshLinuxIntegration();
         }
-        _accessibilityGranted = await _windowHost.accessibilityGranted();
+        await _readAccessibility();
         if (_disposed) return;
       }
       _errorMessage = null;
@@ -369,11 +369,16 @@ class QuickPasteSettingsController extends ChangeNotifier
 
   Future<void> refreshAccessibility() async {
     if (!_supported) return;
+    if (await _readAccessibility()) notifyListeners();
+  }
+
+  /// Reads the permission; a failed read keeps the last confirmed state.
+  Future<bool> _readAccessibility() async {
     try {
       _accessibilityGranted = await _windowHost.accessibilityGranted();
-      notifyListeners();
+      return true;
     } catch (_) {
-      // Keep the last confirmed permission state.
+      return false;
     }
   }
 
@@ -472,7 +477,7 @@ class QuickPasteSettingsController extends ChangeNotifier
     }
     _supported = true;
     await _registerSavedShortcut();
-    _accessibilityGranted = await _windowHost.accessibilityGranted();
+    await _readAccessibility();
   }
 
   @override

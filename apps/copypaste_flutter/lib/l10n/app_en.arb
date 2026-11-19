@@ -4965,6 +4965,10 @@
   "@modulesSmsMonitoringNeedsSetup": {
     "description": "Error shown when an enabled SMS module lost its permission and must be set up again."
   },
+  "modulesSmsMonitoringUnavailable": "SMS monitoring could not be checked.",
+  "@modulesSmsMonitoringUnavailable": {
+    "description": "Notice shown when the app could not check whether an enabled SMS module is being monitored."
+  },
   "modulesOperationIncomplete": "The module operation could not be completed.",
   "@modulesOperationIncomplete": {
     "description": "Error shown when a module action failed for an unknown reason."

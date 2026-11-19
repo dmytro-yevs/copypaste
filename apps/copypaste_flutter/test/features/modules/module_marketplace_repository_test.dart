@@ -145,6 +145,37 @@ void main() {
     },
   );
 
+  test('keeps a module whose catalog entry names unknown targets', () {
+    final body = catalog();
+    final entry = (body['modules'] as List).single as Map;
+    final artifacts = entry['artifacts'] as List<Map<String, Object>>;
+    artifacts.add({
+      ...artifacts.first,
+      'platform': 'fuchsia',
+      'architecture': 'riscv64',
+      'url':
+          'https://github.com/dmytro-yevs/copypaste/releases/download/module-copypaste.ocr-v0.1.0/ocr-fuchsia-riscv64.cpmodule',
+    });
+    entry['supported_platforms'] = [
+      'macos',
+      'windows',
+      'linux',
+      'android',
+      'fuchsia',
+    ];
+    entry['localizations'] = {
+      'uk': {'title': 'Р' * 201, 'description': 'Офлайн.'},
+    };
+    final module = const ModuleCatalogParser()
+        .parse(jsonEncode(body), target)
+        .single;
+    expect(module.supportedPlatforms, unorderedEquals(ModulePlatform.values));
+    expect(module.canInstall, isTrue);
+    addTearDown(() => AppStrings.useLocale(const Locale('en')));
+    AppStrings.useLocale(const Locale('uk'));
+    expect((module.title, module.description), ('OCR', 'Офлайн.'));
+  });
+
   test('shows catalog translations with an English fallback', () {
     final body = catalog();
     ((body['modules'] as List).single as Map)['localizations'] = {
