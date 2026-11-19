@@ -97,6 +97,7 @@ pub struct Runtime {
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
+    bind_retry: peer_sync::BindRetry,
     peer_supervisor_started: AtomicBool,
     peer_session: tokio::sync::Mutex<Option<peer_sync::PeerSession>>,
     download_resume_started: AtomicBool,
@@ -426,6 +427,7 @@ impl Runtime {
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
+            bind_retry: peer_sync::BindRetry::default(),
             peer_supervisor_started: AtomicBool::new(false),
             peer_session: tokio::sync::Mutex::default(),
             download_resume_started: AtomicBool::new(false),
@@ -663,16 +665,17 @@ impl Runtime {
 
     /// Start the background work and, while sync is on, the peer listener and
     /// the outgoing scheduler, which then follow the sync switch until
-    /// [`Runtime::shutdown`]. Fails only when sync is on and the port is busy.
+    /// [`Runtime::shutdown`]. A busy peer port is not a failure: outgoing sync
+    /// still runs, and later calls try the port again after a growing wait.
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
         self.start_module_sync();
         self.start_deadlines();
         self.start_download_resume();
         self.start_peer_network();
-        if self.listener_started.load(Ordering::Acquire) || !self.settings.get().sync_enabled {
-            return Ok(());
+        if !self.listener_started.load(Ordering::Acquire) && self.settings.get().sync_enabled {
+            self.try_start_peer_session();
         }
-        self.try_start_peer_session()
+        Ok(())
     }
 
     /// Accept peer connections until shutdown, serving them from this history.
