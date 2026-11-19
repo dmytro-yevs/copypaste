@@ -2,7 +2,7 @@
 use super::{channel::NoiseChannel, ActiveSyncSource, Node};
 use crate::{
     peers::Peer,
-    protocol::{SyncMessage, FILE_CHUNK_BYTES, FILE_RANGE_UNSUPPORTED, PROTOCOL_VERSION},
+    protocol::{SyncMessage, VersionRange, FILE_CHUNK_BYTES, FILE_RANGE_UNSUPPORTED},
     sync::{SyncChannel, SyncError, SyncSource},
 };
 use sha2::{Digest, Sha256};
@@ -85,7 +85,8 @@ impl Node {
             // it no longer causes a request/response round trip per chunk.
             channel
                 .send(SyncMessage::FileRequest {
-                    protocol_version: PROTOCOL_VERSION,
+                    protocol_version: VersionRange::SUPPORTED.min,
+                    max_protocol_version: VersionRange::SUPPORTED.wire_max(),
                     item_id: id.into(),
                     sha256: hash.into(),
                     index: start_index,
