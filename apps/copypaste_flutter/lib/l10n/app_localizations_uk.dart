@@ -6932,4 +6932,25 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'Не вдалося завантажити теги';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Видалити всі дані';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Видаляє історію, налаштування й ключ шифрування, потім закриває CopyPaste.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Видалити все';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle => 'Видалити всі дані CopyPaste?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'Історію, файли, налаштування й ключ шифрування на цьому пристрої буде видалено, а CopyPaste закриється. Сполучені пристрої та копії в хмарі залишаться. Це не можна скасувати.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'Не вдалося видалити частину даних CopyPaste.';
 }

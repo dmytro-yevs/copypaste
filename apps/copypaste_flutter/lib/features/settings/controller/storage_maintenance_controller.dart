@@ -5,6 +5,7 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/files/folder_reveal.dart';
+import '../../../platform/lifecycle/local_data_eraser.dart';
 import '../models/storage_maintenance_models.dart';
 import '../repository/storage_maintenance_repository.dart';
 
@@ -13,13 +14,16 @@ class StorageMaintenanceController extends ChangeNotifier {
   StorageMaintenanceController({
     required StorageMaintenanceRepository repository,
     FolderReveal folders = const SystemFolderReveal(),
+    LocalDataEraser eraser = const PlatformLocalDataEraser(),
     VoidCallback? clearDecodedImages,
   }) : _repository = repository,
        _folders = folders,
+       _eraser = eraser,
        _clearDecodedImages = clearDecodedImages ?? _clearImageCache;
 
   final StorageMaintenanceRepository _repository;
   final FolderReveal _folders;
+  final LocalDataEraser _eraser;
   final VoidCallback _clearDecodedImages;
 
   StorageBreakdown? _breakdown;
@@ -57,6 +61,13 @@ class StorageMaintenanceController extends ChangeNotifier {
         await _repository.restore(backup);
         _breakdown = await _repository.breakdown();
       }, AppStrings.current.settingsRestoreFailed);
+
+  /// History, settings and the device key; the app exits when it succeeds.
+  Future<bool> eraseAllData() => _run(
+    StorageMaintenanceOperation.eraseAll,
+    _eraser.eraseAndExit,
+    AppStrings.current.settingsEraseAllDataFailed,
+  );
 
   Future<bool> openDataFolder() => _openFolder(null);
 

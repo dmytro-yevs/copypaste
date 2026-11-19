@@ -6446,4 +6446,24 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'タグを読み込めませんでした';
+
+  @override
+  String get settingsEraseAllDataTitle => 'すべてのデータを削除';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      '履歴、設定、暗号化キーを削除してから CopyPaste を終了します。';
+
+  @override
+  String get settingsEraseAllDataAction => 'すべて削除';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle => 'CopyPaste のすべてのデータを削除しますか？';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'このデバイスの履歴、ファイル、設定、暗号化キーが削除され、CopyPaste が終了します。ペアリング済みのデバイスとクラウドのコピーは残ります。この操作は元に戻せません。';
+
+  @override
+  String get settingsEraseAllDataFailed => 'CopyPaste の一部のデータを削除できませんでした。';
 }

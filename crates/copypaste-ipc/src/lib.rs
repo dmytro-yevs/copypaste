@@ -84,6 +84,10 @@ pub const APP_PARENT_READY_LINE: &str = "copypaste-daemon-listening";
 /// daemon keeps running without it. EOF without it still stops the daemon.
 pub const APP_PARENT_RELEASE_BYTE: u8 = b'r';
 
+/// One-shot daemon mode: `--erase-device-secret <DIR>` removes the device
+/// secret of a history the app has already deleted from `<DIR>`.
+pub const ERASE_DEVICE_SECRET_ARGUMENT: &str = "--erase-device-secret";
+
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {

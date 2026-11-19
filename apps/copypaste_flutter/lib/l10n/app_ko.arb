@@ -1800,5 +1800,11 @@
   "errorRateLimited": "시도 횟수가 너무 많습니다. 잠시 후 다시 시도하세요.",
   "devicesSyncFailedWith": "{devices}와(과) 동기화하지 못했습니다.",
   "transfersUnavailableTitle": "전송 목록을 불러올 수 없습니다",
-  "historyTagsLoadFailedTitle": "태그를 불러올 수 없습니다"
+  "historyTagsLoadFailedTitle": "태그를 불러올 수 없습니다",
+  "settingsEraseAllDataTitle": "모든 데이터 삭제",
+  "settingsEraseAllDataDescription": "기록, 설정, 암호화 키를 삭제한 뒤 CopyPaste를 종료합니다.",
+  "settingsEraseAllDataAction": "모두 삭제",
+  "settingsEraseAllDataConfirmTitle": "CopyPaste의 모든 데이터를 삭제할까요?",
+  "settingsEraseAllDataConfirmMessage": "이 기기의 기록, 파일, 설정, 암호화 키가 삭제되고 CopyPaste가 종료됩니다. 페어링된 기기와 클라우드 사본은 유지됩니다. 이 작업은 되돌릴 수 없습니다.",
+  "settingsEraseAllDataFailed": "CopyPaste 데이터 일부를 삭제하지 못했습니다."
 }

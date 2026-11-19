@@ -245,6 +245,13 @@ impl RuntimeError {
         }
     }
 
+    pub(crate) fn data_erase_failed() -> Self {
+        Self {
+            code: "data_erase_failed".into(),
+            message: "CopyPaste could not delete all of its data.".into(),
+        }
+    }
+
     pub(crate) fn from_daemon(code: String, message: String) -> Self {
         Self { code, message }
     }
@@ -1051,6 +1058,12 @@ pub fn stop_desktop_runtime() {
 /// The next [`start_desktop_runtime`] stops it and starts an owned one.
 pub fn release_desktop_runtime() -> Result<(), RuntimeError> {
     crate::runtime::release()
+}
+
+/// Stops the owned desktop daemon, deletes its data directory and then the
+/// device secret kept outside it. The runtime cannot be used afterwards.
+pub async fn erase_desktop_runtime_data(daemon_executable: String) -> Result<(), RuntimeError> {
+    crate::runtime::erase(daemon_executable).await
 }
 
 /// Returns runtime status only; it does not start or discover a

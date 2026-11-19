@@ -37,4 +37,10 @@ class UpgradeBackup {
   final int sizeBytes;
 }
 
-enum StorageMaintenanceOperation { refresh, clearCache, restore, openFolder }
+enum StorageMaintenanceOperation {
+  refresh,
+  clearCache,
+  restore,
+  openFolder,
+  eraseAll,
+}

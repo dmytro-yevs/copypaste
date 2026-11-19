@@ -114,10 +114,29 @@ cask "copypaste" do
   # uninstall` leaves the certificate, which is what makes uninstall-then-
   # reinstall keep a grant.
   #
-  zap trash: [
-    "~/Library/Application Support/com.copypaste.app",
-    "~/Library/Application Support/com.copypaste.CopyPaste",
-  ]
+  # The script removes the device secret from the login Keychain and the
+  # Privacy & Security grants; both outlive every file below. Either may
+  # already be absent, so neither is required to succeed.
+  zap script: {
+        executable:   "/bin/sh",
+        args:         [
+          "-c",
+          "/usr/bin/security delete-generic-password -s com.copypaste.daemon -a device-secret-key >/dev/null 2>&1; " \
+          "/usr/bin/tccutil reset All com.copypaste.app >/dev/null 2>&1; exit 0",
+        ],
+        must_succeed: false,
+      },
+      trash:  [
+        "~/Library/Application Scripts/com.copypaste.app",
+        "~/Library/Application Support/com.copypaste.app",
+        "~/Library/Application Support/com.copypaste.CopyPaste",
+        "~/Library/Caches/com.copypaste.app",
+        "~/Library/Containers/com.copypaste.app",
+        "~/Library/HTTPStorages/com.copypaste.app",
+        "~/Library/Preferences/com.copypaste.app.plist",
+        "~/Library/Saved Application State/com.copypaste.app.savedState",
+        "~/Library/WebKit/com.copypaste.app",
+      ]
 
   caveats <<~EOS
     CopyPaste is not notarised by Apple — the project has no Apple Developer ID.

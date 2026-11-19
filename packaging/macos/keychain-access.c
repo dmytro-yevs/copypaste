@@ -108,6 +108,26 @@ static int transfer(bool create) {
     return result;
 }
 
+// The daemon asks only after the history this secret opens has been deleted.
+static int erase(void) {
+    if (!authorized_parent()) return 5;
+    SecKeychainRef keychain = NULL;
+#ifdef COPYPASTE_KEYCHAIN_TESTING
+    const char *path = getenv("COPYPASTE_KEYCHAIN_TEST_PATH");
+    if (!path || SecKeychainOpen(path, &keychain) != errSecSuccess) return 2;
+    SecKeychainSetUserInteractionAllowed(false);
+#endif
+    SecKeychainItemRef item = NULL;
+    OSStatus status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
+        (UInt32)strlen(account), account, NULL, NULL, &item);
+    int result = 2;
+    if (status == errSecItemNotFound) result = 3;
+    if (status == errSecSuccess && item) result = SecKeychainItemDelete(item) == errSecSuccess ? 0 : 2;
+    if (item) CFRelease(item);
+    if (keychain) CFRelease(keychain);
+    return result;
+}
+
 int main(int argc, char **argv) {
     // Bound an OS-mediated prompt even if the daemon exits during the call.
     alarm(8);
@@ -135,5 +155,6 @@ int main(int argc, char **argv) {
     }
     if (!strcmp(argv[1], "load")) return transfer(false);
     if (!strcmp(argv[1], "create")) return transfer(true);
+    if (!strcmp(argv[1], "delete")) return erase();
     return 2;
 }

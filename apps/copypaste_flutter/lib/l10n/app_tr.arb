@@ -1800,5 +1800,11 @@
   "errorRateLimited": "Çok fazla deneme. Biraz bekleyip yeniden deneyin.",
   "devicesSyncFailedWith": "Şu cihazlarla eşitlenemedi: {devices}.",
   "transfersUnavailableTitle": "Aktarımlar yüklenemedi",
-  "historyTagsLoadFailedTitle": "Etiketler yüklenemedi"
+  "historyTagsLoadFailedTitle": "Etiketler yüklenemedi",
+  "settingsEraseAllDataTitle": "Tüm verileri sil",
+  "settingsEraseAllDataDescription": "Geçmişi, ayarları ve şifreleme anahtarını siler, ardından CopyPaste'i kapatır.",
+  "settingsEraseAllDataAction": "Tümünü sil",
+  "settingsEraseAllDataConfirmTitle": "Tüm CopyPaste verileri silinsin mi?",
+  "settingsEraseAllDataConfirmMessage": "Bu cihazdaki geçmiş, dosyalar, ayarlar ve şifreleme anahtarı silinecek ve CopyPaste kapanacak. Eşleştirilmiş cihazlar ve buluttaki kopyalar korunur. Bu işlem geri alınamaz.",
+  "settingsEraseAllDataFailed": "Bazı CopyPaste verileri silinemedi."
 }

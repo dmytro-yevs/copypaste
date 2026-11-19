@@ -474,6 +474,91 @@ pub(crate) fn release() -> Result<(), RuntimeError> {
     Ok(())
 }
 
+/// How long the stopping daemon and the one-shot secret eraser may each take.
+const ERASE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Stops the owned daemon, deletes its data directory, and only then asks the
+/// daemon executable to remove the device secret: the reverse order would
+/// leave a history nobody can open.
+pub(crate) async fn erase(daemon_executable: String) -> Result<(), RuntimeError> {
+    let runtime = {
+        let mut guard = slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match guard.take() {
+            Some(RuntimeSlot::Owned(runtime)) => runtime,
+            other => {
+                *guard = other;
+                return Err(RuntimeError::not_initialized());
+            }
+        }
+    };
+    cancel_all_watches();
+    let RunningRuntime {
+        #[cfg(not(target_os = "android"))]
+        socket_path,
+        data_dir,
+        mut child,
+    } = runtime;
+    // Closing the app-parent pipe is the daemon's shutdown signal.
+    drop(child.stdin.take());
+    wait_bounded(child).await?;
+    #[cfg(not(target_os = "android"))]
+    if copypaste_ipc::transport::connect(&socket_path)
+        .await
+        .is_ok()
+    {
+        return Err(RuntimeError::runtime_conflict());
+    }
+
+    let removal = {
+        let data_dir = data_dir.clone();
+        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(data_dir)).await
+    };
+    match removal {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return Err(RuntimeError::data_erase_failed()),
+    }
+
+    let mut command = Command::new(daemon_executable);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let eraser = command
+        .arg(copypaste_ipc::ERASE_DEVICE_SECRET_ARGUMENT)
+        .arg(&data_dir)
+        .env_remove("COPYPASTE_SOCKET")
+        .env_remove("COPYPASTE_DATA_DIR")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| RuntimeError::daemon_spawn_failed())?;
+    match wait_bounded(eraser).await? {
+        status if status.success() => Ok(()),
+        _ => Err(RuntimeError::data_erase_failed()),
+    }
+}
+
+/// Waits for `child` to exit, killing it once [`ERASE_DEADLINE`] passes.
+async fn wait_bounded(mut child: Child) -> Result<std::process::ExitStatus, RuntimeError> {
+    let deadline = tokio::time::Instant::now() + ERASE_DEADLINE;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|_| RuntimeError::internal())? {
+            return Ok(status);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            reap(child);
+            return Err(RuntimeError::data_erase_failed());
+        }
+        tokio::time::sleep(RETIRE_POLL).await;
+    }
+}
+
 /// Waits for an owned daemon after its app-parent pipe closes.
 ///
 /// `Child::drop` does not reap a process. Use Tokio when the bridge is running
@@ -617,6 +702,48 @@ mod tests {
             .expect("nothing to retire");
 
         assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn erasing_stops_the_daemon_and_deletes_history_before_the_secret() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = runtime_test_guard().await;
+        let root = tempfile::tempdir().expect("root");
+        let data_dir = root.path().join("runtime");
+        std::fs::create_dir(&data_dir).expect("data directory");
+        std::fs::write(data_dir.join("copypaste-v2.db"), b"history").expect("history");
+        let eraser = root.path().join("daemon");
+        let invocation = root.path().join("invocation");
+        std::fs::write(
+            &eraser,
+            format!(
+                "#!/bin/sh\ntest -e \"$2\" && exit 9\necho \"$1 $2\" > '{}'\n",
+                invocation.display()
+            ),
+        )
+        .expect("eraser");
+        std::fs::set_permissions(&eraser, std::fs::Permissions::from_mode(0o700)).expect("mode");
+        let daemon = Command::new("/bin/sh")
+            .args(["-c", "cat >/dev/null"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("daemon");
+        *slot().lock().unwrap() = Some(RuntimeSlot::Owned(RunningRuntime {
+            socket_path: root.path().join("absent.sock"),
+            data_dir: data_dir.clone(),
+            child: daemon,
+        }));
+
+        erase(eraser.display().to_string()).await.expect("erased");
+
+        assert!(!data_dir.exists());
+        assert_eq!(
+            std::fs::read_to_string(invocation).expect("eraser ran"),
+            format!("--erase-device-secret {}\n", data_dir.display())
+        );
+        assert!(slot().lock().unwrap().is_none());
     }
 
     #[cfg(target_os = "linux")]

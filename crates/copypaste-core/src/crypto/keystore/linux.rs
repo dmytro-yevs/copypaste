@@ -104,6 +104,24 @@ fn connect() -> Result<SecretService<'static>, CryptoError> {
     SecretService::connect(EncryptionType::Dh).map_err(unavailable)
 }
 
+/// One session-scoped Secret Service item serves every data directory.
+pub(super) const SHARED: bool = true;
+
+/// Called from the bounded keystore worker, never from a Tokio thread.
+pub(super) fn erase(_data_dir: &Path) -> Result<(), CryptoError> {
+    let service = connect()?;
+    let matches = service.search_items(attributes()).map_err(unavailable)?;
+    if !matches.locked.is_empty() {
+        return Err(CryptoError::KeystoreUnavailable(
+            "the Linux keyring is locked",
+        ));
+    }
+    for item in matches.unlocked {
+        item.delete().map_err(unavailable)?;
+    }
+    Ok(())
+}
+
 fn lookup_in(service: &SecretService<'_>) -> Result<Lookup, CryptoError> {
     let matches = service.search_items(attributes()).map_err(unavailable)?;
     if !matches.locked.is_empty() {

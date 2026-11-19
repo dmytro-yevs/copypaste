@@ -53,6 +53,7 @@ import 'features/history/controller/history_module_actions.dart';
 import 'features/history/controller/history_ocr_controller.dart';
 import 'features/history/repository/file_selector_history_file_downloader.dart';
 import 'platform/files/history_file_picker.dart';
+import 'platform/files/runtime_data_directory.dart';
 import 'platform/files/temporary_artifacts.dart';
 import 'platform/system_accent.dart';
 import 'features/history/repository/recent_searches_store.dart';
@@ -281,18 +282,11 @@ Future<void> _startRuntimeProcess() async {
     return;
   }
   if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
-  final daemonName = Platform.isWindows
-      ? 'copypaste-daemon.exe'
-      : 'copypaste-daemon';
-  final daemon = File(
-    '${File(Platform.resolvedExecutable).parent.path}/$daemonName',
-  );
+  final daemon = desktopDaemonExecutable();
   if (!await daemon.exists()) {
     throw StateError('The CopyPaste runtime helper is unavailable.');
   }
-  final supportDirectory = await getApplicationSupportDirectory();
-  final runtimeDirectory = kDebugMode ? 'development-runtime' : 'runtime';
-  final dataDir = Directory('${supportDirectory.path}/$runtimeDirectory');
+  final dataDir = await runtimeDataDirectory();
   await runtime.startDesktopRuntime(
     daemonExecutable: daemon.path,
     dataDir: dataDir.path,

@@ -6769,4 +6769,26 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'Etiketler yüklenemedi';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Tüm verileri sil';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Geçmişi, ayarları ve şifreleme anahtarını siler, ardından CopyPaste\'i kapatır.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Tümünü sil';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle =>
+      'Tüm CopyPaste verileri silinsin mi?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'Bu cihazdaki geçmiş, dosyalar, ayarlar ve şifreleme anahtarı silinecek ve CopyPaste kapanacak. Eşleştirilmiş cihazlar ve buluttaki kopyalar korunur. Bu işlem geri alınamaz.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'Bazı CopyPaste verileri silinemedi.';
 }

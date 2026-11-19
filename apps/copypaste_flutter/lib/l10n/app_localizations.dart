@@ -10928,6 +10928,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Couldn\'t load tags'**
   String get historyTagsLoadFailedTitle;
+
+  /// Title of the settings row that deletes all local CopyPaste data.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete all data'**
+  String get settingsEraseAllDataTitle;
+
+  /// Description of the settings row that deletes all local data.
+  ///
+  /// In en, this message translates to:
+  /// **'Removes history, settings and the encryption key, then closes CopyPaste.'**
+  String get settingsEraseAllDataDescription;
+
+  /// Button that starts deleting all local data.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete all'**
+  String get settingsEraseAllDataAction;
+
+  /// Title of the dialog confirming deletion of all local data.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete all CopyPaste data?'**
+  String get settingsEraseAllDataConfirmTitle;
+
+  /// Message of the dialog confirming deletion of all local data.
+  ///
+  /// In en, this message translates to:
+  /// **'History, files, settings and the encryption key on this device will be deleted and CopyPaste will close. Paired devices and cloud copies stay. This cannot be undone.'**
+  String get settingsEraseAllDataConfirmMessage;
+
+  /// Error shown when deleting all local data fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Some CopyPaste data could not be deleted.'**
+  String get settingsEraseAllDataFailed;
 }
 
 class _AppLocalizationsDelegate

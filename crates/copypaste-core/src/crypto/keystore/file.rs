@@ -27,6 +27,13 @@ fn secret_path(data_dir: &Path) -> PathBuf {
     data_dir.join(SECRET_FILE_NAME)
 }
 
+/// The secret travels inside its data directory.
+pub(super) const SHARED: bool = false;
+
+pub(super) fn erase(data_dir: &Path) -> Result<(), CryptoError> {
+    super::remove_secret_file(&secret_path(data_dir))
+}
+
 pub(super) fn load(data_dir: &Path) -> Result<Lookup, CryptoError> {
     let path = secret_path(data_dir);
     match fs::File::open(&path) {

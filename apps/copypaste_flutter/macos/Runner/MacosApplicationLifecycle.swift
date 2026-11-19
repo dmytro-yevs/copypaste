@@ -12,6 +12,11 @@ final class MacosApplicationLifecycle {
     )
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else { return }
+      if call.method == "eraseLocalData" {
+        Self.eraseLocalData(bundleIdentifier: Bundle.main.bundleIdentifier)
+        result(nil)
+        return
+      }
       guard call.method == "restart" else {
         result(FlutterMethodNotImplemented)
         return
@@ -37,6 +42,32 @@ final class MacosApplicationLifecycle {
   }
 
   deinit { channel.setMethodCallHandler(nil) }
+
+  /// Removes what macOS keeps for this bundle outside Application Support:
+  /// the defaults domain, per-bundle Library folders and privacy grants.
+  static func eraseLocalData(
+    bundleIdentifier: String?,
+    library: URL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+  ) {
+    guard let identifier = bundleIdentifier, !identifier.isEmpty else { return }
+    UserDefaults.standard.removePersistentDomain(forName: identifier)
+    for folder in [
+      "Application Scripts/\(identifier)", "Caches/\(identifier)",
+      "Containers/\(identifier)", "HTTPStorages/\(identifier)",
+      "Saved Application State/\(identifier).savedState", "WebKit/\(identifier)",
+    ] {
+      try? FileManager.default.removeItem(at: library.appendingPathComponent(folder))
+    }
+    let reset = Process()
+    reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+    reset.arguments = ["reset", "All", identifier]
+    reset.standardOutput = FileHandle.nullDevice
+    reset.standardError = FileHandle.nullDevice
+    do {
+      try reset.run()
+      reset.waitUntilExit()
+    } catch {}
+  }
 
   @discardableResult
   static func scheduleRelaunch(

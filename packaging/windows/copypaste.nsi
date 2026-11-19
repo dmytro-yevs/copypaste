@@ -62,9 +62,25 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CopyPaste"
   DeleteRegKey HKCU "Software\CopyPaste"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CopyPaste"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "CopyPaste"
+  ; Notification registration written by the app and by Windows for its AUMID.
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\com.copypaste.app"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\PushNotifications\Backup\com.copypaste.app"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.copypaste.app"
   ReadRegStr $0 HKCU "Software\Classes\copypaste\shell\open\command" ""
   ${If} $0 == '"$INSTDIR\CopyPaste.exe" "%1"'
     DeleteRegKey HKCU "Software\Classes\copypaste"
   ${EndIf}
   RMDir /r "$INSTDIR"
+
+  ; Silent uninstalls (package managers, upgrades) keep history.
+  MessageBox MB_YESNO|MB_ICONQUESTION "Also delete CopyPaste history, settings and encryption keys from this computer? This cannot be undone." /SD IDNO IDNO keep_data
+    ; App data (path_provider) and the standalone CLI daemon's data.
+    RMDir /r "$APPDATA\com.copypaste\CopyPaste"
+    RMDir "$APPDATA\com.copypaste"
+    RMDir /r "$APPDATA\copypaste\CopyPaste"
+    RMDir "$APPDATA\copypaste"
+    RMDir /r "$TEMP\copypaste-staging"
+    RMDir /r "$TEMP\copypaste-updates"
+  keep_data:
 SectionEnd

@@ -6765,4 +6765,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'Couldn\'t load tags';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Delete all data';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Removes history, settings and the encryption key, then closes CopyPaste.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Delete all';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle => 'Delete all CopyPaste data?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'History, files, settings and the encryption key on this device will be deleted and CopyPaste will close. Paired devices and cloud copies stay. This cannot be undone.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'Some CopyPaste data could not be deleted.';
 }

@@ -6,6 +6,7 @@
 mod capture;
 mod cli;
 mod clipboard;
+mod erase;
 mod host;
 #[cfg(target_os = "macos")]
 mod macos_allocator;
@@ -62,6 +63,10 @@ fn main() -> anyhow::Result<()> {
             std::io::stdout().lock(),
         )
         .map_err(Into::into);
+    }
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments.next().is_some_and(|arg| arg == erase::ARGUMENT) {
+        return erase::erase_device_secret(arguments.next());
     }
     #[cfg(target_os = "macos")]
     {

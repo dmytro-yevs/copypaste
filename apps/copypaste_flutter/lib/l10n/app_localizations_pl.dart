@@ -6936,4 +6936,26 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'Nie udało się wczytać tagów';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Usuń wszystkie dane';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Usuwa historię, ustawienia i klucz szyfrowania, a potem zamyka CopyPaste.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Usuń wszystko';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle =>
+      'Usunąć wszystkie dane CopyPaste?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'Historia, pliki, ustawienia i klucz szyfrowania na tym urządzeniu zostaną usunięte, a CopyPaste się zamknie. Sparowane urządzenia i kopie w chmurze pozostaną. Tej operacji nie można cofnąć.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'Nie udało się usunąć części danych CopyPaste.';
 }

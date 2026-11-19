@@ -1800,5 +1800,11 @@
   "errorRateLimited": "Забагато спроб. Зачекайте трохи й спробуйте ще раз.",
   "devicesSyncFailedWith": "Не вдалося синхронізуватися з: {devices}.",
   "transfersUnavailableTitle": "Не вдалося завантажити передачі",
-  "historyTagsLoadFailedTitle": "Не вдалося завантажити теги"
+  "historyTagsLoadFailedTitle": "Не вдалося завантажити теги",
+  "settingsEraseAllDataTitle": "Видалити всі дані",
+  "settingsEraseAllDataDescription": "Видаляє історію, налаштування й ключ шифрування, потім закриває CopyPaste.",
+  "settingsEraseAllDataAction": "Видалити все",
+  "settingsEraseAllDataConfirmTitle": "Видалити всі дані CopyPaste?",
+  "settingsEraseAllDataConfirmMessage": "Історію, файли, налаштування й ключ шифрування на цьому пристрої буде видалено, а CopyPaste закриється. Сполучені пристрої та копії в хмарі залишаться. Це не можна скасувати.",
+  "settingsEraseAllDataFailed": "Не вдалося видалити частину даних CopyPaste."
 }

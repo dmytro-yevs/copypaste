@@ -1800,5 +1800,11 @@
   "errorRateLimited": "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
   "devicesSyncFailedWith": "No se pudo sincronizar con {devices}.",
   "transfersUnavailableTitle": "No se pudieron cargar las transferencias",
-  "historyTagsLoadFailedTitle": "No se pudieron cargar las etiquetas"
+  "historyTagsLoadFailedTitle": "No se pudieron cargar las etiquetas",
+  "settingsEraseAllDataTitle": "Eliminar todos los datos",
+  "settingsEraseAllDataDescription": "Elimina el historial, los ajustes y la clave de cifrado, y cierra CopyPaste.",
+  "settingsEraseAllDataAction": "Eliminar todo",
+  "settingsEraseAllDataConfirmTitle": "¿Eliminar todos los datos de CopyPaste?",
+  "settingsEraseAllDataConfirmMessage": "Se eliminarán el historial, los archivos, los ajustes y la clave de cifrado de este dispositivo, y CopyPaste se cerrará. Los dispositivos vinculados y las copias en la nube se conservan. Esta acción no se puede deshacer.",
+  "settingsEraseAllDataFailed": "No se pudieron eliminar algunos datos de CopyPaste."
 }

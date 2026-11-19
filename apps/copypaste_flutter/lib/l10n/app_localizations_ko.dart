@@ -6419,4 +6419,24 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => '태그를 불러올 수 없습니다';
+
+  @override
+  String get settingsEraseAllDataTitle => '모든 데이터 삭제';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      '기록, 설정, 암호화 키를 삭제한 뒤 CopyPaste를 종료합니다.';
+
+  @override
+  String get settingsEraseAllDataAction => '모두 삭제';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle => 'CopyPaste의 모든 데이터를 삭제할까요?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      '이 기기의 기록, 파일, 설정, 암호화 키가 삭제되고 CopyPaste가 종료됩니다. 페어링된 기기와 클라우드 사본은 유지됩니다. 이 작업은 되돌릴 수 없습니다.';
+
+  @override
+  String get settingsEraseAllDataFailed => 'CopyPaste 데이터 일부를 삭제하지 못했습니다.';
 }

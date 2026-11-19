@@ -122,6 +122,32 @@ impl Keyring {
         Ok(Self { secret })
     }
 
+    /// Whether one device secret serves every data directory of this account
+    /// (Keychain, Secret Service, Android Keystore) instead of travelling
+    /// inside each one.
+    pub fn device_secret_is_shared() -> bool {
+        super::keystore::SECRET_IS_SHARED
+    }
+
+    /// Removes the device secret of a history already deleted from
+    /// `data_dir`. An absent secret is success.
+    ///
+    /// # Errors
+    ///
+    /// [`CryptoError::KeystoreUnavailable`] while the history is still present
+    /// or when the keystore refused the removal.
+    pub fn erase_device_secret(data_dir: &Path) -> Result<(), CryptoError> {
+        #[cfg(all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)))]
+        {
+            let data_dir = data_dir.to_path_buf();
+            load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || {
+                super::keystore::erase_secret(&data_dir)
+            })
+        }
+        #[cfg(any(not(any(target_os = "macos", target_os = "linux")), debug_assertions))]
+        super::keystore::erase_secret(data_dir)
+    }
+
     /// Deterministic construction from a known secret; touches no keystore.
     pub fn from_secret(secret: &[u8; KEY_LEN]) -> Self {
         Self {

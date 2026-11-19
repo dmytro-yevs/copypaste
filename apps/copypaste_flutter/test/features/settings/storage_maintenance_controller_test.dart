@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/features/settings/controller/storage_maintenan
 import 'package:copypaste_flutter/features/settings/models/storage_maintenance_models.dart';
 import 'package:copypaste_flutter/features/settings/repository/storage_maintenance_repository.dart';
 import 'package:copypaste_flutter/platform/files/folder_reveal.dart';
+import 'package:copypaste_flutter/platform/lifecycle/local_data_eraser.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -33,6 +34,34 @@ void main() {
     await controller.refresh();
     expect(controller.error, isNotNull);
   });
+
+  test('erasing all data reports a failure instead of exiting', () async {
+    final eraser = _Eraser();
+    final controller = StorageMaintenanceController(
+      repository: _Repository(),
+      eraser: eraser,
+    );
+    addTearDown(controller.dispose);
+
+    expect(await controller.eraseAllData(), isTrue);
+    expect(eraser.calls, 1);
+
+    eraser.fail = true;
+    expect(await controller.eraseAllData(), isFalse);
+    expect(eraser.calls, 2);
+    expect(controller.error, isNotNull);
+  });
+}
+
+class _Eraser implements LocalDataEraser {
+  var calls = 0;
+  var fail = false;
+
+  @override
+  Future<void> eraseAndExit() async {
+    calls++;
+    if (fail) throw StateError('locked');
+  }
 }
 
 StorageBreakdown _breakdown({required int cache}) => StorageBreakdown(
