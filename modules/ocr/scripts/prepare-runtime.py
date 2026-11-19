@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import urllib.request
 import zipfile
@@ -28,12 +27,10 @@ def prepare(platform, architecture, destination, cache, ndk=None):
     metadata = json.loads((ROOT / "assets/runtime-sources.json").read_text())
     source = dict(metadata["sources"][platform])
     if platform == "linux":
-        release_architecture = {"x86_64": "x64", "aarch64": "aarch64"}.get(architecture)
+        release_architecture = {"x86_64": "x64", "aarch64": "arm64"}.get(architecture)
         if release_architecture is None:
             raise ValueError("Linux modules ship only x86_64 and aarch64")
-        source["url"] = source["url"].format(architecture=release_architecture)
         source["member"] = source["member"].format(architecture=release_architecture)
-        source["sha256"] = source["sha256"][architecture]
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / source["url"].rsplit("/", 1)[-1]
     if not archive.exists() or digest(archive) != source["sha256"]:
@@ -54,20 +51,11 @@ def prepare(platform, architecture, destination, cache, ndk=None):
     target.mkdir(parents=True, exist_ok=True)
     name = {"macos": "libonnxruntime.dylib", "windows": "onnxruntime.dll", "linux": "libonnxruntime.so", "android": "libonnxruntime.so"}[platform]
     output = target / name
-    if platform in {"macos", "linux"}:
-        if architecture != "aarch64":
-            if platform == "macos":
-                raise ValueError("The shipped macOS application uses aarch64")
-        with tarfile.open(archive) as package:
-            member = package.getmember(source["member"])
-            if not member.isfile():
-                raise ValueError("Runtime archive member must be a regular file")
-            with package.extractfile(member) as library, output.open("wb") as destination_file:
-                shutil.copyfileobj(library, destination_file)
-    else:
-        member = source.get("member", f"jni/{ANDROID_ABIS.get(architecture)}/libonnxruntime.so")
-        with zipfile.ZipFile(archive) as package, package.open(member) as library, output.open("wb") as destination_file:
-            shutil.copyfileobj(library, destination_file)
+    if platform == "macos" and architecture != "aarch64":
+        raise ValueError("The shipped macOS application uses aarch64")
+    member = source.get("member", f"jni/{ANDROID_ABIS.get(architecture)}/libonnxruntime.so")
+    with zipfile.ZipFile(archive) as package, package.open(member) as library, output.open("wb") as destination_file:
+        shutil.copyfileobj(library, destination_file)
     if platform == "android":
         if ndk is None:
             raise ValueError("Android packaging requires the pinned NDK")
