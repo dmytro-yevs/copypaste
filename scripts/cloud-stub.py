@@ -16,6 +16,7 @@ import re
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -28,6 +29,22 @@ ARGS = None
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+LAST_PLACED = 0
+
+
+def placed():
+    """The next `updated_at`, as Postgres spells one: never before the last write."""
+    global LAST_PLACED
+    LAST_PLACED = max(time.time_ns() // 1000, LAST_PLACED + 1)
+    at = datetime.fromtimestamp(LAST_PLACED // 1_000_000, timezone.utc)
+    return f"{at:%Y-%m-%dT%H:%M:%S}.{LAST_PLACED % 1_000_000:06d}+00:00"
+
+
+def position(row):
+    # One layout and one zone, so positions order as text up to the offset.
+    return (row.get("updated_at") or "")[:26]
 
 
 def dump_rows():
@@ -122,7 +139,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(401, {"message": "no bearer"})
             incoming = self._body() or []
             with STATE_LOCK:
+                # One write, one position: every row of an upsert shares it.
+                at = placed()
                 for row in incoming:
+                    row["updated_at"] = at
                     ROWS[row["item_id"]] = row
                 dump_rows()
             return self._reply(201)
@@ -142,6 +162,7 @@ class Handler(BaseHTTPRequestHandler):
         ids = _parse_item_ids(raw)
 
         with STATE_LOCK:
+            at = placed()
             for item_id in ids:
                 row = ROWS.get(item_id)
                 if row is None:
@@ -157,6 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 row["ciphertext"] = ""
                 row["nonce"] = ""
                 row["deleted"] = True
+                row["updated_at"] = at
             dump_rows()
         self._reply(204)
 
@@ -171,47 +193,53 @@ class Handler(BaseHTTPRequestHandler):
 
         query = parse_qs(url.query)
         after = None
-        since = 0
+        since = ""
+        instant = r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6})Z"
 
         keyset = (query.get("or") or [""])[0]
         if keyset:
-            # The compound cursor: strictly after the pair (created_at, item_id).
+            # The compound cursor: strictly after the pair (updated_at, item_id).
             # Exclusive is correct *only* in this form, because the pair is a
             # total order with no ties (manifest 05 §5.1 row 6, INV-N1).
             match = re.fullmatch(
-                r"\(created_at\.gt\.(\d+),and\(created_at\.eq\.(\d+),item_id\.gt\.([A-Za-z0-9_-]+)\)\)",
+                rf"\(updated_at\.gt\.{instant},and\(updated_at\.eq\.{instant},item_id\.gt\.([A-Za-z0-9_-]+)\)\)",
                 keyset,
             )
             if not match or match.group(1) != match.group(2):
                 return self._reply(400, {"message": "unparseable keyset cursor"})
-            since = int(match.group(1))
+            since = match.group(1)
             after = match.group(3)
-        else:
-            raw = (query.get("created_at") or ["gte.0"])[0]
-            if raw.startswith("gte."):
-                since = int(raw[4:])
-            elif raw.startswith("gt."):
-                # A strict bound on the millisecond *alone* drops every row
-                # sharing the boundary millisecond (manifest 05 §4.4).
-                return self._reply(400, {"message": "exclusive cursor bound"})
+        elif "updated_at" in query:
+            match = re.fullmatch(rf"gte\.{instant}", query["updated_at"][0])
+            if not match:
+                # A strict bound on the position *alone* drops every row
+                # sharing the boundary position (manifest 05 §4.4).
+                return self._reply(400, {"message": "position bound is not inclusive"})
+            since = match.group(1)
 
         order = (query.get("order") or [""])[0]
-        if order != "created_at.asc,item_id.asc":
+        if order != "updated_at.asc,item_id.asc":
             # Equally load-bearing: a forward cursor cannot drain a
             # newest-first page, and the keyset's tie-break needs item_id in
             # the same direction.
             return self._reply(400, {"message": "page order is not the keyset order"})
         limit = int((query.get("limit") or ["100"])[0])
+        wanted = _parse_item_ids((query.get("item_id") or [""])[0]) if "item_id" in query else None
+        columns = (query.get("select") or [""])[0].split(",")
 
         def key(row):
-            return (int(row.get("created_at", 0)), row["item_id"])
+            return (position(row), row["item_id"])
 
         with STATE_LOCK:
             if after is None:
                 rows = [r for r in ROWS.values() if key(r)[0] >= since]
             else:
                 rows = [r for r in ROWS.values() if key(r) > (since, after)]
-        rows.sort(key=key)
+            if wanted is not None:
+                rows = [r for r in rows if r["item_id"] in wanted]
+            rows.sort(key=key)
+            if columns != [""]:
+                rows = [{name: r.get(name) for name in columns} for r in rows]
         self._reply(200, rows[:limit])
 
 
@@ -314,15 +342,38 @@ def self_test():
         )
         check("POST empty 201 completes promptly",
               status == 201 and body == b"" and length == "0" and elapsed < 1.0)
+        listing = "item_id,created_at,deleted,origin_device_id,signature,updated_at"
+        page = "/rest/v1/clipboard_items?order=updated_at.asc,item_id.asc"
         status, body, length, elapsed = _exchange(
             conn,
             "GET",
-            "/rest/v1/clipboard_items?order=created_at.asc,item_id.asc&created_at=gte.0",
+            f"{page}&select={listing}&updated_at=gte.1970-01-01T00:00:00.000000Z",
             headers={"Authorization": "Bearer stub-access"},
         )
-        pulled = json.loads(body) if body else []
-        check("keep-alive GET after empty 201 returns the upsert",
-              status == 200 and elapsed < 1.0 and pulled == [row])
+        listed = json.loads(body) if body else []
+        check("keep-alive listing after empty 201 places the upsert and omits the payload",
+              status == 200 and elapsed < 1.0 and len(listed) == 1
+              and set(listed[0]) == set(listing.split(","))
+              and listed[0]["updated_at"].endswith("+00:00"))
+        at = listed[0]["updated_at"][:26] + "Z" if listed else ""
+        status, body, _, _ = _exchange(
+            conn,
+            "GET",
+            f"{page}&or=(updated_at.gt.{at},and(updated_at.eq.{at},item_id.gt.it-0))",
+            headers={"Authorization": "Bearer stub-access"},
+        )
+        check("keyset after an earlier id at the same position returns the row",
+              status == 200 and [r["item_id"] for r in json.loads(body)] == ["it-1"])
+        status, body, _, _ = _exchange(
+            conn,
+            "GET",
+            f"{page}&item_id=in.(it-1,it-absent)",
+            headers={"Authorization": "Bearer stub-access"},
+        )
+        fetched = json.loads(body) if body else []
+        check("fetch by id returns the whole stored row",
+              status == 200 and len(fetched) == 1
+              and {k: v for k, v in fetched[0].items() if k != "updated_at"} == row)
         status, body, length, elapsed = _exchange(
             conn,
             "GET",

@@ -15,10 +15,10 @@ use std::{
     io::{Cursor, Write},
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use wiremock::{
     matchers::{method, path},
@@ -251,25 +251,98 @@ impl Drop for Device {
         let _ = self.manager.set_enabled("copypaste.supabase", false, &[]);
     }
 }
+/// The clipboard table as PostgREST serves it: a write places its rows at the
+/// backend's own clock, and a read honours the id filter, the keyset, the
+/// order, the limit and the column list.
 #[derive(Clone, Default)]
-struct Rows(Arc<Mutex<BTreeMap<String, Value>>>);
+struct Rows(Arc<Mutex<BTreeMap<String, Value>>>, Arc<AtomicU64>);
+impl Rows {
+    /// The next `updated_at` as Postgres spells a `timestamptz` in JSON, at
+    /// least a microsecond after the previous write.
+    fn placed(&self) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        let at = now.max(self.1.load(Ordering::Acquire) + 1);
+        self.1.store(at, Ordering::Release);
+        let (seconds, micros) = (at / 1_000_000, at % 1_000_000);
+        // Days since the epoch to a civil date, shifted to years starting in March.
+        let days = seconds / 86_400 + 719_468;
+        let day_of_era = days % 146_097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let shifted_month = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+        let month = if shifted_month < 10 {
+            shifted_month + 3
+        } else {
+            shifted_month - 9
+        };
+        let year = year_of_era + days / 146_097 * 400 + u64::from(month <= 2);
+        let second = seconds % 86_400;
+        format!(
+            "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{micros:06}+00:00",
+            second / 3_600,
+            second % 3_600 / 60,
+            second % 60
+        )
+    }
+}
 impl Respond for Rows {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let mut rows = self.0.lock().unwrap();
         if request.method.as_str() == "POST" {
+            let placed = self.placed();
             let items: Vec<Value> = serde_json::from_slice(&request.body).unwrap();
-            for item in items {
+            for mut item in items {
+                item["updated_at"] = json!(placed);
                 rows.insert(item["item_id"].as_str().unwrap().into(), item);
             }
-            ResponseTemplate::new(201)
-        } else {
-            let mut items: Vec<_> = rows.values().cloned().collect();
-            items.sort_by(|a, b| {
-                (a["created_at"].as_i64(), a["item_id"].as_str())
-                    .cmp(&(b["created_at"].as_i64(), b["item_id"].as_str()))
-            });
-            ResponseTemplate::new(200).set_body_json(items)
+            return ResponseTemplate::new(201);
         }
+        let query: BTreeMap<String, String> = request.url.query_pairs().into_owned().collect();
+        // Positions share one layout and zone, so they order as text up to the offset.
+        let instant = |text: &str| text.get(..26).unwrap_or(text).to_owned();
+        let key = |row: &Value| {
+            (
+                instant(row["updated_at"].as_str().unwrap()),
+                row["item_id"].as_str().unwrap().to_owned(),
+            )
+        };
+        let mut items: Vec<Value> = rows.values().cloned().collect();
+        if let Some(ids) = query
+            .get("item_id")
+            .and_then(|ids| ids.strip_prefix("in.(")?.strip_suffix(')'))
+        {
+            items.retain(|row| ids.split(',').any(|id| row["item_id"] == id));
+        }
+        if let Some(from) = query
+            .get("updated_at")
+            .and_then(|from| from.strip_prefix("gte."))
+        {
+            items.retain(|row| key(row).0 >= instant(from));
+        }
+        if let Some(after) = query.get("or").and_then(|after| {
+            let (position, rest) = after.strip_prefix("(updated_at.gt.")?.split_once(",and(")?;
+            let item_id = rest.rsplit_once(",item_id.gt.")?.1.strip_suffix("))")?;
+            Some((instant(position), item_id.to_owned()))
+        }) {
+            items.retain(|row| key(row) > after);
+        }
+        items.sort_by_key(key);
+        if let Some(limit) = query.get("limit").and_then(|limit| limit.parse().ok()) {
+            items.truncate(limit);
+        }
+        if let Some(columns) = query.get("select") {
+            for item in &mut items {
+                item.as_object_mut()
+                    .unwrap()
+                    .retain(|column, _| columns.split(',').any(|name| name == column));
+            }
+        }
+        ResponseTemplate::new(200).set_body_json(items)
     }
 }
 async fn backend(delay: Option<Duration>) -> (MockServer, Rows) {
