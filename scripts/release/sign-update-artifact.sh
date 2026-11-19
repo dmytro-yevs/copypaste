@@ -15,7 +15,15 @@ OUTPUT="${2:-${ARTIFACT}.sig}"
 }
 
 artifact="$(cd "$(dirname "$ARTIFACT")" && pwd)/$(basename "$ARTIFACT")"
-npx --yes @tauri-apps/cli@2.11.4 signer sign "$artifact"
+# Install the signer from the committed lockfile so every package is
+# integrity-pinned, with lifecycle scripts disabled and the key withheld.
+pinned="$(cd "$(dirname "${BASH_SOURCE[0]}")/updater-signer" && pwd)"
+signer="$(mktemp -d)"
+trap 'rm -rf "$signer"' EXIT
+cp "$pinned/package.json" "$pinned/package-lock.json" "$signer/"
+(cd "$signer" && unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+    && npm ci --ignore-scripts --no-audit --no-fund)
+"$signer/node_modules/.bin/tauri" signer sign "$artifact"
 [[ -s "${artifact}.sig" ]] || {
     echo "ERROR: updater signer did not create a signature" >&2
     exit 1

@@ -26,11 +26,6 @@ on:
       source_run_id:
         required: true
         type: string
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY:
-        required: true
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
-        required: true
 
 permissions:
   contents: read
@@ -116,18 +111,16 @@ jobs:
             --receipt artifact/runtime-receipt.json --runtime-dir artifact/runtime --version "${CI_INPUT_VERSION}" \
             --format "${{ matrix.package_format }}" \
             --output "artifact/copypaste-compositor-runtime-$runtime_id-v${CI_INPUT_VERSION}-linux-${{ matrix.architecture }}.${{ matrix.package_format }}"
-      - name: Sign and bind immutable producer files
+      # The release signs and verifies its own staged copy of this package.
+      - name: Bind immutable producer files
         env:
           CI_INPUT_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           CI_INPUT_VERSION: ${{ inputs.version }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           COMPOSITOR_RUNTIME_COMMIT: ${{ inputs.commit }}
         run: |
           set -euo pipefail
           package="$(find artifact -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) -print -quit)"
           test -n "$package"
-          scripts/release/sign-update-artifact.sh "$package"
           (cd "$(dirname "$package")" && sha256sum "$(basename "$package")") > "$package.sha256"
           python3 - "$package" artifact/runtime-receipt.json artifact/compositor-runtime-producer-receipt.json <<'PY'
           import hashlib, json, os, sys

@@ -9,13 +9,16 @@ import subprocess
 
 
 def select(paths):
-    selected = {"native": False, "compositor": False}
+    selected = {"native": False, "compositor": False, "signer": False}
     for path in paths:
         if not path or path.startswith("/") or ".." in Path(path).parts:
-            return {"native": True, "compositor": True}
+            return {"native": True, "compositor": True, "signer": True}
         if path in ("README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE"):
             continue
         selected["native"] = True
+        if (path.startswith("scripts/release/updater-signer/")
+                or path in {"scripts/release/sign-update-artifact.sh", "scripts/ci/test-updater-signer.sh"}):
+            selected["signer"] = True
         if (path.startswith("packaging/linux/desktop-integrations/")
                 or path.startswith("packaging/linux/compositor-runtime/")
                 or path.startswith("scripts/release/compositor-runtime-")
@@ -36,13 +39,15 @@ def changed_paths(base, head):
     return subprocess.check_output(["git", "diff", "--name-only", "-z", base_sha, head_sha]).decode("utf-8").split("\0")[:-1]
 
 
-def verify_results(needs, native, trusted_pr, is_pr=False, compositor=True):
+def verify_results(needs, native, trusted_pr, is_pr=False, compositor=True, signer=True):
     if needs.get("changes", {}).get("result") != "success":
         raise ValueError("change detection did not pass")
     for key, result in needs.items():
         if key == "changes":
             continue
         expected = "success" if native else "skipped"
+        if key == "updater-signer" and not signer:
+            expected = "skipped"
         if key in ("compositor-runtime-metadata", "compositor-runtime-producer") and not (trusted_pr and compositor):
             expected = "skipped"
         if key == "linux-mutter-bridges" and not compositor:
@@ -60,7 +65,7 @@ def main():
     if args.verify:
         verify_results(json.loads(os.environ["NEEDS"]), os.environ["NATIVE"] == "true",
                        os.environ["TRUSTED_PR"] == "true", os.environ["IS_PR"] == "true",
-                       os.environ["COMPOSITOR"] == "true")
+                       os.environ["COMPOSITOR"] == "true", os.environ["SIGNER"] == "true")
         print("All selected CI jobs passed")
         return
     try:
@@ -68,7 +73,7 @@ def main():
         result = select(paths)
     except (ValueError, UnicodeError, subprocess.CalledProcessError) as error:
         print(f"Full validation required: {error}")
-        result = {"native": True, "compositor": True}
+        result = {"native": True, "compositor": True, "signer": True}
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         for name, enabled in result.items():
             output.write(f"{name}={str(enabled).lower()}\n")

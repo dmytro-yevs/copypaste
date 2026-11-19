@@ -33,6 +33,9 @@ permissions:
 
 jobs:
   preflight:
+    # Every signing and publishing job needs this one, so skipping it refuses
+    # a manual run of any ref other than the default branch or a v* release tag.
+    if: github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -63,6 +66,7 @@ jobs:
 
   desktop:
     needs: preflight
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -129,6 +133,7 @@ jobs:
   android:
     if: inputs.linux_only != true
     needs: preflight
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -228,6 +233,7 @@ jobs:
   publish:
     needs: [preflight, desktop, android, android-native]
     if: inputs.publish
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -247,8 +253,9 @@ jobs:
       - name: Publish qualified module release
         env:
           GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           gh release create module-copypaste.ocr-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste OCR ${{ needs.preflight.outputs.version }}" --notes "Optional first-party OCR. Signed packages for macOS, Windows, Linux x86_64 (GNOME X11 release scope), and all shipped Android ABIs. Recognition works offline."
           if [[ "${{ inputs.publish_marketplace }}" == true ]]; then
-            gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.ocr-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}
+            gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH" -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}
           fi

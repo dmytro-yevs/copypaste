@@ -292,7 +292,7 @@ class ReleasePipelineTest(unittest.TestCase):
         from workflow_yaml import read_workflow
         workflow = read_workflow(ROOT / ".github/workflows/compositor-runtime.yml")
         step = next(step for step in workflow["jobs"]["build"]["steps"]
-                    if step.get("name") == "Sign and bind immutable producer files")
+                    if step.get("name") == "Bind immutable producer files")
         program = step["run"].split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
         for name, value in workflow["jobs"]["build"]["strategy"]["matrix"]["include"][0].items():
             program = program.replace("${{ matrix." + name + " }}", str(value))
