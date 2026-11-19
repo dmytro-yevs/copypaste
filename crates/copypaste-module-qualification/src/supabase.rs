@@ -5,7 +5,8 @@ use copypaste_sync::store::StoreView;
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 
-pub(super) fn qualify(manager: &ModuleManager, id: &str) -> Result<usize, String> {
+/// Sync host callbacks over an in-memory store, as the runtime provides them.
+pub(super) fn sync_services() -> Result<Arc<SyncServices>, String> {
     let keys = Arc::new(Keyring::from_secret(&[41; 32]));
     let store = Store::open_in_memory(&keys.db_key()).map_err(|e| e.to_string())?;
     let identity = store
@@ -18,13 +19,17 @@ pub(super) fn qualify(manager: &ModuleManager, id: &str) -> Result<usize, String
         identity.device_name,
         Default::default(),
     );
+    Ok(Arc::new(SyncServices::new(
+        store,
+        StoreView::new(source, identity.device_id),
+        || true,
+        |_| {},
+    )))
+}
+
+pub(super) fn qualify(manager: &ModuleManager, id: &str) -> Result<usize, String> {
     manager
-        .set_sync_services(Arc::new(SyncServices::new(
-            store,
-            StoreView::new(source, identity.device_id),
-            || true,
-            |_| {},
-        )))
+        .set_sync_services(sync_services()?)
         .map_err(|e| e.to_string())?;
     manager
         .set_enabled(id, true, &[])
