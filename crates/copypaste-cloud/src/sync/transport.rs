@@ -11,7 +11,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::auth::Session;
-use crate::rest::{CloudItem, RowPage};
+use crate::rest::{CloudItem, RowListing, RowPage};
 
 /// What the driver needs to know about a failed request.
 ///
@@ -106,40 +106,41 @@ pub trait RestApi: Send + Sync {
     ) -> impl Future<Output = Result<(), TransportFault>> + Send {
         async { Ok(()) }
     }
-    /// One page of rows, **oldest first**, at most `limit` of them, positioned
-    /// by a keyset cursor.
+    /// One page of a listing in the order the backend placed the rows,
+    /// **oldest first**, at most `limit` of them, after a keyset cursor. A
+    /// listing carries no payload.
     ///
-    /// `after_item_id` is the tie-break half of that cursor. With it, the page
-    /// starts strictly after the pair `(since_ms, after_item_id)`; without it,
-    /// the bound is inclusive on `since_ms` alone, for the reason on
-    /// [`CloudSource::local_changes_since`](super::CloudSource::local_changes_since).
+    /// `position` is the backend's own, never a device's stamp: a row written
+    /// late or under a wrong clock still lands after everything accepted
+    /// before it, so a cursor that only moves forward cannot leave it behind.
     ///
-    /// The ordering must be total and tie-free — `(created_at, item_id)`, not
-    /// `created_at` alone — or a burst sharing one millisecond is silently lost
-    /// (manifest 05 INV-N1). The cursor must be expressed in the same pair, or
-    /// a millisecond holding more than one page can never be paged past.
+    /// `after_item_id` is the tie-break half of the cursor. With it, the page
+    /// starts strictly after the pair `(position, after_item_id)`; without it,
+    /// the bound is inclusive on `position` alone.
     ///
-    /// **Oldest first is a hard requirement, not a preference.** The cursor is
-    /// a lower bound that moves forward, so a newest-first page cannot be
-    /// drained: taking the newest `limit` rows and advancing past them skips
-    /// everything older that has not been seen yet, and *not* advancing means
-    /// the same page comes back forever. That is exactly the shape of the
-    /// original watermark bug in manifest 05 §4.4 —
-    /// `order=wall_time.desc&limit=20` re-fetched the same newest twenty rows
-    /// on every tick and older history never downloaded at all. The fix that
-    /// manifest records is `order=…asc` with a compound keyset.
+    /// The ordering must be total and tie-free — `(position, item_id)` — and
+    /// the cursor expressed in the same pair, or a batch that shares one
+    /// position and outgrows a page can never be paged past (INV-N1).
     ///
-    /// [`CloudSync::pull`](super::CloudSync::pull) sorts each page defensively
-    /// and warns if one arrives out of order, so a violation is loud rather
-    /// than silent — but it cannot repair it.
-    ///
-    /// A page may also end early at a byte budget; [`RowPage::cut`] says so.
-    fn fetch_since(
+    /// **Oldest first is a hard requirement, not a preference.** A forward
+    /// cursor cannot drain a newest-first page: advancing past it skips
+    /// everything older, and not advancing returns it forever (manifest 05
+    /// §4.4).
+    fn list_since(
         &self,
         token: &str,
-        since_ms: i64,
+        position: i64,
         after_item_id: Option<&str>,
         limit: u32,
+    ) -> impl Future<Output = Result<Vec<RowListing>, TransportFault>> + Send;
+
+    /// The rows with these ids, whole. A page may end early at a byte budget,
+    /// and [`RowPage::cut`] says so: an id missing from a page that was not
+    /// cut no longer exists, one missing from a cut page was not reached.
+    fn fetch_rows(
+        &self,
+        token: &str,
+        item_ids: &[String],
     ) -> impl Future<Output = Result<RowPage, TransportFault>> + Send;
 
     /// Upsert on `item_id`, so re-sending a row is a no-op rather than a

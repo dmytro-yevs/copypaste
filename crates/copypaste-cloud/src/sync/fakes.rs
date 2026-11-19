@@ -8,14 +8,14 @@
 //! HTTP clients.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use super::*;
 use crate::auth::{now_ms, Session};
 use crate::crypto::{encrypt_row, SyncKey};
-use crate::rest::{CloudItem, RowPage};
+use crate::rest::{CloudItem, RowListing, RowPage};
 use crate::CloudConfig;
 use zeroize::Zeroizing;
 
@@ -93,6 +93,7 @@ pub(super) fn cloud_row(id: &str, created_at: i64, content: &str) -> CloudItem {
         deleted: false,
         origin_device_id: "device-b".into(),
         signature: String::new(),
+        position: None,
     })
 }
 
@@ -121,33 +122,22 @@ pub(super) fn driver(rest: FakeRest, auth: FakeAuth) -> CloudSync<FakeRest, Fake
 pub(super) struct FakeSource {
     outgoing: Mutex<Vec<LocalItem>>,
     stored: Mutex<HashMap<String, LocalItem>>,
-    watermark: Mutex<i64>,
-    /// The tie-break half, for the sources that keep one. `None` in the
-    /// default fake, which is the weaker cursor most of these tests exercise.
-    watermark_item_id: Mutex<Option<String>>,
-    keyset: bool,
-    /// Tracked separately from the watermark, as a real source must — see
-    /// [`CloudSource::upload_floor`].
+    cursor: Mutex<PullCursor>,
+    /// Tracked separately from the download cursor, as a real source must —
+    /// see [`CloudSource::upload_floor`].
     floor: Mutex<i64>,
     #[allow(dead_code)]
     applies: AtomicUsize,
     pub(super) batches: AtomicUsize,
     short_batch: bool,
+    /// A space key the application holds, once a test hands it one.
+    space: Mutex<Option<(u64, [u8; 32])>>,
 }
 
 impl FakeSource {
     pub(super) fn with_outgoing(items: Vec<LocalItem>) -> Self {
         Self {
             outgoing: Mutex::new(items),
-            ..Self::default()
-        }
-    }
-
-    /// A source that persists both halves of the keyset cursor, as a real one
-    /// should.
-    pub(super) fn with_keyset_watermark() -> Self {
-        Self {
-            keyset: true,
             ..Self::default()
         }
     }
@@ -173,10 +163,20 @@ impl FakeSource {
         self.stored.lock().unwrap().get(id).cloned()
     }
 
-    /// Move the cursor without the monotonicity assertion, to set up a case
-    /// the driver itself would never produce.
-    pub(super) fn rewind(&self, ms: i64) {
-        *self.watermark.lock().unwrap() = ms;
+    /// Forget the cursor, as a device that lost its state would: the driver
+    /// starts over and forgets what it had dealt with.
+    pub(super) fn rewind(&self) {
+        *self.cursor.lock().unwrap() = PullCursor::default();
+    }
+
+    /// Persist a cursor the driver did not write.
+    pub(super) fn plant_cursor(&self, cursor: PullCursor) {
+        *self.cursor.lock().unwrap() = cursor;
+    }
+
+    /// The application received the key of a later epoch.
+    pub(super) fn adopt_space_key(&self, epoch: u64, key: &SyncKey) {
+        *self.space.lock().unwrap() = Some((epoch, *key.to_bytes()));
     }
 
     /// What the owner of a source does after a round completes.
@@ -188,6 +188,21 @@ impl FakeSource {
 impl CloudSource for FakeSource {
     fn device_id(&self) -> String {
         DEVICE.into()
+    }
+
+    fn space_key(
+        &self,
+        _: Option<&[u8; 32]>,
+    ) -> Result<Option<copypaste_sync::space::SpaceKey>, SyncError> {
+        Ok(self
+            .space
+            .lock()
+            .unwrap()
+            .map(|(epoch, key)| copypaste_sync::space::SpaceKey {
+                epoch,
+                key: Zeroizing::new(key),
+                active: true,
+            }))
     }
 
     fn local_changes_since(&self, since_ms: i64) -> Result<Vec<LocalItem>, SyncError> {
@@ -229,12 +244,8 @@ impl CloudSource for FakeSource {
         Ok(out)
     }
 
-    fn watermark(&self) -> Result<i64, SyncError> {
-        Ok(*self.watermark.lock().unwrap())
-    }
-
-    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        Ok(self.watermark_item_id.lock().unwrap().clone())
+    fn pull_cursor(&self) -> Result<PullCursor, SyncError> {
+        Ok(self.cursor.lock().unwrap().clone())
     }
 
     fn upload_floor(&self) -> Result<i64, SyncError> {
@@ -254,24 +265,18 @@ impl CloudSource for FakeSource {
         Ok(false)
     }
 
-    fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-        let mut w = self.watermark.lock().unwrap();
+    fn set_pull_cursor(&self, cursor: &PullCursor) -> Result<(), SyncError> {
+        let mut stored = self.cursor.lock().unwrap();
         // INV-N5, asserted for every test that pulls: the driver must never
-        // hand back a lower cursor than it was given.
-        assert!(ms >= *w, "the watermark moved backwards: {} -> {ms}", *w);
-        *w = ms;
-        *self.watermark_item_id.lock().unwrap() = None;
-        Ok(())
-    }
-
-    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
-        if !self.keyset {
-            return self.set_watermark(ms);
-        }
-        let mut w = self.watermark.lock().unwrap();
-        assert!(ms >= *w, "the watermark moved backwards: {} -> {ms}", *w);
-        *w = ms;
-        *self.watermark_item_id.lock().unwrap() = Some(item_id.to_owned());
+        // hand back a lower cursor than it was given. Starting over for
+        // another account or under a later key is not a step back.
+        assert!(
+            cursor.position >= stored.position
+                || cursor.account != stored.account
+                || cursor.epoch > stored.epoch,
+            "the cursor moved backwards: {stored:?} -> {cursor:?}"
+        );
+        *stored = cursor.clone();
         Ok(())
     }
 }
@@ -304,6 +309,11 @@ pub(super) struct FakeRest {
     pub(super) oversized: Vec<String>,
     /// Order and filter ids case-insensitively, as a database collation does.
     pub(super) collated: bool,
+    /// The backend's clock: every write takes the next position.
+    pub(super) clock: AtomicI64,
+    pub(super) lists: AtomicUsize,
+    /// Rows a listing still names that are gone when they are fetched.
+    pub(super) vanished: Vec<String>,
 }
 
 impl FakeRest {
@@ -314,10 +324,23 @@ impl FakeRest {
         }
     }
 
+    /// A backend that took each row as a write of its own, in this order.
     pub(super) fn seeded(rows: Vec<CloudItem>) -> Self {
-        Self {
-            rows: Mutex::new(rows.into_iter().map(|r| (r.item_id.clone(), r)).collect()),
-            ..Self::default()
+        let rest = Self::default();
+        for row in rows {
+            rest.write(vec![row]);
+        }
+        rest
+    }
+
+    /// One write: its rows share the position the backend's clock gives it.
+    /// Positions step by ten so a test can place a row between two writes.
+    pub(super) fn write(&self, batch: Vec<CloudItem>) {
+        let position = self.clock.fetch_add(10, Ordering::SeqCst) + 10;
+        let mut rows = self.rows.lock().unwrap();
+        for mut row in batch {
+            row.position = Some(position);
+            rows.insert(row.item_id.clone(), row);
         }
     }
 
@@ -347,12 +370,18 @@ impl FakeRest {
         (folded, id.to_owned())
     }
 
+    /// A row the backend never placed sorts last, as an unreadable position
+    /// does.
+    fn place(row: &CloudItem) -> i64 {
+        row.position.unwrap_or(i64::MAX)
+    }
+
     pub(super) fn sorted_rows(&self) -> Vec<CloudItem> {
         let mut rows: Vec<CloudItem> = self.rows.lock().unwrap().values().cloned().collect();
         // A total, tie-free order — INV-N1.
         rows.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
+            Self::place(a)
+                .cmp(&Self::place(b))
                 .then_with(|| self.id_key(&a.item_id).cmp(&self.id_key(&b.item_id)))
         });
         rows
@@ -360,14 +389,42 @@ impl FakeRest {
 }
 
 impl RestApi for FakeRest {
-    /// Pages exactly as the deployment does: inclusive on the millisecond
-    /// alone, strictly after the pair once the tie-break is known.
-    async fn fetch_since(
+    /// Lists exactly as the deployment does: inclusive on the position alone,
+    /// strictly after the pair once the tie-break is known.
+    async fn list_since(
         &self,
         token: &str,
-        since_ms: i64,
+        position: i64,
         after_item_id: Option<&str>,
         limit: u32,
+    ) -> Result<Vec<RowListing>, TransportFault> {
+        if let Some(fault) = self.next(token) {
+            return Err(fault);
+        }
+        self.lists.fetch_add(1, Ordering::SeqCst);
+        Ok(self
+            .sorted_rows()
+            .into_iter()
+            .filter(|r| match after_item_id {
+                Some(id) => (Self::place(r), self.id_key(&r.item_id)) > (position, self.id_key(id)),
+                None => Self::place(r) >= position,
+            })
+            .take(limit as usize)
+            .map(|row| RowListing {
+                position: Self::place(&row),
+                item_id: row.item_id,
+                created_at: row.created_at,
+                deleted: row.deleted,
+                origin_device_id: row.origin_device_id,
+                signature: row.signature,
+            })
+            .collect())
+    }
+
+    async fn fetch_rows(
+        &self,
+        token: &str,
+        item_ids: &[String],
     ) -> Result<RowPage, TransportFault> {
         if let Some(fault) = self.next(token) {
             return Err(fault);
@@ -377,14 +434,8 @@ impl RestApi for FakeRest {
         for row in self
             .sorted_rows()
             .into_iter()
-            .filter(|r| match after_item_id {
-                Some(id) => (r.created_at, self.id_key(&r.item_id)) > (since_ms, self.id_key(id)),
-                None => r.created_at >= since_ms,
-            })
+            .filter(|row| item_ids.contains(&row.item_id) && !self.vanished.contains(&row.item_id))
         {
-            if page.rows.len() == limit as usize {
-                break;
-            }
             if Some(page.rows.len()) == self.cut_after {
                 page.cut = true;
                 break;
@@ -416,10 +467,7 @@ impl RestApi for FakeRest {
             }
         }
         self.upserts.fetch_add(items.len(), Ordering::SeqCst);
-        let mut rows = self.rows.lock().unwrap();
-        for item in items {
-            rows.insert(item.item_id.clone(), item.clone());
-        }
+        self.write(items.to_vec());
         Ok(())
     }
 }

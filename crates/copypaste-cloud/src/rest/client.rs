@@ -1,16 +1,19 @@
 //! The two requests, and the one place both auth headers are attached.
 //!
 //! Every query-shape decision that the cursor depends on is here — the
-//! inclusive `gte`, the ascending compound order, the clamped `limit` — and
-//! each carries the bug it prevents.
+//! server-assigned position, the inclusive `gte`, the ascending compound
+//! order, the clamped `limit` — and each carries the bug it prevents.
 
 use std::fmt;
 use std::future::Future;
 
 use super::body::{read_capped, read_prefix, read_row_page, BodyError, RowPage};
 use super::error::{classify, RestError};
-use super::item::{validate_item_id, CloudItem};
-use super::{CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, UPSERT_CHUNK};
+use super::item::{format_position, validate_item_id, CloudItem, RowListing};
+use super::{
+    CONFLICT_TARGET, LISTING_COLUMNS, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE,
+    UPSERT_CHUNK,
+};
 use crate::auth::transient_backoff;
 use crate::{CloudConfig, HttpClient};
 use backon::{ExponentialBuilder, Retryable};
@@ -78,71 +81,86 @@ impl SupabaseRest {
         self
     }
 
-    /// One page of rows, oldest first, positioned by the keyset cursor.
+    /// One page of a listing in the order the server placed the rows, after a
+    /// keyset cursor over `(updated_at, item_id)`. No payload travels.
     ///
-    /// The cursor has two halves, and which of them the caller holds decides
-    /// the bound this sends:
+    /// `updated_at` is assigned by the database on every write and no client
+    /// can set it, so this order is the one rows reached the server in. A
+    /// device's own stamp is not: a row uploaded late, or by a device whose
+    /// clock is wrong, would sort behind or ahead of cursors that then never
+    /// meet it.
     ///
-    /// * `after_item_id = None` — the caller knows only the millisecond, so the
-    ///   bound is **inclusive** (`created_at=gte.…`). A strict `gt` on a
-    ///   millisecond alone silently drops every row that shares the boundary
-    ///   millisecond with the last row of the previous page (manifest §4.4,
-    ///   INV-N1). Re-offered boundary rows are free to absorb, because applying
-    ///   a version already applied is a no-op (INV-I1).
-    /// * `after_item_id = Some(id)` — the caller knows the full position, so the
-    ///   bound is the compound keyset
-    ///   `or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))`: everything
-    ///   strictly after the pair `(M, ID)` in the page order. Exclusive is
-    ///   correct *here* and only here, because `(created_at, item_id)` is a
-    ///   total order with no ties, so "strictly after the last row I applied"
-    ///   cannot skip a row it has not seen.
+    /// * `after_item_id = None` — the bound is **inclusive** on the position
+    ///   (`updated_at=gte.…`).
+    /// * `after_item_id = Some(id)` — everything strictly after the pair, as
+    ///   `or=(updated_at.gt.P,and(updated_at.eq.P,item_id.gt.ID))`. Every row
+    ///   of one upsert shares a position, so the pair is what pages through a
+    ///   batch larger than a page (INV-N1, AT-24).
     ///
-    /// The millisecond-only form is what stalls once more than one page of rows
-    /// shares a single `created_at`: the watermark cannot advance past that
-    /// millisecond, so the same first page comes back forever and the rows
-    /// behind it never download (manifest §5.1 row 6, INV-N1, AT-24). The
-    /// compound form advances through every row in the total order.
-    ///
-    /// The order is **ascending** — `(created_at asc, item_id asc)` — and it is
-    /// the order the keyset is expressed in; the deployment's
-    /// `(user_id, created_at, item_id)` index serves both.
-    ///
-    /// Ascending is load-bearing, not a preference. A forward cursor cannot
-    /// drain a newest-first page: take the newest `limit` rows and advance past
-    /// them and everything older is skipped forever; do not advance and the
-    /// same page is returned on every tick. The failure is invisible in steady
-    /// state, where the backlog is smaller than one page, and appears only for
-    /// a device that has been offline long enough to matter — which is exactly
-    /// when history matters most. Manifest 05 §4.4 records the required forward
-    /// order and AT-23 exercises a backlog larger than one page.
-    ///
-    /// `limit` is clamped to [`MAX_PAGE_LIMIT`]; a full page means "there may
-    /// be more", and the caller should drain rather than wait for the next tick.
-    /// So does a page cut at [`PAGE_BYTES`](super::body::PAGE_BYTES), which is
-    /// read as a stream and stops at the first row boundary past that budget.
-    pub async fn fetch_since(
+    /// Ascending is load-bearing: a forward cursor cannot drain a newest-first
+    /// page (manifest 05 §4.4, AT-23). `limit` is clamped to
+    /// [`MAX_PAGE_LIMIT`]; a full page means "there may be more".
+    pub async fn list_since(
         &self,
         token: &str,
-        since_ms: i64,
+        position: i64,
         after_item_id: Option<&str>,
         limit: u32,
-    ) -> Result<RowPage, RestError> {
+    ) -> Result<Vec<RowListing>, RestError> {
         let limit = limit.clamp(1, MAX_PAGE_LIMIT);
-        let since_ms = since_ms.max(0);
-        let url = self.table_url();
+        let position = format_position(position);
         let mut query = vec![
-            ("select", SELECT_COLUMNS.to_string()),
-            ("order", "created_at.asc,item_id.asc".to_string()),
+            ("select", LISTING_COLUMNS.to_string()),
+            ("order", PAGE_ORDER.to_string()),
             ("limit", limit.to_string()),
         ];
         match after_item_id {
             Some(item_id) => {
                 validate_item_id(item_id)?;
-                query.push(("or", keyset_after(since_ms, item_id)));
+                query.push(("or", keyset_after(&position, item_id)));
             }
-            None => query.push(("created_at", format!("gte.{since_ms}"))),
+            None => query.push(("updated_at", format!("gte.{position}"))),
         }
+        let body = self
+            .fetch_capped(
+                token,
+                &self.table_url(),
+                &query,
+                limit as usize * LISTING_ROW_BYTES,
+            )
+            .await?;
+        let rows: Vec<RowListing> =
+            serde_json::from_slice(&body).map_err(|_| RestError::Malformed)?;
+        if rows.len() > limit as usize {
+            return Err(RestError::Malformed);
+        }
+        tracing::debug!(rows = rows.len(), "listed a page");
+        Ok(rows)
+    }
 
+    /// The rows with these ids, whole, in the listing's order. An id that is
+    /// absent from a page that was not cut no longer exists; a page cut at
+    /// [`PAGE_BYTES`](super::body::PAGE_BYTES) says nothing of the ids it did
+    /// not reach.
+    pub async fn fetch_rows(&self, token: &str, item_ids: &[String]) -> Result<RowPage, RestError> {
+        if item_ids.is_empty() {
+            return Ok(RowPage::default());
+        }
+        if item_ids.len() > MAX_PAGE_LIMIT as usize {
+            return Err(RestError::InvalidItem {
+                reason: "more rows were asked for than one page holds",
+            });
+        }
+        for item_id in item_ids {
+            validate_item_id(item_id)?;
+        }
+        let url = self.table_url();
+        let query = [
+            ("select", SELECT_COLUMNS.to_string()),
+            ("item_id", format!("in.({})", item_ids.join(","))),
+            ("order", PAGE_ORDER.to_string()),
+            ("limit", item_ids.len().to_string()),
+        ];
         let page = self
             .send_reading(
                 token,
@@ -155,12 +173,7 @@ impl SupabaseRest {
                 read_row_page,
             )
             .await?;
-        tracing::debug!(
-            rows = page.rows.len(),
-            cut = page.cut,
-            since_ms,
-            "fetched a page"
-        );
+        tracing::debug!(rows = page.rows.len(), cut = page.cut, "fetched rows");
         Ok(page)
     }
 
@@ -297,17 +310,20 @@ impl SupabaseRest {
     }
 }
 
-/// PostgREST's spelling of "strictly after the pair `(created_at, item_id)`".
-///
-/// The `and(…)` arm is what makes the bound safe to make exclusive: without it
-/// a strict `gt` on the millisecond alone loses every row sharing it, and an
-/// inclusive bound on the millisecond alone cannot get past a millisecond that
-/// holds more than one page (INV-N1).
+/// The one order every page is read in.
+const PAGE_ORDER: &str = "updated_at.asc,item_id.asc";
+
+/// Room for one listed row: three columns of at most 128 characters, one of
+/// them free text that JSON may escape six-fold, two numbers and the keys.
+const LISTING_ROW_BYTES: usize = 2 * 1024;
+
+/// PostgREST's spelling of "strictly after the pair `(updated_at, item_id)`".
 ///
 /// `item_id` is `[A-Za-z0-9_-]` by [`validate_item_id`], checked by the caller,
-/// so it cannot close the parenthesis or add a disjunct.
-fn keyset_after(created_at: i64, item_id: &str) -> String {
-    format!("(created_at.gt.{created_at},and(created_at.eq.{created_at},item_id.gt.{item_id}))")
+/// and `position` is [`format_position`]'s digits and `-:.TZ`, so neither can
+/// close the parenthesis or add a disjunct.
+fn keyset_after(position: &str, item_id: &str) -> String {
+    format!("(updated_at.gt.{position},and(updated_at.eq.{position},item_id.gt.{item_id}))")
 }
 
 // Tests
@@ -321,7 +337,7 @@ mod tests {
     use wiremock::matchers::{header as header_match, headers, method, path, query_param};
     use wiremock::Mock;
 
-    // -- fetch_since --------------------------------------------------------
+    // -- list_since and fetch_rows -------------------------------------------
 
     #[test]
     fn table_url_join_preserves_an_ipv6_authority() {
@@ -349,17 +365,20 @@ mod tests {
         assert_eq!(value_of(&pairs, "unicode"), "✓");
     }
 
+    /// 2023-11-14T22:13:20.000001Z.
+    const POSITION: i64 = 1_700_000_000_000_001;
+
     #[tokio::test]
-    async fn fetch_since_asks_for_an_inclusive_bound_and_a_total_order() {
+    async fn a_listing_asks_for_an_inclusive_bound_a_total_order_and_no_payload() {
         let mock = Mock::given(method("GET"))
             .and(path("/rest/v1/clipboard_items"))
-            .and(query_param("select", SELECT_COLUMNS))
-            .and(query_param("created_at", "gte.1700000000000"))
-            .and(query_param("order", "created_at.asc,item_id.asc"))
+            .and(query_param("select", LISTING_COLUMNS))
+            .and(query_param("updated_at", "gte.2023-11-14T22:13:20.000001Z"))
+            .and(query_param("order", "updated_at.asc,item_id.asc"))
             .and(query_param("limit", "20"));
         let stub = Stub::start_matching(mock, vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, 1_700_000_000_000, None, 20)
+            .list_since(TOKEN, POSITION, None, 20)
             .await
             .expect("fetch");
 
@@ -368,30 +387,38 @@ mod tests {
         assert_eq!(request.url.path(), "/rest/v1/clipboard_items");
 
         let pairs = query_pairs(&request.url);
-        assert_eq!(value_of(&pairs, "select"), SELECT_COLUMNS);
+        assert_eq!(value_of(&pairs, "select"), LISTING_COLUMNS);
+        assert!(
+            !LISTING_COLUMNS.contains("ciphertext"),
+            "a listing must not carry the payload"
+        );
         assert_eq!(
-            value_of(&pairs, "created_at"),
-            "gte.1700000000000",
-            "a strict `gt` loses every row in the boundary millisecond"
+            value_of(&pairs, "updated_at"),
+            "gte.2023-11-14T22:13:20.000001Z",
+            "a strict `gt` loses every row at the boundary position"
+        );
+        assert!(
+            !pairs.iter().any(|(key, _)| key == "created_at"),
+            "a device's own stamp must not bound the page: {pairs:?}"
         );
         // Ascending: a forward cursor cannot drain a newest-first page.
-        assert_eq!(value_of(&pairs, "order"), "created_at.asc,item_id.asc");
+        assert_eq!(value_of(&pairs, "order"), "updated_at.asc,item_id.asc");
         assert_eq!(value_of(&pairs, "limit"), "20");
     }
 
     #[tokio::test]
     async fn a_known_tie_break_becomes_a_compound_keyset() {
-        // INV-N1 / AT-24. The millisecond alone cannot be paged past once one
-        // millisecond holds more than a page of rows; the pair can.
-        let keyset =
-            "(created_at.gt.1700000000000,and(created_at.eq.1700000000000,item_id.gt.item-42))";
+        // INV-N1 / AT-24. Every row of one upsert shares a position, so the
+        // position alone cannot be paged past once a batch outgrows a page.
+        let keyset = "(updated_at.gt.2023-11-14T22:13:20.000001Z,\
+                      and(updated_at.eq.2023-11-14T22:13:20.000001Z,item_id.gt.item-42))";
         let mock = Mock::given(method("GET"))
             .and(path("/rest/v1/clipboard_items"))
             .and(query_param("or", keyset))
-            .and(query_param("order", "created_at.asc,item_id.asc"));
+            .and(query_param("order", "updated_at.asc,item_id.asc"));
         let stub = Stub::start_matching(mock, vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, 1_700_000_000_000, Some("item-42"), 20)
+            .list_since(TOKEN, POSITION, Some("item-42"), 20)
             .await
             .expect("fetch");
 
@@ -399,17 +426,17 @@ mod tests {
         let pairs = query_pairs(&request.url);
         assert_eq!(value_of(&pairs, "or"), keyset);
         assert!(
-            !pairs.iter().any(|(k, _)| k == "created_at"),
+            !pairs.iter().any(|(k, _)| k == "updated_at"),
             "the keyset replaces the bare bound rather than joining it: {pairs:?}"
         );
-        assert_eq!(value_of(&pairs, "order"), "created_at.asc,item_id.asc");
+        assert_eq!(value_of(&pairs, "order"), "updated_at.asc,item_id.asc");
     }
 
     #[tokio::test]
     async fn a_hostile_tie_break_cannot_rewrite_the_filter() {
         let stub = Stub::start(vec![Reply::json(200, "[]")], 0).await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 1, Some("a),or=(deleted.eq.false"), 10)
+            .list_since(TOKEN, 1, Some("a),or=(deleted.eq.false"), 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
@@ -417,14 +444,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_since_sends_both_the_apikey_and_the_user_token() {
+    async fn a_listing_sends_both_the_apikey_and_the_user_token() {
         let mock = Mock::given(method("GET"))
             .and(path("/rest/v1/clipboard_items"))
             .and(header_match("apikey", ANON))
             .and(header_match("authorization", format!("Bearer {TOKEN}")));
         let stub = Stub::start_matching(mock, vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
 
@@ -441,7 +468,7 @@ mod tests {
     async fn the_page_size_is_bounded_in_both_directions() {
         let stub = Stub::start(vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, 0, None, 100_000)
+            .list_since(TOKEN, 0, None, 100_000)
             .await
             .expect("fetch");
         assert_eq!(
@@ -451,7 +478,7 @@ mod tests {
 
         let stub = Stub::start(vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, 0, None, 0)
+            .list_since(TOKEN, 0, None, 0)
             .await
             .expect("fetch");
         assert_eq!(
@@ -461,40 +488,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_negative_watermark_is_floored_at_zero() {
+    async fn a_negative_position_is_floored_at_the_epoch() {
         let stub = Stub::start(vec![Reply::json(200, "[]")], 1).await;
         client(&stub)
-            .fetch_since(TOKEN, -42, None, 10)
+            .list_since(TOKEN, -42, None, 10)
             .await
             .expect("fetch");
         assert_eq!(
-            value_of(&query_pairs(&stub.only_request().await.url), "created_at"),
-            "gte.0"
+            value_of(&query_pairs(&stub.only_request().await.url), "updated_at"),
+            "gte.1970-01-01T00:00:00.000000Z"
         );
     }
 
     #[tokio::test]
-    async fn a_page_round_trips_into_rows() {
+    async fn rows_are_fetched_by_id_and_round_trip() {
         let body = r#"[
             {"item_id":"a1","ciphertext":"c2VhbGVk","nonce":"bm9uY2U=",
              "content_type":"text","created_at":1700000000001,"deleted":false,
-             "origin_device_id":"device-b","signature":"c2ln"},
+             "origin_device_id":"device-b","signature":"c2ln",
+             "updated_at":"2023-11-14T22:13:20.000001+00:00"},
             {"item_id":"a2","ciphertext":"","nonce":"",
              "content_type":"text","created_at":1700000000000,"deleted":true,
              "origin_device_id":"device-c"}
         ]"#;
         let stub = Stub::start(vec![Reply::json(200, body)], 1).await;
         let rows = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .fetch_rows(TOKEN, &["a1".into(), "a2".into()])
             .await
             .expect("fetch")
             .rows;
+
+        let pairs = query_pairs(&stub.only_request().await.url);
+        assert_eq!(value_of(&pairs, "select"), SELECT_COLUMNS);
+        assert_eq!(value_of(&pairs, "item_id"), "in.(a1,a2)");
+        assert_eq!(value_of(&pairs, "order"), "updated_at.asc,item_id.asc");
+        assert_eq!(value_of(&pairs, "limit"), "2");
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].item_id, "a1");
         assert_eq!(rows[0].ciphertext_bytes().expect("base64"), b"sealed");
         assert_eq!(rows[0].nonce_bytes().expect("base64"), b"nonce");
         assert_eq!(rows[0].signature, "c2ln");
+        assert_eq!(rows[0].position, Some(POSITION));
         assert!(rows[1].deleted, "a tombstone must survive the round trip");
         assert!(rows[1].ciphertext.is_empty());
         assert!(
@@ -504,10 +539,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_id_that_could_change_the_filter_is_never_asked_for() {
+        let stub = Stub::start(vec![Reply::json(200, "[]")], 0).await;
+        let err = client(&stub)
+            .fetch_rows(TOKEN, &["a1".into(), "b),or=(deleted.eq.false".into()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
+        assert_eq!(stub.request_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_listing_reads_what_a_row_claims_and_where_it_was_placed() {
+        let body = r#"[{"item_id":"a1","created_at":7,"deleted":false,
+            "origin_device_id":"device-b","signature":"c2ln",
+            "updated_at":"2023-11-14T22:13:20.000001+00:00"}]"#;
+        let stub = Stub::start(vec![Reply::json(200, body)], 1).await;
+        let listed = client(&stub)
+            .list_since(TOKEN, 0, None, 10)
+            .await
+            .expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].item_id, "a1");
+        assert_eq!(listed[0].created_at, 7);
+        assert_eq!(listed[0].position, POSITION);
+    }
+
+    #[tokio::test]
+    async fn a_position_that_cannot_be_read_fails_the_page() {
+        // Skipping such a row would lose it while sync still looked healthy.
+        for updated_at in [r#""updated_at":"infinity","#, ""] {
+            let body = format!(
+                r#"[{{"item_id":"a1","created_at":7,"deleted":false,{updated_at}
+                    "origin_device_id":"device-b","signature":"c2ln"}}]"#
+            );
+            let stub = Stub::start(vec![Reply::json(200, &body)], 1).await;
+            let err = client(&stub)
+                .list_since(TOKEN, 0, None, 10)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, RestError::Malformed),
+                "{updated_at:?}: {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_body_that_is_not_a_row_array_is_malformed() {
         let stub = Stub::start(vec![Reply::json(200, r#"{"message":"nope"}"#)], 1).await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Malformed), "{err:?}");

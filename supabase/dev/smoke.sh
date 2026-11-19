@@ -22,18 +22,20 @@
 #   1. that `?on_conflict=user_id,item_id` resolves when the body does not
 #      contain `user_id` — the single most load-bearing untested assumption in
 #      the whole deployment, and a 400 (`42P10`) if it is wrong;
-#   2. that the `select=`, `order=` and `created_at=gte.` query string the
-#      client sends is accepted verbatim;
+#   2. that the three read requests the client sends — the listing with an
+#      inclusive bound, the listing with a compound keyset, and the fetch by
+#      id — are accepted verbatim, and that a position the server returned
+#      still names the same row once spelled the way the client spells it;
 #   3. that a tombstone upsert reaches exactly the rows it names and wipes the
 #      payload;
 #   4. that the publishable key on its own reaches nothing;
 #   5. that a row with no `signature` is refused by the column, not merely by
 #      the client (manifest 05 §5.3).
 #
-# Needs: curl, jq.
+# Needs: curl, jq, python3.
 set -euo pipefail
 
-for tool in curl jq; do
+for tool in curl jq python3; do
     command -v "$tool" >/dev/null || { echo "smoke: $tool is required" >&2; exit 2; }
 done
 
@@ -113,19 +115,73 @@ code="$(upsert "$alice" "$(row 'c2Vjb25k' "$((now_ms + 1))")")"
 [[ "$code" =~ ^(200|201|204)$ ]] || fail "the replayed upsert returned $code"
 echo "smoke: upsert is idempotent without the client ever sending user_id"
 
-# The read path, character for character as `fetch_since` builds it.
-page="$(curl -sS -G "$REST" \
-    -H "apikey: $ANON" -H "Authorization: Bearer $alice" -H 'Accept: application/json' \
-    --data-urlencode 'select=item_id,ciphertext,nonce,content_type,created_at,deleted,origin_device_id,signature' \
-    --data-urlencode "created_at=gte.$now_ms" \
-    --data-urlencode 'order=created_at.asc,item_id.asc' \
-    --data-urlencode 'limit=100')"
+# The read path, character for character as the client builds it
+# (`SupabaseRest::list_since` and `fetch_rows`): a listing names versions and
+# positions, never the payload, and whole rows are then fetched by id.
+listing_columns='item_id,created_at,deleted,origin_device_id,signature,updated_at'
+row_columns='item_id,ciphertext,nonce,content_type,payload_metadata,source_app_bundle_id,source_app_name,created_at,deleted,origin_device_id,signature,updated_at'
+get() { # query parameters, already `name=value`
+    local args=()
+    for pair in "$@"; do args+=(--data-urlencode "$pair"); done
+    curl -sS -G "$REST" \
+        -H "apikey: $ANON" -H "Authorization: Bearer $alice" -H 'Accept: application/json' \
+        "${args[@]}"
+}
 
-echo "$page" | jq -e --arg id "$item" 'map(select(.item_id == $id)) | length == 1' >/dev/null \
-    || fail "the row did not come back exactly once: $page"
-echo "$page" | jq -e 'map(keys | sort) | all(. == ["ciphertext","content_type","created_at","deleted","item_id","nonce","origin_device_id","signature"])' >/dev/null \
-    || fail "the page carries columns the client does not model: $page"
-echo "smoke: the cursor page has exactly the eight columns the client parses"
+listing="$(get "select=$listing_columns" 'order=updated_at.asc,item_id.asc' 'limit=200' \
+    'updated_at=gte.1970-01-01T00:00:00.000000Z')"
+echo "$listing" | jq -e --arg id "$item" 'map(select(.item_id == $id)) | length == 1' >/dev/null \
+    || fail "the row was not listed exactly once: $listing"
+echo "$listing" | jq -e --arg columns "$listing_columns" \
+    'map(keys | sort) | all(. == ($columns | split(",") | sort))' >/dev/null \
+    || fail "the listing carries columns the client does not model: $listing"
+echo "smoke: the listing has exactly the columns the client parses, and no payload"
+
+# The position the server gave the row, spelled as the client spells it: UTC,
+# six fractional digits, `Z` (`rest/item.rs`, `format_position`).
+placed="$(echo "$listing" | jq -er --arg id "$item" 'map(select(.item_id == $id))[0].updated_at')"
+position="$(python3 - "$placed" <<'PY'
+import datetime, re, sys
+m = re.fullmatch(
+    r"(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d):(\d\d)(?:\.(\d{1,6}))?(Z|[+-]\d\d(?::\d\d)?)",
+    sys.argv[1])
+if not m:
+    sys.exit(f"not a timestamp the client reads: {sys.argv[1]}")
+year, month, day, hour, minute, second = (int(part) for part in m.groups()[:6])
+micros = int((m.group(7) or "").ljust(6, "0"))
+zone = m.group(8)
+offset = 0 if zone == "Z" else (1 if zone[0] == "+" else -1) * (
+    int(zone[1:3]) * 3600 + int(zone[4:6] or 0) * 60)
+utc = datetime.datetime(year, month, day, hour, minute, second) - datetime.timedelta(seconds=offset)
+print(f"{utc:%Y-%m-%dT%H:%M:%S}.{micros:06d}Z")
+PY
+)"
+
+same="$(get 'select=item_id' "item_id=eq.$item" "updated_at=eq.$position")"
+echo "$same" | jq -e 'length == 1' >/dev/null \
+    || fail "$placed read back as $position no longer names the row: $same"
+
+# The compound keyset, bounded just before the row and then on the row itself.
+after() { # tie-break id -> ids listed strictly after ($position, id)
+    get "select=$listing_columns" 'order=updated_at.asc,item_id.asc' 'limit=200' \
+        "or=(updated_at.gt.$position,and(updated_at.eq.$position,item_id.gt.$1))"
+}
+before_it="$(after 0)"
+echo "$before_it" | jq -e --arg id "$item" 'map(select(.item_id == $id)) | length == 1' >/dev/null \
+    || fail "the keyset was not accepted, or lost a row sharing its position: $before_it"
+on_it="$(after "$item")"
+echo "$on_it" | jq -e --arg id "$item" 'map(select(.item_id == $id)) | length == 0' >/dev/null \
+    || fail "the keyset returned the row it is positioned on: $on_it"
+echo "smoke: a server position survives the client's spelling, and the keyset pages on it"
+
+page="$(get "select=$row_columns" "item_id=in.($item,$item-absent)" \
+    'order=updated_at.asc,item_id.asc' 'limit=2')"
+echo "$page" | jq -e --arg id "$item" 'map(.item_id) == [$id]' >/dev/null \
+    || fail "the fetch by id did not return exactly the row that exists: $page"
+echo "$page" | jq -e --arg columns "$row_columns" \
+    'map(keys | sort) | all(. == ($columns | split(",") | sort))' >/dev/null \
+    || fail "the row carries columns the client does not model: $page"
+echo "smoke: rows are fetched by id with exactly the columns the client parses"
 
 # An unsigned row must not exist at all. The client refuses to send one and
 # refuses to merge one; this is the third gate, and the only one that applies to

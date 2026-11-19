@@ -155,7 +155,7 @@ mod tests {
     async fn a_401_is_distinct_and_is_not_retried() {
         let stub = Stub::start(vec![Reply::json(401, r#"{"message":"JWT expired"}"#)], 1).await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Unauthorized), "{err:?}");
@@ -181,7 +181,7 @@ mod tests {
     async fn a_403_is_not_confused_with_a_401() {
         let stub = Stub::start(vec![Reply::json(403, r#"{"message":"RLS"}"#)], 1).await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(
@@ -198,7 +198,7 @@ mod tests {
         )
         .await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         match err {
@@ -230,10 +230,10 @@ mod tests {
     async fn a_5xx_is_retried_and_then_succeeds() {
         let stub = Stub::start(vec![Reply::text(503, "down"), Reply::json(200, "[]")], 2).await;
         let rows = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
-        assert!(rows.rows.is_empty());
+        assert!(rows.is_empty());
         assert_eq!(stub.request_count().await, 2);
     }
 
@@ -241,7 +241,7 @@ mod tests {
     async fn a_persistent_5xx_gives_up_with_the_status() {
         let stub = Stub::start(vec![Reply::text(500, "boom")], 1..).await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Server { status: 500 }), "{err:?}");
@@ -282,7 +282,7 @@ mod tests {
         )
         .await;
         let err = client(&stub)
-            .fetch_since(TOKEN, 0, None, 10)
+            .list_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         let rendered = format!("{err} {err:?}");
@@ -295,7 +295,7 @@ mod tests {
         let rest =
             SupabaseRest::new(CloudConfig::new_loopback("http://127.0.0.1:1", ANON).unwrap())
                 .with_retry_policy(fast_retry());
-        let err = rest.fetch_since(TOKEN, 0, None, 10).await.unwrap_err();
+        let err = rest.list_since(TOKEN, 0, None, 10).await.unwrap_err();
         assert!(matches!(err, RestError::Network(_)), "{err:?}");
         assert!(!format!("{err}").contains('/'));
     }

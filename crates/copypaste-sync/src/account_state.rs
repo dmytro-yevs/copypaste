@@ -12,8 +12,17 @@ pub enum CloudStateKey {
     SyncKeyUserId,
     CursorUserId,
     LastSyncMs,
+    /// The download cursor of versions that paged on device clocks. Still
+    /// reset on an account change for those versions; never read.
     WatermarkMs,
     WatermarkItemId,
+    /// The download cursor: the position the backend gave the last row
+    /// passed and that row's id, then the account and the key epoch the
+    /// cursor was built under.
+    PullPosition,
+    PullItemId,
+    PullAccount,
+    PullEpoch,
     UploadFloorMs,
     UploadFloorItemId,
     UnreadableUploads,
@@ -36,6 +45,10 @@ impl CloudStateKey {
             Self::LastSyncMs => "cloud_last_sync_ms",
             Self::WatermarkMs => "cloud_watermark_ms",
             Self::WatermarkItemId => "cloud_watermark_item_id",
+            Self::PullPosition => "cloud_pull_position",
+            Self::PullItemId => "cloud_pull_item_id",
+            Self::PullAccount => "cloud_pull_account",
+            Self::PullEpoch => "cloud_pull_epoch",
             Self::UploadFloorMs => "cloud_upload_floor_ms",
             Self::UploadFloorItemId => "cloud_upload_floor_item_id",
             Self::UnreadableUploads => "cloud_unreadable_uploads",
