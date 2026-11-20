@@ -1055,7 +1055,7 @@
     },
     {
       "id": "CI-003",
-      "title": "Build CodeQL Swift Dart and Rust outputs outside tracing",
+      "title": "Trace only the Swift compiler in the CodeQL Swift build",
       "domain": "ci",
       "implementation_status": "implemented",
       "priority": "P1",
@@ -1068,53 +1068,68 @@
         "scripts/ci/xcodebuild-macos-release.sh",
         "scripts/ci/tests/test_codeql_swift_build.py"
       ],
-      "invariant": "The traced build compiles every Swift target of the universal Release app in fresh derived data; Dart AOT, the Rust bridge and the daemon are built before CodeQL init and reused through the shared products directory.",
-      "next_step": "Under tracing, the cnativeapi Objective-C++ compile (about 8 minutes) and the Swift extraction remain on the critical path; removing non-Swift work from the traced build needs a product build-script change.",
+      "invariant": "One Release build of the universal app runs after CodeQL init, native and outside the tracer. Xcode and SwiftPM compile every Swift module and package manifest through a generated wrapper that starts swiftc under the CodeQL tracer; Dart, Rust, C and linking are never traced. The job builds its Rust products without the release optimizer because it neither runs nor ships them.",
+      "next_step": "The Rust bridge hook (Flutter build_hooks, 774 s in run 44737492397) and the extraction of the 12 package manifests (205 to 363 s across six runs) are now the longest parts of the build step.",
       "native_resource_qualification": {
         "macOS": "not_established"
       },
       "measured_saving": {
         "metric": "analyze-swift job wall clock seconds (scripts/ci/metrics.py)",
-        "baseline_p50": 3277,
-        "candidate_p50": 2834,
+        "baseline_p50": 3385,
+        "candidate_p50": 1702,
         "baseline_runs": [
-          42124847085,
-          42205161689,
-          42222126997
+          44624703066,
+          44618752158,
+          44623642034,
+          44632222130,
+          44639079361
+        ],
+        "baseline_runs_cancelled_at_the_60_minute_limit": [
+          44618849983,
+          44713738981
         ],
         "candidate_runs": [
-          42283233466,
-          42283310085,
-          42283846287
+          44742642181,
+          44742684321,
+          44742734514
         ],
-        "build_steps_p50_before": 2916,
-        "build_steps_p50_after": 2594,
-        "cache_cohort": "unknown per metrics.py; neither variant restores build-output caches, only the Flutter SDK",
-        "attribution": "Baseline runs are main pushes; candidate runs are branch workflow_dispatch and pull_request runs with the same Swift, Xcode and hook inputs.",
+        "candidate_seconds": [
+          1869,
+          1702,
+          1216
+        ],
+        "cache_cohort": "unknown per metrics.py; neither variant restores build-output caches. Flutter SDK and pub cache restores per run: all three candidate runs missed both; baseline runs restored both (44639079361, 44713738981), the SDK only (44624703066, 44618752158, 44623642034, 44618849983) or neither (44632222130).",
+        "attribution": "Baseline runs are main pushes and pull_request runs of the two-build workflow, including the main commit 5a2fa83f this change is based on; candidate runs are one pull_request and two workflow_dispatch runs of commit fbe58a4e with the same Swift, Xcode and hook inputs.",
         "qualification": false
       },
       "evidence_refs": [
         {
           "kind": "ci_run",
-          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42222126997",
-          "source_state": "main_d9e5ccc4_baseline_swift_database_54_sources",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/44624703066",
+          "source_state": "main_f59a14be_baseline_swift_database_59_sources",
           "release_qualification": false
         },
         {
           "kind": "ci_run",
-          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283233466",
-          "source_state": "candidate_with_post_analysis_source_listing_54_identical_sources",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/44715687295",
+          "source_state": "probe_traced_step_runs_translated_and_arch_arm64_fails_under_the_tracer",
           "release_qualification": false
         },
         {
           "kind": "ci_run",
-          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283846287",
-          "source_state": "candidate_a95d4e3a_on_release_1_2_1",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/44737492397",
+          "source_state": "candidate_f1979b26_with_post_analysis_source_listing_59_identical_sources",
+          "release_qualification": false
+        },
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/44742642181",
+          "source_state": "candidate_fbe58a4e_pull_request",
           "release_qualification": false
         }
       ],
       "supersedes": [],
-      "functional_validation": "The Swift database source list is identical to main (54 of 54 paths, including 12 Runner files, GeneratedPluginRegistrant.swift and 3 hotkey_manager_macos files). Traced Flutter Assemble finished in 5 seconds and the daemon Cargo build was fresh. CI workflow lint, zizmor and 51 CI tests passed."
+      "functional_validation": "The Swift database source list is identical to main (59 of 59 paths: 14 Runner files, GeneratedPluginRegistrant.swift, 12 package manifests, plugin and generated sources) in runs 44727581441, 44733017843 and 44737492397, and the source archive is 106.80 KiB on main and in every candidate run. The build script refuses to start inside the tracer. CI workflow lint, zizmor and 59 CI tests passed."
     },
     {
       "id": "DEV-001",
