@@ -1069,7 +1069,7 @@
         "scripts/ci/tests/test_codeql_swift_build.py"
       ],
       "invariant": "One Release build of the universal app runs after CodeQL init, native and outside the tracer. Xcode and SwiftPM compile every Swift module and package manifest through a generated wrapper that starts swiftc under the CodeQL tracer; Dart, Rust, C and linking are never traced. The job builds its Rust products without the release optimizer because it neither runs nor ships them.",
-      "next_step": "The Rust bridge hook (Flutter build_hooks, 774 s in run 44737492397) and the extraction of the 12 package manifests (217 to 363 s) are now the longest parts of the build step.",
+      "next_step": "The Rust bridge hook (Flutter build_hooks, 774 s in run 44737492397) and the extraction of the 12 package manifests (205 to 363 s across six runs) are now the longest parts of the build step.",
       "native_resource_qualification": {
         "macOS": "not_established"
       },
