@@ -10,7 +10,7 @@ from workflow_yaml import read_workflow
 
 
 class CodeQlSwiftBuildTest(unittest.TestCase):
-    def test_swift_targets_recompile_under_tracing_after_untraced_dart_and_rust_build(self):
+    def test_only_swift_modules_recompile_under_tracing_after_the_untraced_build(self):
         workflow = read_workflow(ROOT / ".github/workflows/codeql-scheduled.yml")
         steps = workflow["jobs"]["analyze-swift"]["steps"]
         init = next(index for index, step in enumerate(steps)
@@ -22,10 +22,10 @@ class CodeQlSwiftBuildTest(unittest.TestCase):
         self.assertLess(prebuild, init)
         self.assertLess(init, traced)
         self.assertEqual(steps[traced]["name"], "Build Swift sources for CodeQL")
-        # New derived data recompiles every Xcode target; shared products keep
-        # Flutter's assemble cache, which is keyed by the products directory.
-        self.assertNotEqual(prebuild_args[1], traced_args[1])
-        self.assertEqual(prebuild_args[2], traced_args[2])
+        # Shared derived data and products keep every output of the untraced
+        # build; the traced build recompiles the Swift modules alone.
+        self.assertEqual(len(prebuild_args), 3)
+        self.assertEqual(traced_args, [*prebuild_args, "--recompile-swift"])
 
 
 if __name__ == "__main__":

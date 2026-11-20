@@ -71,39 +71,25 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter build macos --release --config-only --no-pub
-      # Dart AOT, the Rust bridge and the runtime daemon contain no Swift.
-      # Build them before tracing starts; the traced build below shares the
-      # products directory, so Flutter and Cargo reuse these outputs while
-      # its fresh derived data recompiles every Swift target under tracing.
+      # CodeQL can only trace an x86_64 build, so everything it traces runs
+      # under Rosetta and costs many times more than the same work untraced.
+      # Build the whole application before tracing starts. The traced build
+      # below shares its directories, reuses every output and recompiles the
+      # Swift modules alone.
       - name: Build Dart and Rust outputs before CodeQL tracing
-        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/macos-prebuild" "$RUNNER_TEMP/macos-products"
+        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: swift
           build-mode: manual
       - name: Build Swift sources for CodeQL
-        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products"
+        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products" --recompile-swift
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:swift
-
-  # TEMPORARY: measures how the CodeQL tracer treats process architecture.
-  probe-swift-tracer:
-    permissions:
-      contents: read
-      actions: read
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        with:
-          languages: swift
-          build-mode: manual
-      - name: Probe tracer architecture handling
-        run: scripts/ci/probe-swift-tracer.sh
+      # TEMPORARY: evidence that the analyzed source list is unchanged.
+      - name: List analyzed Swift sources
+        run: unzip -Z1 "$RUNNER_TEMP/codeql_databases/swift/src.zip" | grep -v '/$' | sort
 
   analyze-cpp:
     permissions:
