@@ -1801,5 +1801,11 @@
   "errorRateLimited": "Trop de tentatives. Patientez un instant et réessayez.",
   "devicesSyncFailedWith": "Impossible de synchroniser avec {devices}.",
   "transfersUnavailableTitle": "Impossible de charger les transferts",
-  "historyTagsLoadFailedTitle": "Impossible de charger les tags"
+  "historyTagsLoadFailedTitle": "Impossible de charger les tags",
+  "settingsEraseAllDataTitle": "Supprimer toutes les données",
+  "settingsEraseAllDataDescription": "Supprime l’historique, les paramètres et la clé de chiffrement, puis ferme CopyPaste.",
+  "settingsEraseAllDataAction": "Tout supprimer",
+  "settingsEraseAllDataConfirmTitle": "Supprimer toutes les données de CopyPaste ?",
+  "settingsEraseAllDataConfirmMessage": "L’historique, les fichiers, les paramètres et la clé de chiffrement de cet appareil seront supprimés et CopyPaste se fermera. Les appareils associés et les copies dans le cloud sont conservés. Cette action est irréversible.",
+  "settingsEraseAllDataFailed": "Certaines données de CopyPaste n’ont pas pu être supprimées."
 }

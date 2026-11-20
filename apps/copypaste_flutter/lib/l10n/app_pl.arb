@@ -1801,5 +1801,11 @@
   "errorRateLimited": "Zbyt wiele prób. Odczekaj chwilę i spróbuj ponownie.",
   "devicesSyncFailedWith": "Nie udało się zsynchronizować z: {devices}.",
   "transfersUnavailableTitle": "Nie udało się wczytać transferów",
-  "historyTagsLoadFailedTitle": "Nie udało się wczytać tagów"
+  "historyTagsLoadFailedTitle": "Nie udało się wczytać tagów",
+  "settingsEraseAllDataTitle": "Usuń wszystkie dane",
+  "settingsEraseAllDataDescription": "Usuwa historię, ustawienia i klucz szyfrowania, a potem zamyka CopyPaste.",
+  "settingsEraseAllDataAction": "Usuń wszystko",
+  "settingsEraseAllDataConfirmTitle": "Usunąć wszystkie dane CopyPaste?",
+  "settingsEraseAllDataConfirmMessage": "Historia, pliki, ustawienia i klucz szyfrowania na tym urządzeniu zostaną usunięte, a CopyPaste się zamknie. Sparowane urządzenia i kopie w chmurze pozostaną. Tej operacji nie można cofnąć.",
+  "settingsEraseAllDataFailed": "Nie udało się usunąć części danych CopyPaste."
 }

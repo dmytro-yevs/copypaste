@@ -8379,5 +8379,29 @@
   "historyTagsLoadFailedTitle": "Couldn't load tags",
   "@historyTagsLoadFailedTitle": {
     "description": "Title of the error state shown in place of the tag list in the tags dialog when tags cannot be loaded."
+  },
+  "settingsEraseAllDataTitle": "Delete all data",
+  "@settingsEraseAllDataTitle": {
+    "description": "Title of the settings row that deletes all local CopyPaste data."
+  },
+  "settingsEraseAllDataDescription": "Removes history, settings and the encryption key, then closes CopyPaste.",
+  "@settingsEraseAllDataDescription": {
+    "description": "Description of the settings row that deletes all local data."
+  },
+  "settingsEraseAllDataAction": "Delete all",
+  "@settingsEraseAllDataAction": {
+    "description": "Button that starts deleting all local data."
+  },
+  "settingsEraseAllDataConfirmTitle": "Delete all CopyPaste data?",
+  "@settingsEraseAllDataConfirmTitle": {
+    "description": "Title of the dialog confirming deletion of all local data."
+  },
+  "settingsEraseAllDataConfirmMessage": "History, files, settings and the encryption key on this device will be deleted and CopyPaste will close. Paired devices and cloud copies stay. This cannot be undone.",
+  "@settingsEraseAllDataConfirmMessage": {
+    "description": "Message of the dialog confirming deletion of all local data."
+  },
+  "settingsEraseAllDataFailed": "Some CopyPaste data could not be deleted.",
+  "@settingsEraseAllDataFailed": {
+    "description": "Error shown when deleting all local data fails."
   }
 }

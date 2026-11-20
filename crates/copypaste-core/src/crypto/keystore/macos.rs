@@ -7,7 +7,9 @@
 use std::path::Path;
 
 use security_framework::base::Error as SecurityFrameworkError;
-use security_framework::passwords::{generic_password, set_generic_password, PasswordOptions};
+use security_framework::passwords::{
+    delete_generic_password, generic_password, set_generic_password, PasswordOptions,
+};
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
@@ -56,6 +58,22 @@ pub(super) fn create(_data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     store_device_secret(&secret)
         .map_err(|_| CryptoError::KeystoreUnavailable("could not write to the keychain"))?;
     Ok(secret)
+}
+
+/// One login-Keychain item serves every data directory of this user.
+pub(super) const SHARED: bool = true;
+
+pub(super) fn erase(_data_dir: &Path) -> Result<(), CryptoError> {
+    if let Some(path) = helper::path()? {
+        return helper::erase(&path);
+    }
+    match delete_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT) {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+        Err(_) => Err(CryptoError::KeystoreUnavailable(
+            "could not remove the device secret from the keychain",
+        )),
+    }
 }
 
 fn store_device_secret(secret: &[u8; KEY_LEN]) -> Result<(), SecurityFrameworkError> {

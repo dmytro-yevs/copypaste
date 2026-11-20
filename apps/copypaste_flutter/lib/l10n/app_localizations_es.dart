@@ -6929,4 +6929,26 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get historyTagsLoadFailedTitle =>
       'No se pudieron cargar las etiquetas';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Eliminar todos los datos';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Elimina el historial, los ajustes y la clave de cifrado, y cierra CopyPaste.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Eliminar todo';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle =>
+      '¿Eliminar todos los datos de CopyPaste?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'Se eliminarán el historial, los archivos, los ajustes y la clave de cifrado de este dispositivo, y CopyPaste se cerrará. Los dispositivos vinculados y las copias en la nube se conservan. Esta acción no se puede deshacer.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'No se pudieron eliminar algunos datos de CopyPaste.';
 }

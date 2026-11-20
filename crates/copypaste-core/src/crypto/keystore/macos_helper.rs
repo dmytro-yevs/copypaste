@@ -111,10 +111,11 @@ pub(super) fn path() -> Result<Option<PathBuf>, CryptoError> {
 
 fn run(
     path: &std::path::Path,
+    mode: &str,
     input: Option<&[u8]>,
 ) -> Result<(i32, Zeroizing<Vec<u8>>), CryptoError> {
     let child = Command::new(path)
-        .arg(if input.is_some() { "create" } else { "load" })
+        .arg(mode)
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -165,7 +166,7 @@ fn collect(
 }
 
 pub(super) fn load(path: &std::path::Path) -> Result<Lookup, CryptoError> {
-    let (status, bytes) = run(path, None)?;
+    let (status, bytes) = run(path, "load", None)?;
     match status {
         0 if bytes.len() == KEY_LEN => {
             let mut secret = Zeroizing::new([0; KEY_LEN]);
@@ -184,11 +185,19 @@ pub(super) fn create(
     path: &std::path::Path,
     secret: DeviceSecret,
 ) -> Result<DeviceSecret, CryptoError> {
-    let (status, output) = run(path, Some(secret.as_ref()))?;
+    let (status, output) = run(path, "create", Some(secret.as_ref()))?;
     if status != 0 || !output.is_empty() {
         return Err(unavailable());
     }
     Ok(secret)
+}
+
+/// Status 3 is the accessor's "no entry", which leaves nothing to remove.
+pub(super) fn erase(path: &std::path::Path) -> Result<(), CryptoError> {
+    match run(path, "delete", None)? {
+        (0 | 3, output) if output.is_empty() => Ok(()),
+        _ => Err(unavailable()),
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +234,20 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = executable(directory.path(), "printf unexpected; exit 3");
         assert!(load(&path).is_err());
+    }
+
+    #[test]
+    fn erase_accepts_only_a_silent_removal_or_absence() {
+        let directory = tempfile::tempdir().unwrap();
+        for (script, erased) in [
+            ("test \"$1\" = delete && exit 0", true),
+            ("test \"$1\" = delete && exit 3", true),
+            ("exit 2", false),
+            ("printf unexpected; exit 0", false),
+        ] {
+            let path = executable(directory.path(), script);
+            assert_eq!(erase(&path).is_ok(), erased, "{script}");
+        }
     }
 
     #[test]

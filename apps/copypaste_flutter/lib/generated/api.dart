@@ -8,7 +8,7 @@ import 'api/rules.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_text`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `request_data`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `sync_outcomes`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `data_erase_failed`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_text`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `request_data`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `sync_outcomes`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
@@ -122,6 +122,13 @@ Future<void> stopDesktopRuntime() =>
 /// The next [`start_desktop_runtime`] stops it and starts an owned one.
 Future<void> releaseDesktopRuntime() =>
     RustLib.instance.api.crateApiReleaseDesktopRuntime();
+
+/// Stops the owned desktop daemon, deletes its data directory and then the
+/// device secret kept outside it. The runtime cannot be used afterwards.
+Future<void> eraseDesktopRuntimeData({required String daemonExecutable}) =>
+    RustLib.instance.api.crateApiEraseDesktopRuntimeData(
+      daemonExecutable: daemonExecutable,
+    );
 
 /// Returns runtime status only; it does not start or discover a
 /// daemon. Startup remains owned by the application lifecycle integration.

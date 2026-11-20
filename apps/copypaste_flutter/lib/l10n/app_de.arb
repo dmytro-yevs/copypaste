@@ -1801,5 +1801,11 @@
   "errorRateLimited": "Zu viele Versuche. Warte kurz und versuche es erneut.",
   "devicesSyncFailedWith": "Synchronisierung mit {devices} fehlgeschlagen.",
   "transfersUnavailableTitle": "Übertragungen konnten nicht geladen werden",
-  "historyTagsLoadFailedTitle": "Tags konnten nicht geladen werden"
+  "historyTagsLoadFailedTitle": "Tags konnten nicht geladen werden",
+  "settingsEraseAllDataTitle": "Alle Daten löschen",
+  "settingsEraseAllDataDescription": "Entfernt Verlauf, Einstellungen und Verschlüsselungsschlüssel und beendet CopyPaste.",
+  "settingsEraseAllDataAction": "Alles löschen",
+  "settingsEraseAllDataConfirmTitle": "Alle CopyPaste-Daten löschen?",
+  "settingsEraseAllDataConfirmMessage": "Verlauf, Dateien, Einstellungen und der Verschlüsselungsschlüssel auf diesem Gerät werden gelöscht und CopyPaste wird beendet. Gekoppelte Geräte und Cloud-Kopien bleiben erhalten. Dies kann nicht rückgängig gemacht werden.",
+  "settingsEraseAllDataFailed": "Einige CopyPaste-Daten konnten nicht gelöscht werden."
 }

@@ -33,6 +33,9 @@
         android:name="${applicationName}"
         android:localeConfig="@xml/locales_config"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true">
         <service android:name=".InferenceWorkerService" android:exported="false"
             android:process=":inference" />

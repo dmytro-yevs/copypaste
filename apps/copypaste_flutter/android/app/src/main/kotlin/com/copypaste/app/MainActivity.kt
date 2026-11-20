@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.LocaleManager
 import android.os.LocaleList
 import android.net.Uri
@@ -340,14 +341,22 @@ class MainActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
             .setMethodCallHandler { call, result ->
-                if (call.method == "restart") {
-                    val launch = packageManager.getLaunchIntentForPackage(packageName)
-                    if (launch == null) result.error("restart_failed", "CopyPaste could not restart.", null)
-                    else {
-                        result.success(null)
-                        ProcessPhoenix.triggerRebirth(this, launch)
+                when (call.method) {
+                    "restart" -> {
+                        val launch = packageManager.getLaunchIntentForPackage(packageName)
+                        if (launch == null) result.error("restart_failed", "CopyPaste could not restart.", null)
+                        else {
+                            result.success(null)
+                            ProcessPhoenix.triggerRebirth(this, launch)
+                        }
                     }
-                } else result.notImplemented()
+                    // The system deletes the sandbox and Keystore keys, then kills the app.
+                    "eraseLocalData" ->
+                        if (getSystemService(ActivityManager::class.java)?.clearApplicationUserData() != true) {
+                            result.error("erase_failed", "CopyPaste could not delete its data.", null)
+                        }
+                    else -> result.notImplemented()
+                }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/security")
             .setMethodCallHandler { call, result ->

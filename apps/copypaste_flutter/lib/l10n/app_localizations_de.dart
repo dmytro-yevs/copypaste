@@ -6912,4 +6912,26 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => 'Tags konnten nicht geladen werden';
+
+  @override
+  String get settingsEraseAllDataTitle => 'Alle Daten löschen';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      'Entfernt Verlauf, Einstellungen und Verschlüsselungsschlüssel und beendet CopyPaste.';
+
+  @override
+  String get settingsEraseAllDataAction => 'Alles löschen';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle =>
+      'Alle CopyPaste-Daten löschen?';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      'Verlauf, Dateien, Einstellungen und der Verschlüsselungsschlüssel auf diesem Gerät werden gelöscht und CopyPaste wird beendet. Gekoppelte Geräte und Cloud-Kopien bleiben erhalten. Dies kann nicht rückgängig gemacht werden.';
+
+  @override
+  String get settingsEraseAllDataFailed =>
+      'Einige CopyPaste-Daten konnten nicht gelöscht werden.';
 }

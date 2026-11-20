@@ -1801,5 +1801,11 @@
   "errorRateLimited": "尝试次数过多。请稍候再试。",
   "devicesSyncFailedWith": "无法与 {devices} 同步。",
   "transfersUnavailableTitle": "无法加载传输",
-  "historyTagsLoadFailedTitle": "无法加载标签"
+  "historyTagsLoadFailedTitle": "无法加载标签",
+  "settingsEraseAllDataTitle": "删除所有数据",
+  "settingsEraseAllDataDescription": "删除历史记录、设置和加密密钥，然后关闭 CopyPaste。",
+  "settingsEraseAllDataAction": "全部删除",
+  "settingsEraseAllDataConfirmTitle": "要删除 CopyPaste 的所有数据吗？",
+  "settingsEraseAllDataConfirmMessage": "此设备上的历史记录、文件、设置和加密密钥将被删除，CopyPaste 将关闭。已配对的设备和云端副本会保留。此操作无法撤销。",
+  "settingsEraseAllDataFailed": "无法删除部分 CopyPaste 数据。"
 }

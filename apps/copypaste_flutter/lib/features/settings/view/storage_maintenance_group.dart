@@ -14,6 +14,7 @@ import '../../../shared/preference_toggle.dart';
 import '../../../shared/system_date_time.dart';
 import '../controller/storage_maintenance_controller.dart';
 import '../models/storage_maintenance_models.dart';
+import 'confirmation_dialog.dart';
 import 'settings_section.dart';
 import 'storage_usage_bar.dart';
 
@@ -150,10 +151,38 @@ class _StorageMaintenanceGroupState extends State<StorageMaintenanceGroup> {
               description: l10n.settingsUpgradeBackupsDescription,
               footer: _upgradeBackups(context),
             ),
+            SettingRow(
+              title: l10n.settingsEraseAllDataTitle,
+              description: l10n.settingsEraseAllDataDescription,
+              trailing: Button.destructive(
+                key: const ValueKey<String>('settings-erase-all-data'),
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.destructive(),
+                ),
+                onPressed: _controller.busy ? null : _confirmEraseAll,
+                leading: _icon(
+                  StorageMaintenanceOperation.eraseAll,
+                  LucideIcons.trash2,
+                ),
+                child: Text(l10n.settingsEraseAllDataAction),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _confirmEraseAll() async {
+    final l10n = context.l10n;
+    final confirmed = await showDestructiveConfirmation(
+      context,
+      icon: LucideIcons.trash2,
+      title: l10n.settingsEraseAllDataConfirmTitle,
+      message: l10n.settingsEraseAllDataConfirmMessage,
+      confirmLabel: l10n.settingsEraseAllDataAction,
+    );
+    if (confirmed && mounted) await _controller.eraseAllData();
   }
 
   Widget? _breakdown(BuildContext context, StorageBreakdown? breakdown) {

@@ -6278,4 +6278,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyTagsLoadFailedTitle => '无法加载标签';
+
+  @override
+  String get settingsEraseAllDataTitle => '删除所有数据';
+
+  @override
+  String get settingsEraseAllDataDescription =>
+      '删除历史记录、设置和加密密钥，然后关闭 CopyPaste。';
+
+  @override
+  String get settingsEraseAllDataAction => '全部删除';
+
+  @override
+  String get settingsEraseAllDataConfirmTitle => '要删除 CopyPaste 的所有数据吗？';
+
+  @override
+  String get settingsEraseAllDataConfirmMessage =>
+      '此设备上的历史记录、文件、设置和加密密钥将被删除，CopyPaste 将关闭。已配对的设备和云端副本会保留。此操作无法撤销。';
+
+  @override
+  String get settingsEraseAllDataFailed => '无法删除部分 CopyPaste 数据。';
 }

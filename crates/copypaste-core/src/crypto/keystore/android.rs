@@ -91,6 +91,16 @@ pub(super) fn create(_data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     Ok(secret)
 }
 
+/// One app-scoped Keystore entry, wherever the history lives.
+pub(super) const SHARED: bool = true;
+
+pub(super) fn erase(_data_dir: &Path) -> Result<(), CryptoError> {
+    match entry()?.delete_credential() {
+        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+        Err(e) => Err(classify(e)),
+    }
+}
+
 /// Open the store and address our one credential in it.
 ///
 /// Opening is what generates the wrapping key on first run, and what fails if

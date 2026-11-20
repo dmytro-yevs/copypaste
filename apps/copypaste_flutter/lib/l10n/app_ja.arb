@@ -1801,5 +1801,11 @@
   "errorRateLimited": "試行回数が多すぎます。しばらく待ってからもう一度お試しください。",
   "devicesSyncFailedWith": "{devices} と同期できませんでした。",
   "transfersUnavailableTitle": "転送を読み込めませんでした",
-  "historyTagsLoadFailedTitle": "タグを読み込めませんでした"
+  "historyTagsLoadFailedTitle": "タグを読み込めませんでした",
+  "settingsEraseAllDataTitle": "すべてのデータを削除",
+  "settingsEraseAllDataDescription": "履歴、設定、暗号化キーを削除してから CopyPaste を終了します。",
+  "settingsEraseAllDataAction": "すべて削除",
+  "settingsEraseAllDataConfirmTitle": "CopyPaste のすべてのデータを削除しますか？",
+  "settingsEraseAllDataConfirmMessage": "このデバイスの履歴、ファイル、設定、暗号化キーが削除され、CopyPaste が終了します。ペアリング済みのデバイスとクラウドのコピーは残ります。この操作は元に戻せません。",
+  "settingsEraseAllDataFailed": "CopyPaste の一部のデータを削除できませんでした。"
 }

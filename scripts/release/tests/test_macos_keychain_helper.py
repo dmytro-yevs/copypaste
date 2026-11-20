@@ -117,6 +117,13 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                                            env=self.environment, capture_output=True, timeout=10)
                 self.assertEqual(duplicate.returncode, 2)
                 self.run_command(str(binaries / "copypaste-daemon"), str(helper), "load")
+                # Erase removes the key once; afterwards there is nothing to load or erase.
+                self.run_command(str(binaries / "copypaste-daemon"), str(helper), "delete")
+                for mode in ("delete", "load"):
+                    absent = subprocess.run([str(binaries / "copypaste-daemon"), str(helper), mode],
+                                            env=self.environment, capture_output=True, timeout=10)
+                    self.assertEqual(absent.returncode, 3, mode)
+                self.run_command(str(binaries / "copypaste-daemon"), str(helper), "create")
                 # The former auto mode must not report success after losing the
                 # signing identity. Keep both the identity and helper intact.
                 signing_keychain = next((support / "signing").glob("*.keychain*"))
@@ -150,10 +157,11 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 # Same executable/id, wrong signer: reject before Keychain access.
                 self.run_command("codesign", "--force", "--sign", "-", "--identifier",
                                  "com.copypaste.copypaste-daemon", str(binaries / "copypaste-daemon"))
-                rejected = subprocess.run([str(binaries / "copypaste-daemon"), str(helper), "load"],
-                                          env=self.environment, capture_output=True, timeout=10)
-                self.assertEqual(rejected.returncode, 5)
-                self.assertEqual(rejected.stdout, b"")
+                for mode in ("load", "delete"):
+                    rejected = subprocess.run([str(binaries / "copypaste-daemon"), str(helper), mode],
+                                              env=self.environment, capture_output=True, timeout=10)
+                    self.assertEqual(rejected.returncode, 5, mode)
+                    self.assertEqual(rejected.stdout, b"")
                 # An invalid retained helper must stop installation, not rotate it.
                 helper.write_bytes(b"invalid retained helper")
                 stopped = subprocess.run(install_command, env=self.environment, cwd=root,

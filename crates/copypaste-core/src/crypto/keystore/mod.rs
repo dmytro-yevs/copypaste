@@ -171,6 +171,38 @@ pub(super) fn load_or_create_linux_secret(data_dir: &Path) -> Result<DeviceSecre
 ///
 /// The filename comes from `copypaste_ipc` rather than a literal here, because
 /// a second definition of it is a second thing to keep in step.
+/// Whether the selected backend keeps one secret for every data directory.
+pub(super) const SECRET_IS_SHARED: bool = backend::SHARED;
+
+/// Remove the device secret of `data_dir`, refused while its history remains:
+/// removing the secret first is exactly how a database is orphaned (I-20).
+pub(super) fn erase_secret(data_dir: &Path) -> Result<(), CryptoError> {
+    if history_present(data_dir) {
+        return Err(CryptoError::KeystoreUnavailable(
+            "the history this device secret opens is still present",
+        ));
+    }
+    backend::erase(data_dir)
+}
+
+#[cfg_attr(
+    not(any(
+        target_os = "windows",
+        all(target_os = "macos", debug_assertions),
+        all(target_os = "linux", debug_assertions)
+    )),
+    allow(dead_code)
+)]
+fn remove_secret_file(path: &Path) -> Result<(), CryptoError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(CryptoError::KeystoreUnavailable(
+            "the device secret could not be removed",
+        )),
+    }
+}
+
 fn history_present(data_dir: &Path) -> bool {
     copypaste_ipc::database_path()
         .file_name()
@@ -223,6 +255,20 @@ mod tests {
             let first = load_or_create_secret(dir.path()).unwrap();
             let second = load_or_create_secret(dir.path()).unwrap();
             assert_eq!(*first, *second);
+        }
+
+        #[test]
+        fn erasing_waits_for_the_history_and_then_removes_the_secret() {
+            let dir = tempfile::tempdir().unwrap();
+            let first = load_or_create_secret(dir.path()).unwrap();
+            let database = database_named_like_the_real_one(dir.path());
+            std::fs::write(&database, b"history").unwrap();
+            assert!(erase_secret(dir.path()).is_err());
+
+            std::fs::remove_file(&database).unwrap();
+            erase_secret(dir.path()).unwrap();
+            erase_secret(dir.path()).unwrap();
+            assert_ne!(*load_or_create_secret(dir.path()).unwrap(), *first);
         }
 
         #[test]
