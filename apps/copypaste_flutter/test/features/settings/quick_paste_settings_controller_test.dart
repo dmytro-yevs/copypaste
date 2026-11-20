@@ -156,6 +156,17 @@ void main() {
       expect(store.value.shortcut, DesktopShortcut.defaultForPlatform());
     });
 
+    test('an unreadable permission does not stop Quick Paste', () async {
+      host.failPermissionRead = true;
+
+      await controller.initialize();
+
+      expect(controller.startFailed, isFalse);
+      expect(controller.errorMessage, isNull);
+      expect(controller.accessibilityGranted, isFalse);
+      expect(registrar.registered, DesktopShortcut.defaultForPlatform());
+    });
+
     test('an unsupported system is not an error', () async {
       host.supported = false;
 
@@ -541,12 +552,16 @@ class _Registrar implements DesktopShortcutRegistrar {
 class _WindowHost implements QuickPasteWindowHost {
   bool supported = true;
   bool failPermission = false;
+  bool failPermissionRead = false;
   int prepareCalls = 0;
   int permissionRequests = 0;
   bool permissionGranted = false;
 
   @override
-  Future<bool> accessibilityGranted() async => permissionGranted;
+  Future<bool> accessibilityGranted() async {
+    if (failPermissionRead) throw PlatformException(code: 'permission_failed');
+    return permissionGranted;
+  }
 
   @override
   Future<void> dispose() async {}

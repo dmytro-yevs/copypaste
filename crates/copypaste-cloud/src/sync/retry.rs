@@ -366,10 +366,7 @@ mod tests {
         // The read path was originally folded into a generic error bucket, so
         // an expired token stalled downloads while uploads kept working.
         let rest = FakeRest::scripted(vec![Reply::Unauthorized, Reply::Ok]);
-        rest.rows
-            .lock()
-            .unwrap()
-            .insert("a".into(), cloud_row("a", 1_000, "x"));
+        rest.write(vec![cloud_row("a", 1_000, "x")]);
         let source = FakeSource::default();
         let sync = driver(rest, FakeAuth::default());
 

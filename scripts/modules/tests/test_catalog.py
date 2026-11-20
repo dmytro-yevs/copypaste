@@ -82,7 +82,7 @@ class CatalogTest(unittest.TestCase):
         value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
         self.assertEqual(len(value["modules"][0]["artifacts"]), 5)
         with self.assertRaises(ValueError):
-            catalog.read_package(self.packages(schema=7)[0], self.public_key)
+            catalog.read_package(self.packages(schema=catalog.MANIFEST_VERSION + 1)[0], self.public_key)
 
     def test_catalog_lists_translated_titles_and_descriptions_only(self):
         localizations = {

@@ -265,6 +265,41 @@ void main() {
     expect(find.text('Settings runtime is unavailable'), findsOneWidget);
   });
 
+  testWidgets('keeps the app shell when only the tray is unavailable', (
+    tester,
+  ) async {
+    final host = _FakeDesktopWindowHost(trayInitializationFails: true);
+    final onboarding = _completedOnboarding();
+    addTearDown(onboarding.dispose);
+    final desktopWindow = DesktopWindowController(
+      host: host,
+      geometryStore: const _NoopGeometryStore(),
+    );
+    await desktopWindow.initialize();
+
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        desktopWindow: desktopWindow,
+        onboardingController: onboarding,
+        runtimeEnabled: false,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      desktopWindow.setupIssue.value,
+      DesktopWindowSetupIssue.trayUnavailable,
+    );
+    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(
+      find.textContaining('The system tray is unavailable'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('uses a standard header until native setup recovers', (
     tester,
   ) async {
@@ -483,10 +518,14 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
     visibilityHandler = handler;
   }
 
-  _FakeDesktopWindowHost({this.windowInitializationFails = false});
+  _FakeDesktopWindowHost({
+    this.windowInitializationFails = false,
+    this.trayInitializationFails = false,
+  });
 
   int disposeCalls = 0;
   bool windowInitializationFails;
+  bool trayInitializationFails;
   Future<void> Function()? settingsHandler;
 
   @override
@@ -506,6 +545,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
     required List<TrayMenuEntry> menu,
     required TrayMenuEvents events,
   }) async {
+    if (trayInitializationFails) throw StateError('tray unavailable');
     settingsHandler = () =>
         events.onAction(const TrayCommandAction(TrayCommand.openSettings));
   }

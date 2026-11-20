@@ -44,19 +44,23 @@ class MacosOnboardingSetup extends OnboardingSetup {
   Future<OnboardingResume> restore() async {
     busy = true;
     notifyIfActive();
+    // Saved progress decides the resume step; a later failure must not reset it.
+    var resume = OnboardingResume.welcome;
     try {
       final wasComplete = await _store.isComplete();
+      resume = wasComplete
+          ? OnboardingResume.complete
+          : OnboardingResume.welcome;
       _loginDefaultPending = !wasComplete;
       await _refreshSystemState();
       errorMessage = null;
-      return wasComplete ? OnboardingResume.complete : OnboardingResume.welcome;
     } catch (_) {
       errorMessage = AppStrings.current.onboardingMacosStateReadFailed;
-      return OnboardingResume.welcome;
     } finally {
       busy = false;
       notifyIfActive();
     }
+    return resume;
   }
 
   Future<void> setLaunchAtLogin(bool enabled) async {

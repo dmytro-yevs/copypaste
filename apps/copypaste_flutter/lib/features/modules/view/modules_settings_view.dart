@@ -42,11 +42,13 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
   ModulesController get controller => widget.controller;
 
   String? _reportedError;
+  String? _reportedNotice;
 
   @override
   void initState() {
     super.initState();
     _reportedError = controller.errorMessage;
+    _reportedNotice = controller.monitoringNotice;
     controller.addListener(_reportError);
     // Loading notifies listeners, which must not happen while this view builds.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,8 +72,21 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     super.dispose();
   }
 
-  /// A failed module operation is reported once, as a toast.
+  /// A failed module operation is reported once, as a toast; so is a
+  /// monitoring problem found after one succeeded.
   void _reportError() {
+    final notice = controller.monitoringNotice;
+    if (notice != _reportedNotice) {
+      _reportedNotice = notice;
+      if (notice != null && mounted) {
+        AppToast.show(
+          context,
+          title: context.l10n.modulesSmsAccessTitle,
+          message: notice,
+          tone: AppToastTone.information,
+        );
+      }
+    }
     final message = controller.errorMessage;
     if (message == _reportedError) return;
     _reportedError = message;

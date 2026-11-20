@@ -17,17 +17,19 @@
 //! one version; it never fails the round and never deletes (R-CLK-2). No skew
 //! correction is attempted.
 //!
-//! # The watermark
+//! # The cursors
 //!
-//! One cursor, in milliseconds. Both bounds are **inclusive**: manifest 05 §4.4
-//! records that a strict `>` on a millisecond cursor permanently lost every row
-//! sharing the boundary millisecond once a burst filled a page. Re-offering a
-//! boundary row is free — upsert and LWW both absorb it.
+//! The download cursor is a position the backend assigns, with the item id as
+//! its tie-break; [`pull`] has its rules. The upload floor is this device's
+//! own clock, and its bound is **inclusive**: manifest 05 §4.4 records that a
+//! strict `>` on a millisecond cursor permanently lost every row sharing the
+//! boundary millisecond once a burst filled a page. Re-offering a boundary row
+//! is free — upsert and LWW both absorb it.
 //!
-//! The source stores it independently of the item rows, so evicting history to
-//! a storage cap cannot move it backwards (INV-N5), and it only ever moves
-//! forward, including past rows that were skipped as undecryptable, so an
-//! unreadable row is not re-fetched forever (INV-I4).
+//! The source stores both independently of the item rows, so evicting history
+//! to a storage cap cannot move them backwards (INV-N5). The download cursor
+//! moves past every row it reads, including ones skipped as undecryptable, so
+//! an unreadable row is not re-fetched forever (INV-I4).
 //!
 //! # A version has to prove where it came from
 //!
@@ -68,7 +70,7 @@ pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use push::{too_large_to_sync, MAX_BINARY_BYTES, MAX_TEXT_BYTES};
-pub use source::{Applied, CloudSource, LocalItem};
+pub use source::{Applied, CloudSource, LocalItem, PullCursor};
 #[cfg(feature = "storage")]
 pub use store::{floor_after_round, Offer, Scan, StoreView, UPLOAD_SCAN_LIMIT};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
@@ -328,16 +330,23 @@ mod tests {
     struct SharedRest(Arc<FakeRest>);
 
     impl RestApi for SharedRest {
-        async fn fetch_since(
+        async fn list_since(
             &self,
             token: &str,
-            since_ms: i64,
+            position: i64,
             after_item_id: Option<&str>,
             limit: u32,
-        ) -> Result<crate::rest::RowPage, TransportFault> {
+        ) -> Result<Vec<crate::rest::RowListing>, TransportFault> {
             self.0
-                .fetch_since(token, since_ms, after_item_id, limit)
+                .list_since(token, position, after_item_id, limit)
                 .await
+        }
+        async fn fetch_rows(
+            &self,
+            token: &str,
+            item_ids: &[String],
+        ) -> Result<crate::rest::RowPage, TransportFault> {
+            self.0.fetch_rows(token, item_ids).await
         }
         async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
             self.0.upsert(token, items).await

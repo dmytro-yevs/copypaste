@@ -126,15 +126,19 @@ class AppFeatures {
     if (tray != null) {
       pasteQueue.trayStatus.addListener(_syncTrayQueue);
       modules?.addListener(_syncTrayModules);
-      await Future.wait([
-        tray.start(),
-        _syncTrayModules(),
-        tray.setPasteQueueHandler(openPasteQueue),
-        tray.setContentRulesHandler(
-          () => openSettings(SettingsSectionId.rules),
-        ),
-        tray.setPasteQueue(pasteQueue.trayStatus.value),
-      ]);
+      try {
+        await Future.wait([
+          tray.start(),
+          _syncTrayModules(),
+          tray.setPasteQueueHandler(openPasteQueue),
+          tray.setContentRulesHandler(
+            () => openSettings(SettingsSectionId.rules),
+          ),
+          tray.setPasteQueue(pasteQueue.trayStatus.value),
+        ]);
+      } catch (_) {
+        // The tray is optional; the paste-queue shortcuts still register.
+      }
     }
     if (_disposed) return;
     await pasteQueueShortcuts?.start();

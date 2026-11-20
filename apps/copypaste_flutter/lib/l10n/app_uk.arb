@@ -1131,6 +1131,7 @@
   "modulesSmsMonitoringFailed": "Не вдалося запустити відстеження SMS.",
   "modulesSmsAndroidOnly": "Доступ до SMS можливий лише на Android.",
   "modulesSmsMonitoringNeedsSetup": "Відстеження SMS потребує налаштування.",
+  "modulesSmsMonitoringUnavailable": "Не вдалося перевірити відстеження SMS.",
   "modulesOperationIncomplete": "Не вдалося завершити операцію з модулем.",
   "modulesUnsupportedEvent": "Модуль використовує непідтримувану подію.",
   "modulesUnsupportedResult": "Модуль повернув непідтримуваний результат.",

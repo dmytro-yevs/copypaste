@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
+import 'package:copypaste_flutter/features/modules/repository/module_access_repository.dart';
 import 'package:copypaste_flutter/platform/modules/android_module_access.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,7 +32,7 @@ void main() {
     notifications = false;
     messenger.setMockMethodCallHandler(sms, (call) async {
       calls.add(call.method);
-      return call.method == 'synchronize' ? true : state();
+      return call.method == 'synchronize' ? 'ok' : state();
     });
     messenger.setMockMethodCallHandler(capture, (call) async {
       calls.add(call.method);
@@ -65,8 +66,19 @@ void main() {
 
   test('applies SMS grants through the SMS channel only', () async {
     await access.configureSms();
-    expect(await access.synchronize(), isTrue);
+    expect(await access.synchronize(), SmsMonitoringStatus.ready);
     expect(calls, ['configure', 'synchronize']);
+  });
+
+  test('distinguishes why SMS monitoring did not synchronize', () async {
+    for (final (native, status) in [
+      ('access_missing', SmsMonitoringStatus.accessMissing),
+      ('service_refused', SmsMonitoringStatus.serviceRefused),
+      (false, SmsMonitoringStatus.unavailable),
+    ]) {
+      messenger.setMockMethodCallHandler(sms, (_) async => native);
+      expect(await access.synchronize(), status);
+    }
   });
 
   test('incomplete native state never claims verified access', () async {

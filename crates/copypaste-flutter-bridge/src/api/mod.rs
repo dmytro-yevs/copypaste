@@ -1123,10 +1123,22 @@ pub(crate) fn runtime_capture_state(status: copypaste_ipc::StatusData) -> Captur
 
 pub async fn set_capture_paused(paused: bool) -> Result<CaptureState, RuntimeError> {
     let response = client::request(Method::SetPrivateMode { enabled: paused }).await?;
-    if !matches!(response.data, Some(ResponseData::PrivateMode(_))) {
+    let Some(ResponseData::PrivateMode(applied)) = response.data else {
         return Err(RuntimeError::internal());
-    }
-    capture_state().await
+    };
+    // The change is already applied. A failed follow-up read must not report
+    // it as failed: answer with the confirmed private mode only. Revision 0
+    // is never newer than a capture state the client already holds.
+    Ok(capture_state().await.unwrap_or_else(|_| CaptureState {
+        capture_watch: false,
+        capture_revision: 0,
+        runtime_watch: false,
+        sync_status: runtime_sync_status(copypaste_ipc::SyncStatus::default()),
+        running: false,
+        paused: applied.private_mode,
+        private_mode_epoch: applied.private_mode_epoch,
+        settings_health: None,
+    }))
 }
 
 pub async fn get_runtime_settings() -> Result<RuntimeSettingsData, RuntimeError> {

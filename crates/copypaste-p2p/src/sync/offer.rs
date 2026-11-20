@@ -16,7 +16,7 @@ use super::{
     MemorySummaryWorkspace, SummaryWorkspace, SyncChannel, SyncError, SyncSource, SyncStats,
 };
 use crate::now_ms;
-use crate::protocol::{ItemSummary, SyncMessage, MAX_OFFER_ITEMS, PROTOCOL_VERSION};
+use crate::protocol::{ItemSummary, SyncMessage, VersionRange, MAX_OFFER_ITEMS};
 
 /// The live versions among `item_ids` this device may send to
 /// `peer_device_id`. Empty means the policy or history leaves nothing to send.
@@ -47,7 +47,8 @@ pub async fn send_offer<C: SyncChannel, S: SyncSource>(
     items: Vec<ItemSummary>,
 ) -> Result<SyncStats, SyncError> {
     chan.send(SyncMessage::Offer {
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: VersionRange::SUPPORTED.min,
+        max_protocol_version: VersionRange::SUPPORTED.wire_max(),
         device_id: source.device_id(),
         items: items.clone(),
     })

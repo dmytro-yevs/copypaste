@@ -3,8 +3,37 @@
 use crate::{Runtime, RuntimeError};
 use copypaste_p2p::{node::SyncCycle, Peer};
 use copypaste_sync::peer_driver::PeerSyncHost;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
+
+const BIND_RETRY_MIN: Duration = Duration::from_secs(5);
+const BIND_RETRY_MAX: Duration = Duration::from_secs(300);
+
+/// Spaces out the bind attempts request paths make while the peer port is
+/// busy: the next attempt's time and the wait that led to it.
+#[derive(Default)]
+pub(crate) struct BindRetry(Mutex<Option<(Instant, Duration)>>);
+
+impl BindRetry {
+    fn due(&self) -> bool {
+        crate::locked(&self.0).is_none_or(|(at, _)| Instant::now() >= at)
+    }
+
+    /// Doubles the wait up to its ceiling and returns it.
+    fn defer(&self) -> Duration {
+        let mut next = crate::locked(&self.0);
+        let wait = next.map_or(BIND_RETRY_MIN, |(_, wait)| {
+            wait.saturating_mul(2).min(BIND_RETRY_MAX)
+        });
+        *next = Some((Instant::now() + wait, wait));
+        wait
+    }
+
+    fn clear(&self) {
+        *crate::locked(&self.0) = None;
+    }
+}
 
 /// The outgoing scheduler and, once the port is bound, its accept loop.
 /// A session stays in its slot until it is stopped.
@@ -63,11 +92,19 @@ impl Runtime {
     }
 
     /// [`Runtime::start_peer_session`] for request paths: a switch already
-    /// in progress is left to finish, so a request never waits on a teardown.
-    pub(crate) fn try_start_peer_session(self: &Arc<Self>) -> Result<(), RuntimeError> {
-        match self.peer_session.try_lock() {
-            Ok(mut slot) => self.start_peer_session_in(&mut slot),
-            Err(_) => Ok(()),
+    /// in progress is left to finish, so a request never waits on a teardown,
+    /// and a busy port is tried again only after a growing wait, so a request
+    /// never fails on it.
+    pub(crate) fn try_start_peer_session(self: &Arc<Self>) {
+        let Ok(mut slot) = self.peer_session.try_lock() else {
+            return;
+        };
+        if self.bind_retry.due() && self.start_peer_session_in(&mut slot).is_err() {
+            let wait = self.bind_retry.defer();
+            tracing::warn!(
+                retry_in_secs = wait.as_secs(),
+                "could not bind the peer port; not accepting peers"
+            );
         }
     }
 
@@ -119,6 +156,7 @@ impl Runtime {
         stop: &watch::Sender<bool>,
     ) -> tokio::task::JoinHandle<()> {
         self.listener_started.store(true, Ordering::Release);
+        self.bind_retry.clear();
         let listening = Listening(Arc::clone(self));
         let stopped = stop.subscribe();
         tokio::spawn(async move {
@@ -437,6 +475,50 @@ mod tests {
         // The stop holds the slot until both tasks have ended.
         assert!(state.peer_session.lock().await.is_none());
         assert!(state.p2p.listen_addr().is_none());
+        state.shutdown();
+    }
+
+    /// A busy peer port costs only incoming connections: requests are served
+    /// and outgoing sync is scheduled, and request paths leave the port alone
+    /// until the wait has passed.
+    #[tokio::test]
+    async fn a_busy_peer_port_fails_no_request_and_is_retried_after_a_wait() {
+        let occupied = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(
+            Runtime::open_with_keyring(
+                dir.path(),
+                "fixture phone",
+                occupied.local_addr().unwrap().port(),
+                Arc::new(crate::host::InProcessHost(Arc::new(
+                    crate::host::UnavailableClipboard,
+                ))),
+                Arc::new(copypaste_core::Keyring::from_secret(&[7; 32])),
+            )
+            .unwrap(),
+        );
+
+        state
+            .start_listener()
+            .await
+            .expect("a busy port is no error");
+        assert!(state.request(0, copypaste_ipc::Method::Status).await.ok);
+        assert!(!state.listener_started.load(Ordering::Acquire));
+        assert!(state
+            .peer_session
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|session| !session.scheduler.is_finished()));
+
+        // Free again, so only the wait keeps the next call from binding it.
+        drop(occupied);
+        state.start_listener().await.unwrap();
+        assert!(!state.listener_started.load(Ordering::Acquire));
+
+        *crate::locked(&state.bind_retry.0) = Some((Instant::now(), BIND_RETRY_MIN));
+        state.start_listener().await.unwrap();
+        assert!(state.listener_started.load(Ordering::Acquire));
         state.shutdown();
     }
 

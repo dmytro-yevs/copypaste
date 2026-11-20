@@ -22,6 +22,7 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     /// space member that signed in without the passphrase.
     pub(super) key: Option<SyncKey>,
     pub(super) space: Mutex<super::space::SpaceRound>,
+    pub(super) handled: Mutex<super::pull::Handled>,
     config: CloudConfig,
     // A 401 rotates this for every later request; never hold it across an await.
     session: Mutex<SessionState>,
@@ -75,6 +76,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             auth,
             key,
             space: Mutex::new(space),
+            handled: Mutex::default(),
             config,
             session: Mutex::new(SessionState {
                 session,
@@ -230,8 +232,9 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 "waiting for another device to share the space key",
             ));
         }
+        let cursor = self.load_cursor(source)?;
         let pushed = self.push(source).await?;
-        let (pulled, republish) = self.pull_with_republish(source).await?;
+        let (pulled, republish) = self.pull_from(source, cursor).await?;
         Ok(if republish {
             pushed.merge(pulled).merge(self.push(source).await?)
         } else {

@@ -3719,6 +3719,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modulesSmsMonitoringNeedsSetup => '短信监控需要设置。';
 
   @override
+  String get modulesSmsMonitoringUnavailable => '无法检查短信监控。';
+
+  @override
   String get modulesOperationIncomplete => '无法完成模块操作。';
 
   @override

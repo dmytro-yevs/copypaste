@@ -15,7 +15,7 @@ use tokio::time::timeout;
 use super::channel::NoiseChannel;
 use super::{DialCandidateSource, Node, NodeError};
 use crate::peers::Peer;
-use crate::protocol::{SyncMessage, PROTOCOL_VERSION};
+use crate::protocol::{SyncMessage, VersionRange};
 use crate::sync::SyncChannel;
 #[cfg(test)]
 use crate::transport::Session;
@@ -392,15 +392,16 @@ impl Node {
 /// accepted here, which makes transferring clipboard data impossible.
 pub(super) async fn respond(
     channel: &mut NoiseChannel,
-    protocol_version: u32,
+    peer_versions: VersionRange,
     nonce: u64,
 ) -> Result<(), NodeError> {
-    if protocol_version != PROTOCOL_VERSION {
+    if VersionRange::SUPPORTED.negotiate(peer_versions).is_err() {
         return Err(NodeError::PeerVersion);
     }
     channel
         .send(SyncMessage::ProbeAck {
-            protocol_version: PROTOCOL_VERSION,
+            protocol_version: VersionRange::SUPPORTED.min,
+            max_protocol_version: VersionRange::SUPPORTED.wire_max(),
             nonce,
             profile: Some(crate::DeviceProfile::current()),
         })
@@ -421,7 +422,8 @@ async fn probe_session(
     let result = async {
         channel
             .send(SyncMessage::Probe {
-                protocol_version: PROTOCOL_VERSION,
+                protocol_version: VersionRange::SUPPORTED.min,
+                max_protocol_version: VersionRange::SUPPORTED.wire_max(),
                 nonce,
                 profile: Some(profile),
             })
@@ -434,9 +436,17 @@ async fn probe_session(
         {
             SyncMessage::ProbeAck {
                 protocol_version,
+                max_protocol_version,
                 nonce: received,
                 profile,
-            } if protocol_version == PROTOCOL_VERSION && received == nonce => {
+            } if received == nonce
+                && VersionRange::SUPPORTED
+                    .negotiate(VersionRange::from_wire(
+                        protocol_version,
+                        max_protocol_version,
+                    ))
+                    .is_ok() =>
+            {
                 node.sync_activity.evidence(
                     &current.pairing_id,
                     copypaste_ipc::sync_issue::SyncEvidence::CompatibleProtocol,
@@ -462,6 +472,7 @@ mod tests {
     use crate::discovery::{DiscoveredPeer, Discovery};
     use crate::node::listen;
     use crate::peers::PeerStore;
+    use crate::protocol::PROTOCOL_VERSION;
     use crate::sync::testutil::TestSource;
     use crate::transport::PairingToken;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -730,6 +741,7 @@ mod tests {
         let secret = hex::encode(token.psk());
         let probe = SyncMessage::Probe {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             nonce: 7,
             profile: None,
         };

@@ -91,20 +91,30 @@ class ClipboardCaptureService : Service() {
                 return false
             }
             AndroidCaptureState.setCaptureEnabled(context, true)
-            return try {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, ClipboardCaptureService::class.java),
-                )
-                true
-            } catch (_: RuntimeException) {
-                AndroidCaptureState.setCaptureEnabled(context, false)
-                false
-            }
+            if (requestService(context)) return true
+            AndroidCaptureState.setCaptureEnabled(context, false)
+            return false
         }
 
+        /** Keeps the saved choice when the system refuses the start; the next restore retries. */
         fun restoreIfEnabled(context: Context) {
-            if (AndroidCaptureState.captureEnabled(context) && !isRunning()) startCapture(context)
+            if (!AndroidCaptureState.captureEnabled(context) || isRunning()) return
+            if (!AndroidCaptureState.backgroundCaptureReady(context) ||
+                !AndroidCaptureState.notificationGranted(context)
+            ) {
+                return
+            }
+            requestService(context)
+        }
+
+        private fun requestService(context: Context): Boolean = try {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, ClipboardCaptureService::class.java),
+            )
+            true
+        } catch (_: RuntimeException) {
+            false
         }
 
         /** Switches the method; enabled capture restarts with it once its access is ready. */

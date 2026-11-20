@@ -55,6 +55,15 @@ if [[ "$(id -u)" == "0" ]]; then
     run_as=(runuser -u "$pg_user" --)
 fi
 
+# An empty array is an unbound variable to bash 3.2 under `set -u`.
+run_pg() {
+    if ((${#run_as[@]})); then
+        "${run_as[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
 PG_PORT="${PG_PORT:-54329}"
 REST_PORT="${REST_PORT:-54330}"
 # Any 32+ byte string; both this script and PostgREST use it and nothing else
@@ -69,23 +78,23 @@ mkdir -p "$datadir" "$sockdir"
 
 cleanup() {
     [[ -n "${REST_PID:-}" ]] && kill "$REST_PID" 2>/dev/null
-    "${run_as[@]}" "$bindir/pg_ctl" -D "$datadir" -m immediate stop >/dev/null 2>&1 || true
+    run_pg "$bindir/pg_ctl" -D "$datadir" -m immediate stop >/dev/null 2>&1 || true
     rm -rf "$workdir"
 }
 trap cleanup EXIT
 
 echo "harness: initialising a throwaway cluster in $workdir"
-"${run_as[@]}" "$bindir/initdb" -D "$datadir" -U copypaste_verify --auth=trust >"$workdir/initdb.log" 2>&1
+run_pg "$bindir/initdb" -D "$datadir" -U copypaste_verify --auth=trust >"$workdir/initdb.log" 2>&1
 # `-k` even though every client below speaks TCP: the server still creates a
 # unix socket, and its compiled-in default is /var/run/postgresql, which does
 # not exist on a machine that has only ever had the client package. Without
 # this the cluster dies at startup on the very machines this harness exists to
 # serve — the ones without Docker.
-"${run_as[@]}" "$bindir/pg_ctl" -D "$datadir" -l "$workdir/server.log" \
+run_pg "$bindir/pg_ctl" -D "$datadir" -l "$workdir/server.log" \
     -o "-k $sockdir -p $PG_PORT -h 127.0.0.1 -c wal_level=logical -c fsync=off -c full_page_writes=off" \
     -w start >/dev/null
 
-psql=("${run_as[@]}" "$bindir/psql" -h 127.0.0.1 -p "$PG_PORT" -U copypaste_verify -v ON_ERROR_STOP=1 -X -q)
+psql=(run_pg "$bindir/psql" -h 127.0.0.1 -p "$PG_PORT" -U copypaste_verify -v ON_ERROR_STOP=1 -X -q)
 "${psql[@]}" -d postgres -c "create database copypaste;" >/dev/null
 db=("${psql[@]}" -d copypaste)
 

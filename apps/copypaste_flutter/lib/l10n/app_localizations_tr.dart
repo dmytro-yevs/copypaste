@@ -4064,6 +4064,9 @@ class AppLocalizationsTr extends AppLocalizations {
       'SMS izlemenin ayarlanması gerekiyor.';
 
   @override
+  String get modulesSmsMonitoringUnavailable => 'SMS izleme denetlenemedi.';
+
+  @override
   String get modulesOperationIncomplete => 'Modül işlemi tamamlanamadı.';
 
   @override

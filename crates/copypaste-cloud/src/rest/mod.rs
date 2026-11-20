@@ -32,9 +32,9 @@
 //!     nonce             text,
 //!     content_type      text not null,
 //!     payload_metadata  text,
-//!     -- Version wall clock, ms since epoch, client-supplied. This is the
-//!     -- value the poll cursor pages on, so every writer must restamp it on
-//!     -- every mutation (see `SupabaseRest::fetch_since`).
+//!     -- Version wall clock, ms since epoch, client-supplied. The merge
+//!     -- orders on it; nothing pages on it, because a device's clock says
+//!     -- nothing about when a row reached the server.
 //!     created_at        bigint not null,
 //!     -- Tombstone flag. Always sent explicitly, including `false`: omitting
 //!     -- it lets the column default win on a merge-duplicates upsert and
@@ -51,6 +51,8 @@
 //!     -- never on the client-supplied `created_at`, or a device with a forged
 //!     -- clock can escape eviction (manifest §5.1 row 4a).
 //!     inserted_at       timestamptz not null default now(),
+//!     -- Server-assigned on every write (the trigger below), and what the
+//!     -- poll cursor pages on (see `SupabaseRest::list_since`).
 //!     updated_at        timestamptz not null default now()
 //! );
 //!
@@ -62,10 +64,12 @@
 //! create unique index clipboard_items_user_item_uidx
 //!     on public.clipboard_items (user_id, item_id);
 //!
-//! -- The read path: `user_id` from RLS, then the `(created_at asc, item_id
-//! -- asc)` keyset this module orders and pages on. Ascending on both: the
-//! -- index has to match `order=created_at.asc,item_id.asc` or every page
-//! -- costs an incremental sort.
+//! -- The read path: `user_id` from RLS, then the `(updated_at asc, item_id
+//! -- asc)` keyset this module orders and pages on. Without the index a page
+//! -- is still correct; it costs a sort of the account's rows.
+//! create index clipboard_items_user_updated_idx
+//!     on public.clipboard_items (user_id, updated_at, item_id);
+//! -- The same for clients that page on `(created_at, item_id)`.
 //! create index clipboard_items_user_created_idx
 //!     on public.clipboard_items (user_id, created_at, item_id);
 //!
@@ -168,7 +172,7 @@ mod testkit;
 pub use body::RowPage;
 pub use client::SupabaseRest;
 pub use error::RestError;
-pub use item::CloudItem;
+pub use item::{CloudItem, RowListing};
 
 /// The one table.
 pub const TABLE: &str = "clipboard_items";
@@ -176,7 +180,12 @@ pub const TABLE: &str = "clipboard_items";
 /// Explicit column list. Naming the columns rather than `select=*` means a
 /// column added to the table later cannot change what this client parses.
 pub const SELECT_COLUMNS: &str =
-    "item_id,ciphertext,nonce,content_type,payload_metadata,source_app_bundle_id,source_app_name,created_at,deleted,origin_device_id,signature";
+    "item_id,ciphertext,nonce,content_type,payload_metadata,source_app_bundle_id,source_app_name,created_at,deleted,origin_device_id,signature,updated_at";
+
+/// What a listing selects: the columns that say which version a row claims to
+/// hold, and where the server placed it. Never the payload.
+pub const LISTING_COLUMNS: &str =
+    "item_id,created_at,deleted,origin_device_id,signature,updated_at";
 
 /// Upper bound on a page, whatever the caller asks for.
 ///

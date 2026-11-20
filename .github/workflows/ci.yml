@@ -22,6 +22,7 @@ jobs:
     outputs:
       native: ${{ steps.changes.outputs.native }}
       compositor: ${{ steps.changes.outputs.compositor }}
+      signer: ${{ steps.changes.outputs.signer }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -69,9 +70,6 @@ jobs:
       version: ${{ needs.compositor-runtime-metadata.outputs.version }}
       commit: ${{ needs.compositor-runtime-metadata.outputs.commit }}
       source_run_id: ${{ needs.compositor-runtime-metadata.outputs.source_run_id }}
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   rust-and-supabase:
     if: needs.changes.outputs.native == 'true'
@@ -553,9 +551,40 @@ jobs:
       - name: Install and remove the RPM fixture through Fedora DNF
         run: scripts/release/test-linux-rpm.sh "$RUNNER_TEMP/linux-package-fixtures/CopyPaste-v1.2.3-linux-x86_64.rpm" 1.2.3
 
+  # Runs the release signing script with a throwaway key and no secret, so a
+  # stale lockfile hash or a platform fault fails here instead of in a release.
+  updater-signer:
+    if: needs.changes.outputs.signer == 'true'
+    needs: changes
+    name: Updater signer (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos, platform: macos, runner: macos-15 }
+          - { name: windows, platform: windows, runner: windows-2022 }
+          - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Select OpenSSL 3 for the signature verifier
+        if: matrix.platform == 'macos'
+        run: bash scripts/ci/use-macos-openssl3.sh
+      - name: Sign and verify a probe with a throwaway key
+        run: bash scripts/ci/test-updater-signer.sh
+
   required:
     name: CI required
-    needs: [changes, flutter-static, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, android-unit-tests, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures]
+    needs: [changes, flutter-static, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, android-unit-tests, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures, updater-signer]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -568,6 +597,7 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           NATIVE: ${{ needs.changes.outputs.native }}
           COMPOSITOR: ${{ needs.changes.outputs.compositor }}
+          SIGNER: ${{ needs.changes.outputs.signer }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
           TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: python3 scripts/ci/changes.py --verify

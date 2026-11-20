@@ -49,11 +49,10 @@ pub struct CloudItem {
     pub source_app_bundle_id: Option<String>,
     #[serde(default)]
     pub source_app_name: Option<String>,
-    /// Version wall clock, ms since epoch. **Not the row's birth time**: it is
-    /// the timestamp the poll cursor pages on, so a writer must restamp it on
-    /// every mutation. A tombstone that kept the original creation time would
-    /// sort below the watermark of every device that already saw the item, and
-    /// the deletion would never propagate.
+    /// Version wall clock, ms since epoch. **Not the row's birth time**: the
+    /// merge orders on it, so a writer must restamp it on every mutation. A
+    /// tombstone that kept the original creation time would lose to the
+    /// version it deletes, and the deletion would never propagate.
     pub created_at: i64,
     /// Tombstone flag. Always serialised, including `false` (manifest T-5).
     pub deleted: bool,
@@ -68,6 +67,41 @@ pub struct CloudItem {
     /// reaches the merge.
     #[serde(default, deserialize_with = "null_as_empty")]
     pub signature: String,
+    /// Where the backend placed this version in its own order: `updated_at`,
+    /// in microseconds since the Unix epoch. Assigned by the server on every
+    /// write and never sent, so it is outside the signature. `None` only on a
+    /// row built here.
+    #[serde(
+        default,
+        rename = "updated_at",
+        skip_serializing,
+        deserialize_with = "fetched_position"
+    )]
+    pub position: Option<i64>,
+}
+
+/// What a listing says of one stored row: which version it claims to hold and
+/// where the backend placed it. No payload, and nothing here is verified until
+/// the row itself is fetched.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RowListing {
+    pub item_id: String,
+    pub created_at: i64,
+    pub deleted: bool,
+    pub origin_device_id: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub signature: String,
+    /// As [`CloudItem::position`], and always present: a listing that does
+    /// not say where a row was placed is not one this client can page.
+    #[serde(rename = "updated_at", deserialize_with = "position")]
+    pub position: i64,
+}
+
+impl RowListing {
+    /// As [`CloudItem::key_epoch`].
+    pub fn key_epoch(&self) -> Option<u64> {
+        split_signature(&self.signature).map(|(epoch, _)| epoch)
+    }
 }
 
 /// Length of a bare base64 HMAC-SHA256 signature.
@@ -115,6 +149,7 @@ impl CloudItem {
             deleted: false,
             origin_device_id: origin_device_id.into(),
             signature: String::new(),
+            position: None,
         }
     }
 
@@ -144,6 +179,7 @@ impl CloudItem {
             deleted: false,
             origin_device_id: origin_device_id.into(),
             signature: String::new(),
+            position: None,
         }
     }
 
@@ -170,6 +206,7 @@ impl CloudItem {
             deleted: true,
             origin_device_id: origin_device_id.into(),
             signature: String::new(),
+            position: None,
         }
     }
 
@@ -311,6 +348,121 @@ where
     D: Deserializer<'de>,
 {
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// A position that does not read as a timestamp fails the page. It is the
+/// backend's own column, so an unreadable one is a response this client does
+/// not understand, and skipping the row would lose it without a sign.
+fn position<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    parse_position(&text).ok_or_else(|| serde::de::Error::custom("unreadable position"))
+}
+
+fn fetched_position<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    position(deserializer).map(Some)
+}
+
+/// Days from the Unix epoch to a proleptic Gregorian date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let (era, year_of_era) = (year.div_euclid(400), year.rem_euclid(400));
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    era * 146_097 + year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year - 719_468
+}
+
+/// The inverse of [`days_from_civil`]: `(year, month, day)`.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let (era, day_of_era) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let month = (shifted_month + 2) % 12 + 1;
+    (
+        era * 400 + year_of_era + i64::from(month <= 2),
+        month,
+        day_of_year - (153 * shifted_month + 2) / 5 + 1,
+    )
+}
+
+/// A run of ASCII digits, as a number. A sign is not one.
+fn digits(text: &str) -> Option<i64> {
+    text.bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| text.parse().ok())?
+}
+
+/// Microseconds since the Unix epoch of a `timestamptz` as Postgres spells one
+/// in JSON: `2026-11-19T12:34:56.123456+00:00`, with the fraction optional and
+/// any offset. `None` for anything else, `infinity` included.
+pub(super) fn parse_position(text: &str) -> Option<i64> {
+    let number = |range: std::ops::Range<usize>| text.get(range).and_then(digits);
+    let bytes = text.as_bytes();
+    let layout = bytes.len() > 19
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && matches!(bytes[10], b'T' | b' ')
+        && bytes[13] == b':'
+        && bytes[16] == b':';
+    if !layout {
+        return None;
+    }
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
+        return None;
+    }
+    let mut rest = &text[19..];
+    let mut micros = 0;
+    if let Some(fraction) = rest.strip_prefix('.') {
+        let len = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if !(1..=6).contains(&len) {
+            return None;
+        }
+        micros = fraction[..len].parse::<i64>().ok()? * 10_i64.pow(6 - len as u32);
+        rest = &fraction[len..];
+    }
+    let offset_seconds = if rest == "Z" {
+        0
+    } else {
+        let sign = match rest.as_bytes().first()? {
+            b'+' => 1,
+            b'-' => -1,
+            _ => return None,
+        };
+        let (hours, minutes) = match rest.len() {
+            3 => (rest.get(1..3)?, "00"),
+            6 if rest.as_bytes()[3] == b':' => (rest.get(1..3)?, rest.get(4..6)?),
+            _ => return None,
+        };
+        sign * (digits(hours)? * 3_600 + digits(minutes)? * 60)
+    };
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second
+        - offset_seconds;
+    Some(seconds * 1_000_000 + micros)
+}
+
+/// The spelling of a position that a PostgREST filter takes. UTC, so the value
+/// holds no `+` for a query string to turn into a space, and no character that
+/// separates filters.
+pub(super) fn format_position(position: i64) -> String {
+    let position = position.max(0);
+    let (seconds, micros) = (position / 1_000_000, position % 1_000_000);
+    let (year, month, day) = civil_from_days(seconds / 86_400);
+    let second_of_day = seconds % 86_400;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{micros:06}Z",
+        second_of_day / 3_600,
+        second_of_day % 3_600 / 60,
+        second_of_day % 60,
+    )
 }
 
 /// An `item_id` goes into a PostgREST filter (`item_id=in.(…)`), where quoting
@@ -495,9 +647,39 @@ mod tests {
                 "source_app_name",
             ]
         );
-        let mut selected: Vec<&str> = SELECT_COLUMNS.split(',').collect();
+        // `updated_at` is the server's to assign: the role may not insert it,
+        // so sending it would fail the whole write.
+        let mut selected: Vec<&str> = SELECT_COLUMNS
+            .split(',')
+            .filter(|column| *column != "updated_at")
+            .collect();
         selected.sort_unstable();
         assert_eq!(keys, selected, "what we write is what we read back");
+    }
+
+    #[test]
+    fn a_server_position_reads_as_microseconds_and_round_trips() {
+        for (text, micros) in [
+            ("1970-01-01T00:00:00+00:00", 0),
+            ("2026-11-19T12:34:56.123456+00:00", 1_795_091_696_123_456),
+            ("2026-11-19T14:34:56.5+02:00", 1_795_091_696_500_000),
+            ("2024-02-29 23:59:59.000001-05:30", 1_709_270_999_000_001),
+            ("2026-11-19T12:34:56Z", 1_795_091_696_000_000),
+        ] {
+            assert_eq!(parse_position(text), Some(micros), "{text}");
+            assert_eq!(
+                parse_position(&format_position(micros)),
+                Some(micros),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            format_position(1_795_091_696_123_456),
+            "2026-11-19T12:34:56.123456Z"
+        );
+        for junk in ["infinity", "", "2026-11-19", "2026-13-01T00:00:00Z", "x"] {
+            assert_eq!(parse_position(junk), None, "{junk}");
+        }
     }
 
     #[test]

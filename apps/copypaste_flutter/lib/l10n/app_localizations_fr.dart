@@ -4168,6 +4168,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'La surveillance des SMS doit être configurée.';
 
   @override
+  String get modulesSmsMonitoringUnavailable =>
+      'La surveillance des SMS n\'a pas pu être vérifiée.';
+
+  @override
   String get modulesOperationIncomplete =>
       'Impossible de terminer l’opération sur le module.';
 

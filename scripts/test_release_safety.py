@@ -698,6 +698,18 @@ class ReleaseSafetyTest(unittest.TestCase):
         )
         self.assertIn("Review cnativeapi native menu bitmap clear-size patch", patch)
 
+    def test_linux_tray_menu_patch_stops_tracking_items_the_menu_has_freed(self):
+        root = ROOT / "apps/copypaste_flutter/linux"
+        patch = (root / "cmake/native_tray_menu_items.cmake").read_text(encoding="utf-8")
+        self.assertIn("g_object_add_weak_pointer(G_OBJECT(tracked), reinterpret_cast<gpointer*>(&tracked));", patch)
+        self.assertIn("reinterpret_cast<gpointer*>(&entry.second));", patch)
+        self.assertEqual(patch.count("_replace_exactly_once(_tray_source"), 3)
+        self.assertIn("Review cnativeapi tray menu item lifetime patch", patch)
+        project = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            "include(flutter/generated_plugins.cmake)\ninclude(cmake/native_tray_menu_items.cmake)\n", project,
+        )
+
     def test_linux_arm64_flutter_bootstrap_uses_the_pinned_source_revision(self):
         action = (ROOT / ".github/actions/setup-flutter/action.yml").read_text(encoding="utf-8")
         self.assertIn("runner.arch == 'ARM64'", action)

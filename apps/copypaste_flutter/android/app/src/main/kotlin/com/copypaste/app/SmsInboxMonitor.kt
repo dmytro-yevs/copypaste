@@ -22,20 +22,19 @@ internal class SmsInboxMonitor(private val context: Context) {
     }
 
     fun start(completion: (Boolean) -> Unit) = worker.post {
+        val started = try { open() } catch (_: Exception) { false } catch (_: LinkageError) { false }
+        completion(started)
+        if (started) scan()
+    }
+
+    private fun open(): Boolean {
         MainActivity.ensureRuntime(context)
-        if (closed || NativeSmsModules.handlerState() != NativeSmsModules.HANDLER_ENABLED || !AndroidSmsAccess.granted(context)) {
-            completion(false); return@post
-        }
+        if (closed || NativeSmsModules.handlerState() != NativeSmsModules.HANDLER_ENABLED || !AndroidSmsAccess.granted(context)) return false
         host = NativeSmsModules.openHost()
-        if (host == 0L) { completion(false); return@post }
-        try {
-            if (closed) { completion(false); return@post }
-            provider = context.contentResolver.acquireUnstableContentProviderClient(inbox)
-                ?: run { completion(false); return@post }
-            context.contentResolver.registerContentObserver(inbox, true, observer)
-            completion(true)
-            scan()
-        } catch (_: Exception) { completion(false) }
+        if (host == 0L || closed) return false
+        provider = context.contentResolver.acquireUnstableContentProviderClient(inbox) ?: return false
+        context.contentResolver.registerContentObserver(inbox, true, observer)
+        return true
     }
 
     fun changed() = worker.post { scan() }
@@ -55,7 +54,12 @@ internal class SmsInboxMonitor(private val context: Context) {
         }
     }
 
+    // Runs on the worker thread, where an uncaught failure would end the process.
     private fun scan() {
+        try { scanInbox() } catch (_: Exception) {} catch (_: LinkageError) {}
+    }
+
+    private fun scanInbox() {
         if (closed || host == 0L || NativeSmsModules.handlerState() != NativeSmsModules.HANDLER_ENABLED || !AndroidSmsAccess.granted(context)) return
         val activated = maxOf(preferences.getLong("activated-at", 0L), preferences.getLong("skip-before", 0L))
         if (activated == 0L) return

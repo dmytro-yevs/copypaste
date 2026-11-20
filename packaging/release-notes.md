@@ -1,7 +1,5 @@
-- CopyPaste uses less memory, most of all while its window is hidden. The background service, sync and clip previews hold less as well.
-- The updated OCR and Semantic Search modules use less memory while they work.
-- On Android, SMS access moved to a separate CopyPaste SMS app, and CopyPaste itself no longer asks for SMS permissions. SMS setup now includes installing it.
-- Very large text clips open in a read-only view instead of the editor.
-- Copying an image or file you deleted from History adds it back.
-- History keeps your place when new clips arrive.
-- Install on macOS with a single curl command, described in the README.
+- The updated Supabase module delivers clips that were uploaded late or from a device with a wrong clock, and no longer stops syncing at a clip encrypted with a newer key.
+- Opening History and searching it take less work on large histories.
+- CopyPaste keeps working when another program holds its LAN sync port.
+- Devices on different CopyPaste versions agree on a LAN sync protocol version before they sync.
+- On Linux, CopyPaste no longer crashes shortly after it starts on GNOME with the AppIndicator extension.

@@ -54,6 +54,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
+      # CodeQL reads the Swift sources only. Nothing here runs or ships the
+      # Rust bridge and daemon the Xcode build produces, so skip the release
+      # profile's optimizer and link-time optimization for them. The Flutter
+      # build hook drops Cargo environment variables, hence a configuration
+      # file in the default Cargo home.
+      - name: Build Rust without release optimization
+        run: |
+          mkdir -p "$HOME/.cargo"
+          cat >> "$HOME/.cargo/config.toml" <<'TOML'
+          [profile.release]
+          opt-level = 0
+          lto = "off"
+          codegen-units = 16
+          TOML
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-flutter
@@ -64,17 +78,17 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter build macos --release --config-only --no-pub
-      # Dart AOT, the Rust bridge and the runtime daemon contain no Swift.
-      # Build them before tracing starts; the traced build below shares the
-      # products directory, so Flutter and Cargo reuse these outputs while
-      # its fresh derived data recompiles every Swift target under tracing.
-      - name: Build Dart and Rust outputs before CodeQL tracing
-        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/macos-prebuild" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: swift
           build-mode: manual
+      # CodeQL traces macOS builds as x86_64 processes under Rosetta, which
+      # costs many times more than native work. The empty variable keeps this
+      # step outside the tracer, so Dart, Rust, C and linking run natively;
+      # the build script puts the Swift compiler alone under the tracer.
       - name: Build Swift sources for CodeQL
+        env:
+          DYLD_INSERT_LIBRARIES: ""
         run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:

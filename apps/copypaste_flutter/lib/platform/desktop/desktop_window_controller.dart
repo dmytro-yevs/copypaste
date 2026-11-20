@@ -295,8 +295,8 @@ class DesktopWindowController implements TrayMenuSurface {
       _trayReady = true;
       _clearIssue();
     } catch (_) {
-      _setIssue(DesktopWindowSetupIssue.trayUnavailable);
       if (startHidden) await showFromTrayOrDock();
+      _reportTrayUnavailable();
     }
   }
 
@@ -334,7 +334,8 @@ class DesktopWindowController implements TrayMenuSurface {
       return;
     }
 
-    _setIssue(DesktopWindowSetupIssue.trayUnavailable);
+    // The window stays open; report again why it cannot hide.
+    _reportTrayUnavailable();
     try {
       await _host.showAndFocus();
     } catch (_) {
@@ -598,6 +599,18 @@ class DesktopWindowController implements TrayMenuSurface {
       return;
     }
     setupIssue.value = issue;
+  }
+
+  /// The window works without a tray, so the issue never replaces a window
+  /// or quit issue; each report notifies again so it can be shown again.
+  void _reportTrayUnavailable() {
+    if (setupIssue.value
+        case DesktopWindowSetupIssue.windowUnavailable ||
+            DesktopWindowSetupIssue.quitUnavailable) {
+      return;
+    }
+    _clearIssue();
+    _setIssue(DesktopWindowSetupIssue.trayUnavailable);
   }
 
   void _clearIssue() {

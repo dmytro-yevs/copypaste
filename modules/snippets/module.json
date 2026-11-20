@@ -5,7 +5,7 @@
   "title": "Snippets",
   "description": "Browse, organize and edit snippets and collections.",
   "version": "0.1.0",
-  "app_versions": ">=0.1.1, <2.0.0",
+  "app_versions": ">=0.1.2, <2.0.0",
   "supported_platforms": [
     "macos",
     "windows",

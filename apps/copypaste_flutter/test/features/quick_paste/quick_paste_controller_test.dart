@@ -1142,6 +1142,18 @@ void main() {
     expect(controller.history.selection.selectedClip?.id, 'recent');
   });
 
+  test('a failed permission read still signals ready', () async {
+    final host = _ContextHost()..permissionFailure = StateError('denied');
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    expect(host.readyCalls, 1);
+  });
+
   test('cold engine opening waits until its controller is ready', () async {
     final host = _ContextHost()..openWhenReady = true;
     final controller = QuickPasteController(
@@ -3984,8 +3996,13 @@ class _ContextHost implements QuickPasteContextHost {
   Completer<bool>? pasteGate;
   Completer<void> pasteStarted = Completer<void>();
 
+  Object? permissionFailure;
+
   @override
-  Future<bool> accessibilityGranted() async => permissionGranted;
+  Future<bool> accessibilityGranted() async {
+    if (permissionFailure case final failure?) throw failure;
+    return permissionGranted;
+  }
 
   @override
   Future<void> close({required int presentationId}) async {

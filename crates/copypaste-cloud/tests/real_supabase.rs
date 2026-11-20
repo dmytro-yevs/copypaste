@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use copypaste_cloud::sync::{Applied, CloudSource, LocalItem};
+use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, PullCursor};
 use copypaste_cloud::{
     CloudConfig, CloudCrypto, CloudItem, CloudSync, RealtimeEvent, RealtimeSubscription,
     SupabaseAuth, SupabaseRest,
@@ -13,7 +13,7 @@ fn secret(name: &str) -> String {
 
 struct Source {
     items: Vec<LocalItem>,
-    watermark: Mutex<i64>,
+    cursor: Mutex<PullCursor>,
 }
 
 impl CloudSource for Source {
@@ -37,12 +37,12 @@ impl CloudSource for Source {
         Ok(Applied::Declined(item))
     }
 
-    fn watermark(&self) -> Result<i64, copypaste_cloud::SyncError> {
-        Ok(*self.watermark.lock().expect("watermark lock"))
+    fn pull_cursor(&self) -> Result<PullCursor, copypaste_cloud::SyncError> {
+        Ok(self.cursor.lock().expect("cursor lock").clone())
     }
 
-    fn set_watermark(&self, ms: i64) -> Result<(), copypaste_cloud::SyncError> {
-        *self.watermark.lock().expect("watermark lock") = ms;
+    fn set_pull_cursor(&self, cursor: &PullCursor) -> Result<(), copypaste_cloud::SyncError> {
+        *self.cursor.lock().expect("cursor lock") = cursor.clone();
         Ok(())
     }
 }
@@ -111,14 +111,23 @@ async fn real_supabase_contract() {
         }
         other => panic!("unexpected Realtime event: {other:?}"),
     }
-    let row = rest
-        .fetch_since(&alice.access_token, created_at, None, 10)
+    let listed = rest
+        .list_since(&alice.access_token, 0, None, 10)
         .await
-        .expect("Alice's page")
-        .rows
+        .expect("Alice's listing")
         .into_iter()
         .find(|row| row.item_id == "real-convergence")
         .expect("the announced row");
+    // The server placed the row; the stamp the client wrote did not.
+    let placed = listed.position;
+    let row = rest
+        .fetch_rows(&alice.access_token, &[listed.item_id])
+        .await
+        .expect("Alice's row")
+        .rows
+        .pop()
+        .expect("the listed row");
+    assert_eq!(row.position, Some(placed), "the two requests disagree");
     row.verify(crypto.key())
         .expect("Realtime metadata signature");
     assert_eq!(
@@ -130,9 +139,14 @@ async fn real_supabase_contract() {
     );
 
     assert!(rest
-        .fetch_since(&bob.access_token, created_at, None, 200)
+        .list_since(&bob.access_token, 0, None, 200)
         .await
-        .expect("Bob's RLS page")
+        .expect("Bob's RLS listing")
+        .is_empty());
+    assert!(rest
+        .fetch_rows(&bob.access_token, &["real-convergence".into()])
+        .await
+        .expect("Bob's RLS fetch")
         .rows
         .is_empty());
 
@@ -145,7 +159,9 @@ async fn real_supabase_contract() {
             ciphertext,
             nonce,
             "text",
-            created_at + 1,
+            // Older than the row already read, as a device that was offline
+            // would stamp them: the page order must still put them after it.
+            created_at - 60_000,
             "device-a",
         );
         row.sign(crypto.key());
@@ -153,24 +169,17 @@ async fn real_supabase_contract() {
     }
     rest.upsert(&alice.access_token, &page_rows)
         .await
-        .expect("write a multi-page timestamp bucket");
+        .expect("write batches that each share one position");
     let first = rest
-        .fetch_since(&alice.access_token, created_at + 1, None, 200)
+        .list_since(&alice.access_token, placed, Some("real-convergence"), 200)
         .await
-        .expect("first page")
-        .rows;
+        .expect("first page");
     assert_eq!(first.len(), 200);
     let last = first.last().expect("first page has a cursor");
     let second = rest
-        .fetch_since(
-            &alice.access_token,
-            last.created_at,
-            Some(&last.item_id),
-            200,
-        )
+        .list_since(&alice.access_token, last.position, Some(&last.item_id), 200)
         .await
-        .expect("second page")
-        .rows;
+        .expect("second page");
     assert_eq!(second.len(), 5);
 
     let mut tombstone =
@@ -179,8 +188,21 @@ async fn real_supabase_contract() {
     rest.upsert(&alice.access_token, &[tombstone])
         .await
         .expect("write tombstone");
+    let after_pages = second.last().expect("second page has a cursor");
     let deleted = rest
-        .fetch_since(&alice.access_token, created_at + 2, None, 10)
+        .list_since(
+            &alice.access_token,
+            after_pages.position,
+            Some(&after_pages.item_id),
+            10,
+        )
+        .await
+        .expect("list tombstone");
+    assert!(deleted
+        .iter()
+        .any(|row| row.item_id == "real-convergence" && row.deleted));
+    let deleted = rest
+        .fetch_rows(&alice.access_token, &["real-convergence".into()])
         .await
         .expect("read tombstone");
     assert!(deleted.rows.iter().any(|row| {
@@ -200,7 +222,7 @@ async fn real_supabase_contract() {
     };
     let source = Source {
         items: vec![credential_shaped],
-        watermark: Mutex::new(0),
+        cursor: Mutex::default(),
     };
     let sync = CloudSync::new(
         rest.clone(),
@@ -212,15 +234,14 @@ async fn real_supabase_contract() {
     let stats = sync.push(&source).await.expect("credential-shaped push");
     assert_eq!(stats.uploaded, 1);
     assert!(rest
-        .fetch_since(
+        .list_since(
             &sync.inspect_session(|session| session.access_token.clone()),
-            created_at + 3,
-            None,
+            after_pages.position,
+            Some(&after_pages.item_id),
             10,
         )
         .await
         .expect("credential-shaped query")
-        .rows
         .iter()
         .any(|row| row.item_id == "real-credential-shaped"));
 

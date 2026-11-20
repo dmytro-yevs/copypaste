@@ -20,6 +20,7 @@ pub(super) const SCHEMA: &str = concat!(
     include_str!("migrations/012_file_sets.sql"),
     include_str!("migrations/013_file_copies.sql"),
     include_str!("migrations/014_module_storage.sql"),
+    include_str!("migrations/015_module_search_item_index.sql"),
 );
 
 pub(super) fn create(conn: &mut Connection) -> Result<(), StoreError> {

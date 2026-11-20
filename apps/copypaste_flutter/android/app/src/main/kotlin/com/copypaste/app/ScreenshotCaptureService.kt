@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 
 class ScreenshotCaptureService : Service() {
@@ -13,7 +14,14 @@ class ScreenshotCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!eligible(this)) { stopSelf(startId); return START_NOT_STICKY }
         MainActivity.ensureRuntime(applicationContext)
-        BackgroundActivityNotification.start(this)
+        try {
+            BackgroundActivityNotification.start(this)
+        } catch (_: RuntimeException) {
+            // Android 12+ refuses a foreground start the system did not allow.
+            Log.w(logTag, "Foreground start refused")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (monitor == null) {
             monitor = ScreenshotCaptureMonitor(applicationContext)
             if (monitor?.start() != true) { stopSelf(startId); return START_NOT_STICKY }
@@ -31,6 +39,7 @@ class ScreenshotCaptureService : Service() {
         super.onDestroy()
     }
     companion object {
+        private const val logTag = "ScreenshotCapture"
         @Volatile private var active: ScreenshotCaptureService? = null
         fun isRunning(): Boolean = active != null
         private fun eligible(context: Context): Boolean = ScreenshotCaptureState.enabled(context) &&

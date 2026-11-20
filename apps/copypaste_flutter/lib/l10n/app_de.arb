@@ -1131,6 +1131,7 @@
   "modulesSmsMonitoringFailed": "Die SMS-Überwachung konnte nicht gestartet werden.",
   "modulesSmsAndroidOnly": "SMS-Zugriff ist nur unter Android verfügbar.",
   "modulesSmsMonitoringNeedsSetup": "Die SMS-Überwachung muss eingerichtet werden.",
+  "modulesSmsMonitoringUnavailable": "Die SMS-Überwachung konnte nicht geprüft werden.",
   "modulesOperationIncomplete": "Der Modulvorgang konnte nicht abgeschlossen werden.",
   "modulesUnsupportedEvent": "Das Modul verwendet ein nicht unterstütztes Ereignis.",
   "modulesUnsupportedResult": "Das Modul hat ein nicht unterstütztes Ergebnis geliefert.",

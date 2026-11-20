@@ -20,6 +20,21 @@ class SmsModuleAccessState {
   bool get granted => smsGranted && notificationGranted;
 }
 
+/// The outcome of applying the enabled SMS modules to native monitoring.
+enum SmsMonitoringStatus {
+  /// Monitoring matches the enabled SMS modules.
+  ready,
+
+  /// The runtime has not reported whether an SMS module is enabled yet.
+  unavailable,
+
+  /// An SMS module is enabled, but SMS access is not granted.
+  accessMissing,
+
+  /// The system refused to start the monitoring service.
+  serviceRefused,
+}
+
 abstract interface class ModuleAccessRepository {
   Future<SmsModuleAccessState> smsState();
 
@@ -29,5 +44,5 @@ abstract interface class ModuleAccessRepository {
   Future<SmsModuleAccessState> requestSmsNotifications();
   Future<bool> openShizuku();
   Future<void> installSmsApp();
-  Future<bool> synchronize();
+  Future<SmsMonitoringStatus> synchronize();
 }

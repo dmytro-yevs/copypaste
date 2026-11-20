@@ -1131,6 +1131,7 @@
   "modulesSmsMonitoringFailed": "SMS の監視を開始できませんでした。",
   "modulesSmsAndroidOnly": "SMS へのアクセスは Android でのみ利用できます。",
   "modulesSmsMonitoringNeedsSetup": "SMS の監視にはセットアップが必要です。",
+  "modulesSmsMonitoringUnavailable": "SMS の監視を確認できませんでした。",
   "modulesOperationIncomplete": "モジュールの操作を完了できませんでした。",
   "modulesUnsupportedEvent": "モジュールが対応していないイベントを使用しています。",
   "modulesUnsupportedResult": "モジュールが対応していない結果を返しました。",

@@ -21,7 +21,7 @@ use super::summary::{exchange_workspace, workspace_watermark};
 use super::transfer::{receive_request, serve_items};
 use super::{SyncChannel, SyncCursor, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
-use crate::protocol::{SyncMessage, PROTOCOL_VERSION};
+use crate::protocol::{SyncMessage, VersionRange};
 /// Runs the initiating half of a session to completion.
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
@@ -205,7 +205,8 @@ fn requested_advertised(
 
 fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i64) -> SyncMessage {
     SyncMessage::Hello {
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: VersionRange::SUPPORTED.min,
+        max_protocol_version: VersionRange::SUPPORTED.wire_max(),
         device_id: source.device_id(),
         device_name: source.device_name(),
         profile: Some(source.device_profile()),
@@ -214,12 +215,15 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i
     }
 }
 
+/// The last field is the negotiated protocol version: the newest one both
+/// halves speak, and what anything after the hello exchange may branch on.
 type PeerHello = (
     String,
     String,
     Option<crate::DeviceProfile>,
     Option<std::net::SocketAddr>,
     i64,
+    u32,
 );
 
 /// Reads the peer's hello and fails closed on anything unexpected. The version
@@ -238,13 +242,18 @@ fn parse_hello<S: SyncSource>(msg: SyncMessage, source: &S) -> Result<PeerHello,
     msg.validate()?;
     match msg {
         SyncMessage::Hello {
+            protocol_version,
+            max_protocol_version,
             device_id,
             device_name,
             profile,
             listen_addr,
             since_ms,
-            ..
         } => {
+            let version = VersionRange::SUPPORTED.negotiate(VersionRange::from_wire(
+                protocol_version,
+                max_protocol_version,
+            ))?;
             if device_id == source.device_id() {
                 return Err(SyncError::SelfSync);
             }
@@ -258,6 +267,7 @@ fn parse_hello<S: SyncSource>(msg: SyncMessage, source: &S) -> Result<PeerHello,
                     .and_then(|addr| addr.parse().ok())
                     .filter(crate::netif::is_dialable),
                 since_ms,
+                version,
             ))
         }
         other => Err(SyncError::Unexpected {
@@ -274,6 +284,7 @@ mod tests {
         content_hash, plaintext_content_hash, ItemSummary, ProtocolError, SyncItem,
         MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
         MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+        PROTOCOL_VERSION,
     };
     use crate::sync::testutil::{
         item, session, session_with, tombstone, try_session, try_session_with_listen_addresses,
@@ -814,6 +825,7 @@ mod tests {
         let mut chan = ScriptChannel::new(vec![
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 profile: None,
@@ -851,6 +863,7 @@ mod tests {
         let mut chan = ScriptChannel::new(vec![
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 profile: None,
@@ -888,6 +901,7 @@ mod tests {
         let mut chan = ScriptChannel::new(vec![
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 profile: None,
@@ -916,6 +930,7 @@ mod tests {
         let mut script = vec![
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 profile: None,
@@ -942,6 +957,7 @@ mod tests {
         let a = TestSource::new("dev-a", vec![]);
         let mut script = vec![SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "dev-b".into(),
             device_name: "B".into(),
             profile: None,
@@ -964,8 +980,10 @@ mod tests {
     #[tokio::test]
     async fn a_version_mismatch_fails_closed_on_both_halves() {
         let a = TestSource::new("dev-a", vec![]);
+        // The peer's whole range lies above ours: no version in common.
         let stale = SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION + 1,
+            max_protocol_version: Some(PROTOCOL_VERSION + 2),
             device_id: "dev-b".into(),
             device_name: "B".into(),
             profile: None,
@@ -978,7 +996,7 @@ mod tests {
             run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::Protocol(ProtocolError::VersionMismatch {
                 ours: PROTOCOL_VERSION,
-                theirs: PROTOCOL_VERSION + 1,
+                theirs: PROTOCOL_VERSION + 2,
             }))
         );
 
@@ -989,11 +1007,27 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn a_peer_stating_a_wider_range_is_spoken_to_at_the_newest_common_version() {
+        let a = TestSource::new("dev-a", vec![]);
+        let newer = SyncMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: Some(PROTOCOL_VERSION + 1),
+            device_id: "dev-b".into(),
+            device_name: "B".into(),
+            profile: None,
+            listen_addr: None,
+            since_ms: 0,
+        };
+        assert_eq!(parse_hello(newer, &a).unwrap().5, PROTOCOL_VERSION);
+    }
+
     #[tokio::test]
     async fn a_peer_claiming_our_own_device_id_is_refused() {
         let a = TestSource::new("dev-a", vec![]);
         let mut chan = ScriptChannel::new(vec![SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "dev-a".into(),
             device_name: "me".into(),
             profile: None,

@@ -26,6 +26,9 @@ permissions:
 
 jobs:
   preflight:
+    # Every signing and publishing job needs this one, so skipping it refuses
+    # a manual run of any ref other than the default branch or a v* release tag.
+    if: github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -67,6 +70,7 @@ jobs:
 
   android:
     needs: preflight
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -162,6 +166,7 @@ jobs:
   publish:
     needs: [preflight, android, android-native]
     if: inputs.publish
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

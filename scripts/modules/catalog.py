@@ -19,6 +19,10 @@ PUBLIC_KEY = re.search(
     r'MODULE_RELEASE_PUBLIC_KEY: &str =\s*"([^"]+)"',
     (ROOT / "crates/copypaste-modules/src/lib.rs").read_text(),
 ).group(1)
+MANIFEST_VERSION = int(re.search(
+    r"pub const MANIFEST_VERSION: u32 = (\d+);",
+    (ROOT / "crates/copypaste-module-sdk/src/manifest.rs").read_text(encoding="utf-8"),
+).group(1))
 REPOSITORY = "https://github.com/dmytro-yevs/copypaste/releases/download"
 LEGACY_CATALOG_NAME = "modules.json"
 LINUX_CATALOG_NAME = "modules-v2.json"
@@ -107,7 +111,7 @@ def read_package(path, public_key=PUBLIC_KEY):
         manifest_bytes = archive.read("manifest.json")
         verify_signature(manifest_bytes, archive.read("manifest.json.sig"), "manifest.json", public_key)
         manifest = json.loads(manifest_bytes)
-        if manifest["schema_version"] not in (1, 2, 3, 4, 5, 6) or manifest["api_version"] != 1:
+        if manifest["schema_version"] not in range(1, MANIFEST_VERSION + 1) or manifest["api_version"] != 1:
             raise ValueError("Unsupported module manifest")
         if not re.fullmatch(r"copypaste\.[a-z0-9][a-z0-9.-]*", manifest["id"]):
             raise ValueError("Invalid first-party module ID")

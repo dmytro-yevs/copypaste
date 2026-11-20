@@ -93,6 +93,11 @@ class AndroidModuleAccess implements ModuleAccessRepository {
   }
 
   @override
-  Future<bool> synchronize() async =>
-      await _channel.invokeMethod<bool>('synchronize') ?? false;
+  Future<SmsMonitoringStatus> synchronize() async =>
+      switch (await _channel.invokeMethod<Object?>('synchronize')) {
+        'ok' || true => SmsMonitoringStatus.ready,
+        'access_missing' => SmsMonitoringStatus.accessMissing,
+        'service_refused' => SmsMonitoringStatus.serviceRefused,
+        _ => SmsMonitoringStatus.unavailable,
+      };
 }

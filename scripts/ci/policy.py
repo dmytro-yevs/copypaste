@@ -44,6 +44,133 @@ def dependencies(jobs):
     return graph
 
 
+RELEASE_ENVIRONMENT = "release"
+DEFAULT_BRANCH_DISPATCH = ("github.event_name != 'workflow_dispatch' || "
+                           "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)")
+# A pushed v* tag already starts the full release, so a manual run on one adds no exposure.
+RELEASE_REF_DISPATCH = DEFAULT_BRANCH_DISPATCH + " || startsWith(github.ref, 'refs/tags/v')"
+# The marketplace publisher replaces the live catalog and never needs a release commit.
+DEFAULT_BRANCH_ONLY = ("module-marketplace.yml",)
+PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target", "merge_group")
+UPDATER_SIGNER = "scripts/release/updater-signer"
+
+
+def conjuncts(condition):
+    """Return the operands that must all hold for a job condition, without outer parentheses."""
+    text = str(condition or "").strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    while True:
+        depth, quoted, closed, operators = 0, False, None, []
+        for index, character in enumerate(text):
+            if character == "'":
+                quoted = not quoted
+            elif not quoted:
+                depth += (character == "(") - (character == ")")
+                if depth == 0 and character == ")" and closed is None:
+                    closed = index
+                if depth == 0 and text[index:index + 2] in ("&&", "||"):
+                    operators.append((index, text[index:index + 2]))
+        if not text.startswith("(") or closed != len(text) - 1:
+            break
+        text = text[1:-1].strip()
+    if not operators or any(operator == "||" for _, operator in operators):
+        return [text]
+    starts = [0, *(index + 2 for index, _ in operators)]
+    ends = [*(index for index, _ in operators), len(text)]
+    return [operand for start, end in zip(starts, ends) for operand in conjuncts(text[start:end])]
+
+
+def reads_secrets(fragment):
+    """Whether any expression in a workflow fragment uses the secrets context."""
+    return any(re.search(r"\bsecrets\b", expression)
+               for expression in re.findall(r"\$\{\{.*?\}\}", json.dumps(fragment), re.DOTALL))
+
+
+def privileged(job):
+    """Whether a job can sign or publish: it reads or forwards secrets, or may write repository contents."""
+    permissions = job.get("permissions")
+    return ("secrets" in job or reads_secrets(job)
+            or (isinstance(permissions, dict) and permissions.get("contents") == "write"))
+
+
+def refuses_untrusted_dispatch(jobs, key, guards, visiting=()):
+    """Whether a manual run on a ref no guard allows skips this job, directly or through a job it needs."""
+    job = jobs[key]
+    required = conjuncts(job.get("if"))
+    if set(guards) & set(required):
+        return True
+    needs = job.get("needs", [])
+    # A status function lets a job run after a skipped dependency unless it also requires that success.
+    survives_skips = re.search(r"\b(always|cancelled|failure)\s*\(", str(job.get("if", "")))
+    return any(parent in jobs and parent not in visiting
+               and (not survives_skips or f"needs.{parent}.result == 'success'" in required)
+               and refuses_untrusted_dispatch(jobs, parent, guards, (*visiting, key))
+               for parent in ([needs] if isinstance(needs, str) else needs))
+
+
+def release_boundary_errors(documents):
+    """Keep signing and publishing inside the release environment and away from pull-request code."""
+    def events(document):
+        triggers = document.get("on", {})
+        return [triggers] if isinstance(triggers, str) else list(triggers)
+
+    errors = []
+    # Every workflow a pull request runs, directly or through reusable workflow calls.
+    reachable = {name for name, document in documents.items() if set(events(document)) & set(PULL_REQUEST_EVENTS)}
+    pending = list(reachable)
+    while pending:
+        for job in documents[pending.pop()]["jobs"].values():
+            callee = Path(job.get("uses", "")).name
+            if job.get("uses", "").startswith("./.github/workflows/") and callee in set(documents) - reachable:
+                reachable.add(callee)
+                pending.append(callee)
+    for name, document in documents.items():
+        jobs = document["jobs"]
+        if reads_secrets(document.get("env")):
+            errors.append(f"{name}: workflow-level env would hand a secret to every job")
+        for key, job in jobs.items():
+            if not privileged(job):
+                continue
+            if name in reachable:
+                errors.append(f"{name}: {key} would hand release secrets to pull-request code")
+                continue
+            if "runs-on" in job and job.get("environment") != RELEASE_ENVIRONMENT:
+                errors.append(f"{name}: {key} must sign or publish in the {RELEASE_ENVIRONMENT} environment")
+            strict = name in DEFAULT_BRANCH_ONLY
+            guards = (DEFAULT_BRANCH_DISPATCH,) if strict else (DEFAULT_BRANCH_DISPATCH, RELEASE_REF_DISPATCH)
+            if "workflow_dispatch" in events(document) and not refuses_untrusted_dispatch(jobs, key, guards):
+                errors.append(f"{name}: {key} must refuse a manual run outside the default branch"
+                              + ("" if strict else " and v* release tags"))
+    return errors
+
+
+def signer_errors(root):
+    """Require the updater signer to come from the committed, integrity-pinned lockfile."""
+    script = root / "scripts/release/sign-update-artifact.sh"
+    if not script.is_file():
+        return []
+    errors = []
+    text = script.read_text(encoding="utf-8")
+    if "npm ci --ignore-scripts" not in text or re.search(r"\bnpx\b|\bnpm\s+(install|i|exec|x)\b", text):
+        errors.append("updater signer must be installed with npm ci --ignore-scripts from the committed lockfile")
+    try:
+        manifest = json.loads((root / UPDATER_SIGNER / "package.json").read_text(encoding="utf-8"))
+        packages = json.loads((root / UPDATER_SIGNER / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+    except (OSError, ValueError, KeyError):
+        return [*errors, "updater signer manifest or lockfile is missing or unreadable"]
+    pinned = manifest.get("dependencies", {})
+    if (not pinned or set(manifest) & {"devDependencies", "optionalDependencies", "scripts"}
+            or any(not re.fullmatch(r"\d+\.\d+\.\d+", str(version)) for version in pinned.values())
+            or packages.get("", {}).get("dependencies") != pinned):
+        errors.append("updater signer dependencies must be exact versions recorded in the lockfile")
+    for name, entry in packages.items():
+        if name and (not str(entry.get("resolved", "")).startswith("https://registry.npmjs.org/")
+                     or not str(entry.get("integrity", "")).startswith("sha512-") or entry.get("hasInstallScript")):
+            errors.append(f"updater signer lockfile entry lacks a pinned integrity or runs install scripts: {name}")
+    return errors
+
+
 def validate(document, path, root):
     errors = []
     jobs = document.get("jobs", {})
@@ -167,6 +294,8 @@ def check(root):
             if event not in triggers or (isinstance(triggers[event], dict)
                                          and any(key in triggers[event] for key in ("paths", "paths-ignore"))):
                 errors.append(f"{workflow}: required checks must run for every {event}")
+    errors.extend(release_boundary_errors(documents))
+    errors.extend(signer_errors(root))
     for path in [*(root / ".github/actions").glob("*/action.yml"), *(root / ".github/actions").glob("*/action.yaml")]:
         for step in read_workflow(path).get("runs", {}).get("steps", []):
             use = step.get("uses", "")

@@ -17,14 +17,24 @@ class FailureToasts extends StatefulWidget {
     required this.listenable,
     required this.failure,
     this.title,
+    this.showInitial = false,
+    this.actionLabel,
+    this.onAction,
     required this.child,
-  });
+  }) : assert((actionLabel == null) == (onAction == null));
 
   final Listenable listenable;
   final String? Function() failure;
 
   /// What failed; defaults to the generic "Action failed".
   final String Function(BuildContext context)? title;
+
+  /// Also shows a failure already reported before this widget appeared.
+  final bool showInitial;
+
+  /// One remedy offered on the toast, such as Retry.
+  final String Function(BuildContext context)? actionLabel;
+  final VoidCallback? onAction;
   final Widget child;
 
   @override
@@ -39,6 +49,10 @@ class _FailureToastsState extends State<FailureToasts> {
     super.initState();
     _shown = widget.failure();
     widget.listenable.addListener(_changed);
+    final initial = _shown;
+    if (widget.showInitial && initial != null) {
+      SchedulerBinding.instance.addPostFrameCallback((_) => _show(initial));
+    }
   }
 
   @override
@@ -76,6 +90,8 @@ class _FailureToastsState extends State<FailureToasts> {
       title: widget.title?.call(context) ?? context.l10n.appActionFailed,
       message: failure,
       tone: AppToastTone.error,
+      actionLabel: widget.actionLabel?.call(context),
+      onAction: widget.onAction,
     );
   }
 

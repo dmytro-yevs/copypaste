@@ -14,7 +14,13 @@ class SmsModuleService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!AndroidSmsAccess.granted(this)) { stopSelf(startId); return START_NOT_STICKY }
-        BackgroundActivityNotification.start(this)
+        try {
+            BackgroundActivityNotification.start(this)
+        } catch (_: RuntimeException) {
+            // Android 12+ refuses a foreground start the system did not allow.
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (monitor == null) monitor = SmsInboxMonitor(applicationContext).also {
             it.start { started -> if (!started) stopSelf(startId) }
         }
@@ -25,10 +31,19 @@ class SmsModuleService : Service() {
     override fun onDestroy() { monitor?.close(); monitor = null; super.onDestroy() }
 
     companion object {
-        fun synchronize(context: Context, handlerState: Int): Boolean {
+        const val SYNCHRONIZED = "ok"
+        const val UNAVAILABLE = "unavailable"
+        const val ACCESS_MISSING = "access_missing"
+        const val SERVICE_REFUSED = "service_refused"
+
+        fun synchronize(context: Context, handlerState: Int): Boolean =
+            synchronizeStatus(context, handlerState) == SYNCHRONIZED
+
+        /** Returns one of the status names above for the Dart side to explain. */
+        fun synchronizeStatus(context: Context, handlerState: Int): String {
             if (handlerState != NativeSmsModules.HANDLER_ENABLED &&
                 handlerState != NativeSmsModules.HANDLER_DISABLED
-            ) return false
+            ) return UNAVAILABLE
             val enabled = handlerState == NativeSmsModules.HANDLER_ENABLED
             SmsInboxMonitor.setEnabled(context, enabled)
             context.packageManager.setComponentEnabledSetting(
@@ -36,12 +51,12 @@ class SmsModuleService : Service() {
                 if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP,
             )
-            if (!enabled) { context.stopService(Intent(context, SmsModuleService::class.java)); return true }
-            if (!AndroidSmsAccess.granted(context)) return false
+            if (!enabled) { context.stopService(Intent(context, SmsModuleService::class.java)); return SYNCHRONIZED }
+            if (!AndroidSmsAccess.granted(context)) return ACCESS_MISSING
             return try {
                 ContextCompat.startForegroundService(context, Intent(context, SmsModuleService::class.java))
-                true
-            } catch (_: RuntimeException) { false }
+                SYNCHRONIZED
+            } catch (_: RuntimeException) { SERVICE_REFUSED }
         }
     }
 }

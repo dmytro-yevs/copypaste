@@ -73,10 +73,12 @@ impl ModuleHost {
         {
             manager.set_sync_services(services)?;
         }
-        self.host
-            .lock()
-            .map_err(|_| ModuleError::State)?
-            .apply(&manager)?;
+        let settings = self.host.lock().map_err(|_| ModuleError::State)?;
+        settings.apply(&manager)?;
+        if let Some(launcher) = &settings.inference_launcher {
+            manager.set_inference_launcher(Arc::clone(launcher));
+        }
+        drop(settings);
         *initialized = Some(Arc::clone(&manager));
         Ok(manager)
     }
@@ -131,11 +133,22 @@ impl ModuleHost {
             Some(crate::semantic_search::SearchBinding { store, changed });
     }
 
+    /// Applied when the registry opens, and at once if it is open. Setting it
+    /// never opens the registry, so a registry failure stays module-scoped.
     pub fn set_inference_launcher(
         &self,
         launcher: Arc<dyn crate::InferenceLauncher>,
     ) -> Result<(), ModuleError> {
-        self.manager()?.set_inference_launcher(launcher);
+        // Same lock order as `manager()`. Kept apart from `configure`, since
+        // replacing the launcher stops a running inference worker.
+        let manager = self.manager.lock().map_err(|_| ModuleError::State)?;
+        self.host
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .inference_launcher = Some(Arc::clone(&launcher));
+        if let Some(manager) = manager.as_ref() {
+            manager.set_inference_launcher(launcher);
+        }
         Ok(())
     }
 
@@ -575,6 +588,7 @@ struct HostSettings {
     services: Option<Arc<dyn ModuleHostServices>>,
     prompt_listener: Option<PromptListener>,
     locale: Option<String>,
+    inference_launcher: Option<Arc<dyn crate::InferenceLauncher>>,
 }
 
 impl HostSettings {
