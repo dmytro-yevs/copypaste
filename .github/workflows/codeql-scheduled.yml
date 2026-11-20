@@ -89,16 +89,10 @@ jobs:
       - name: Build Swift sources for CodeQL
         env:
           DYLD_INSERT_LIBRARIES: ""
-          PERFORMANCE_MEASUREMENT_FILE: ${{ runner.temp }}/flutter-assemble.json
         run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:swift
-      # TEMPORARY: evidence that the analyzed source list is unchanged.
-      - name: List analyzed Swift sources
-        run: |
-          unzip -Z1 "$RUNNER_TEMP/codeql_databases/swift/src.zip" | grep -v '/$' | sort
-          cat "$RUNNER_TEMP/flutter-assemble.json" || true
 
   analyze-cpp:
     permissions:
