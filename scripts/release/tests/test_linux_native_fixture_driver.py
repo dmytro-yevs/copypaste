@@ -153,8 +153,12 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         for error in (None, RuntimeError("seed failed")):
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                app = mock.Mock(pid=4242, returncode=0)
+                app = mock.Mock(pid=4242, returncode=None)
                 app.poll.return_value = None
+                app.wait.side_effect = lambda timeout: setattr(app, "returncode", 0)
+                process = root / "proc/4242"
+                process.mkdir(parents=True)
+                (process / "status").write_text("Name:\tcopypaste\nVmSize:\t1 kB\nCoreDumping:\t0\n", encoding="utf-8")
                 arguments = [
                     "driver", "--artifacts", str(root), "--version", "1.0.26",
                     "--architecture", "x86_64", "--desktop", "GNOME", "--session", "x11",
@@ -166,6 +170,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 ]
                 with mock.patch.object(driver.sys, "argv", arguments), \
                      mock.patch.dict(driver.os.environ, {"XDG_RUNTIME_DIR": str(root)}), \
+                     mock.patch.object(driver, "PROC_ROOT", root / "proc"), \
                      mock.patch.object(driver, "runtime_prefix", return_value=root), \
                      mock.patch.object(driver, "runtime_gui_entrypoint", return_value=root / "gui"), \
                      mock.patch.object(driver, "start_gui_runtime", return_value=(app, root / "socket")), \
@@ -186,22 +191,43 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                     "packaged GUI pid 4242 was still running when the scenario failed\n" if error else "",
                 )
 
-    def test_scenario_failure_reports_how_the_gui_ended_and_keeps_its_output(self):
+    def test_scenario_failure_reports_the_gui_state_seen_before_the_driver_stops_it(self):
         capability = "c" * 64
-        for already_ended, returncode, expected in (
-            (True, -signal.SIGSEGV, "had already ended with signal SIGSEGV when the scenario failed"),
-            (False, -signal.SIGSEGV, "ended with signal SIGSEGV as the scenario failed"),
-            (True, 3, "had already ended with exit status 3 when the scenario failed"),
-            (False, -signal.SIGKILL, "was still running when the scenario failed"),
+        alive = "Name:\tcopypaste\nVmSize:\t1 kB\nCoreDumping:\t0\nThreads:\t38\n"
+        crashed = -signal.SIGSEGV
+        # (status the driver holds, poll result, procfs status, status after the stop, expected)
+        for held, polled, procfs, stopped, expected in (
+            (crashed, None, None, crashed,
+             "had already been stopped by the driver when the scenario failed (ended with signal SIGSEGV)"),
+            (None, crashed, None, crashed, "had ended on its own with signal SIGSEGV before the scenario failed"),
+            (None, None, alive.replace("CoreDumping:\t0", "CoreDumping:\t1"), crashed,
+             "was already terminating when the scenario failed and ended with signal SIGSEGV"),
+            (None, None, "Name:\tcopypaste\nThreads:\t1\n", 3,
+             "was already terminating when the scenario failed and ended with exit status 3"),
+            (None, None, alive, crashed,
+             "was still running when the scenario failed; stopping it ended with signal SIGSEGV"),
+            (None, None, None, 0,
+             "could not be inspected when the scenario failed; after the driver's SIGTERM it ended with exit status 0"),
         ):
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
+                app = SimpleNamespace(pid=7, returncode=held)
+
+                def poll():
+                    app.returncode = polled if app.returncode is None else app.returncode
+                    return app.returncode
+
+                app.poll = poll
+                if procfs is not None:
+                    (root / "proc/7").mkdir(parents=True)
+                    (root / "proc/7/status").write_text(procfs, encoding="utf-8")
                 environment = {"TMPDIR": str(root), "COPYPASTE_QUALIFICATION_CAPABILITY": capability}
                 driver.gui_log_path(environment).write_text(f"native output {capability}\n", encoding="utf-8")
-                with contextlib.redirect_stderr(io.StringIO()) as stderr:
-                    driver.report_gui_failure(
-                        SimpleNamespace(pid=7, returncode=returncode), already_ended, environment, root,
-                    )
+                with mock.patch.object(driver, "PROC_ROOT", root / "proc"), \
+                     contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    state = driver.gui_state_before_stop(app)
+                    app.returncode = stopped
+                    driver.report_gui_failure(app, state, environment, root)
                 self.assertEqual(stderr.getvalue(), f"packaged GUI pid 7 {expected}\n")
                 self.assertEqual(
                     (root / "gui-failure-output.log").read_text(encoding="utf-8"), "native output [redacted]\n",

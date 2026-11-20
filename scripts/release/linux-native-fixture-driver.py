@@ -821,19 +821,43 @@ def gui_exit_description(returncode):
         return f"signal {-returncode}"
 
 
-def report_gui_failure(app, already_ended, environment, evidence_dir):
+def gui_state_before_stop(app):
+    """Classify the packaged GUI before the driver signals it."""
+    if app.returncode is not None:
+        # Only stop_gui collects an exit status before this point.
+        return "stopped"
+    if app.poll() is not None:
+        return "ended"
+    try:
+        status = (PROC_ROOT / str(app.pid) / "status").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "unknown"
+    # A fatal signal first dumps core and then releases the address space; the
+    # parent can collect the exit status only after both.
+    if "\nCoreDumping:\t1\n" in status or "\nVmSize:" not in status:
+        return "terminating"
+    return "running"
+
+
+def report_gui_failure(app, state_before_stop, environment, evidence_dir):
     """Say how the packaged GUI ended when a scenario fails, and keep its output.
 
     A GUI that crashed is otherwise visible only as a later assertion that
-    could not reach it, which reads as a failure of that assertion.
+    could not reach it, which reads as a failure of that assertion. The state
+    is taken before the driver's own SIGTERM, because the GUI can also fault
+    while it exits and would then end with the same signal as a crash.
     """
-    returncode = app.returncode
-    if already_ended:
-        state = f"had already ended with {gui_exit_description(returncode)} when the scenario failed"
-    elif returncode < 0 and -returncode not in (signal.SIGTERM, signal.SIGKILL):
-        # A crash is still being dumped when the scenario first notices it, so
-        # the stop that follows is the first to see the fatal signal.
-        state = f"ended with {gui_exit_description(returncode)} as the scenario failed"
+    ended = gui_exit_description(app.returncode)
+    if state_before_stop == "stopped":
+        state = f"had already been stopped by the driver when the scenario failed (ended with {ended})"
+    elif state_before_stop == "ended":
+        state = f"had ended on its own with {ended} before the scenario failed"
+    elif state_before_stop == "terminating":
+        state = f"was already terminating when the scenario failed and ended with {ended}"
+    elif state_before_stop == "unknown":
+        state = f"could not be inspected when the scenario failed; after the driver's SIGTERM it ended with {ended}"
+    elif app.returncode < 0 and -app.returncode not in (signal.SIGTERM, signal.SIGKILL):
+        state = f"was still running when the scenario failed; stopping it ended with {ended}"
     else:
         state = "was still running when the scenario failed"
     print(f"packaged GUI pid {app.pid} {state}", file=sys.stderr)
@@ -1929,7 +1953,7 @@ def main():
             scenario_failed = True
             raise
         finally:
-            already_ended = app.poll() is not None
+            state_before_stop = gui_state_before_stop(app) if scenario_failed else None
             app.terminate()
             try:
                 app.wait(timeout=5)
@@ -1937,7 +1961,7 @@ def main():
                 app.kill()
                 app.wait(timeout=5)
             if scenario_failed:
-                report_gui_failure(app, already_ended, environment, args.evidence_dir)
+                report_gui_failure(app, state_before_stop, environment, args.evidence_dir)
 
 
 if __name__ == "__main__":
