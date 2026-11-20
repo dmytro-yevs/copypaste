@@ -796,10 +796,72 @@ def stop_gui(app, environment, evidence_dir):
         app.wait(timeout=5)
     report = Path(evidence_dir) / "gui-exit-diagnostics.txt"
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    log = gui_log_path(environment)
-    if log.is_file():
-        (Path(evidence_dir) / "gui-exit-output.log").write_bytes(log.read_bytes()[-262144:])
+    retain_gui_output(environment, evidence_dir, "gui-exit-output.log")
     raise RuntimeError(f"packaged GUI did not exit within 5 seconds of SIGTERM; see {report}")
+
+
+def retain_gui_output(environment, evidence_dir, name):
+    """Keep the end of the packaged GUI's own output with the evidence."""
+    log = gui_log_path(environment)
+    if not log.is_file():
+        return
+    output = log.read_bytes()[-262144:]
+    capability = environment.get("COPYPASTE_QUALIFICATION_CAPABILITY")
+    if capability:
+        output = output.replace(capability.encode("utf-8"), b"[redacted]")
+    (Path(evidence_dir) / name).write_bytes(output)
+
+
+def gui_exit_description(returncode):
+    if returncode >= 0:
+        return f"exit status {returncode}"
+    try:
+        return f"signal {signal.Signals(-returncode).name}"
+    except ValueError:
+        return f"signal {-returncode}"
+
+
+def gui_state_before_stop(app):
+    """Classify the packaged GUI before the driver signals it."""
+    if app.returncode is not None:
+        # Only stop_gui collects an exit status before this point.
+        return "stopped"
+    if app.poll() is not None:
+        return "ended"
+    try:
+        status = (PROC_ROOT / str(app.pid) / "status").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "unknown"
+    # A fatal signal first dumps core and then releases the address space; the
+    # parent can collect the exit status only after both.
+    if "\nCoreDumping:\t1\n" in status or "\nVmSize:" not in status:
+        return "terminating"
+    return "running"
+
+
+def report_gui_failure(app, state_before_stop, environment, evidence_dir):
+    """Say how the packaged GUI ended when a scenario fails, and keep its output.
+
+    A GUI that crashed is otherwise visible only as a later assertion that
+    could not reach it, which reads as a failure of that assertion. The state
+    is taken before the driver's own SIGTERM, because the GUI can also fault
+    while it exits and would then end with the same signal as a crash.
+    """
+    ended = gui_exit_description(app.returncode)
+    if state_before_stop == "stopped":
+        state = f"had already been stopped by the driver when the scenario failed (ended with {ended})"
+    elif state_before_stop == "ended":
+        state = f"had ended on its own with {ended} before the scenario failed"
+    elif state_before_stop == "terminating":
+        state = f"was already terminating when the scenario failed and ended with {ended}"
+    elif state_before_stop == "unknown":
+        state = f"could not be inspected when the scenario failed; after the driver's SIGTERM it ended with {ended}"
+    elif app.returncode < 0 and -app.returncode not in (signal.SIGTERM, signal.SIGKILL):
+        state = f"was still running when the scenario failed; stopping it ended with {ended}"
+    else:
+        state = "was still running when the scenario failed"
+    print(f"packaged GUI pid {app.pid} {state}", file=sys.stderr)
+    retain_gui_output(environment, evidence_dir, "gui-failure-output.log")
 
 
 @contextmanager
@@ -1739,6 +1801,7 @@ def main():
         app, runtime_socket = start_gui_runtime(
             gui_entrypoint, environment, socket_dirs, runtime_sockets(socket_dirs),
         )
+        scenario_failed = False
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
             cli = prefix / "copypaste-cli"
@@ -1886,13 +1949,19 @@ def main():
             require_external_file_drag(cli, cli_environment, workspace, app.pid, args.session)
             require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
             emit_runtime(args.runtime_format, prefix)
+        except BaseException:
+            scenario_failed = True
+            raise
         finally:
+            state_before_stop = gui_state_before_stop(app) if scenario_failed else None
             app.terminate()
             try:
                 app.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 app.kill()
                 app.wait(timeout=5)
+            if scenario_failed:
+                report_gui_failure(app, state_before_stop, environment, args.evidence_dir)
 
 
 if __name__ == "__main__":

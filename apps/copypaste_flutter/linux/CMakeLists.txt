@@ -55,6 +55,7 @@ set_target_properties(${BINARY_NAME}
 # building its optional desktop backend would add an unused system JVM.
 set(CMAKE_DISABLE_FIND_PACKAGE_JNI TRUE)
 include(flutter/generated_plugins.cmake)
+include(cmake/native_tray_menu_items.cmake)
 
 set(BUILD_BUNDLE_DIR "${PROJECT_BINARY_DIR}/bundle")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
