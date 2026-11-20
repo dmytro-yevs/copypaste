@@ -266,7 +266,7 @@ mod tests {
         transport::TransportFault,
     };
     use copypaste_p2p::{DeviceProfile, Node, PeerStore};
-    use copypaste_sync::{space::SpaceRecovery, Applied, LocalItem};
+    use copypaste_sync::{space::SpaceRecovery, Applied, LocalItem, PullCursor};
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
@@ -279,14 +279,21 @@ mod tests {
         envelope_reads: Arc<std::sync::atomic::AtomicUsize>,
     }
     impl RestApi for Backend {
-        async fn fetch_since(
+        async fn list_since(
             &self,
             token: &str,
-            since: i64,
+            position: i64,
             after: Option<&str>,
             limit: u32,
+        ) -> Result<Vec<crate::rest::RowListing>, TransportFault> {
+            self.items.list_since(token, position, after, limit).await
+        }
+        async fn fetch_rows(
+            &self,
+            token: &str,
+            ids: &[String],
         ) -> Result<crate::rest::RowPage, TransportFault> {
-            self.items.fetch_since(token, since, after, limit).await
+            self.items.fetch_rows(token, ids).await
         }
         async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
             self.items.upsert(token, items).await
@@ -400,7 +407,7 @@ mod tests {
         node: Node,
         id: String,
         items: Mutex<BTreeMap<String, LocalItem>>,
-        watermark: Mutex<(i64, Option<String>)>,
+        cursor: Mutex<PullCursor>,
     }
     fn convert<T: serde::Serialize, U: serde::de::DeserializeOwned>(value: &T) -> U {
         serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap()
@@ -423,7 +430,7 @@ mod tests {
                 node,
                 id: id.into(),
                 items: Mutex::default(),
-                watermark: Mutex::new((0, None)),
+                cursor: Mutex::default(),
             }
         }
         fn copy(&self, id: &str, at: i64, text: &str) {
@@ -550,18 +557,11 @@ mod tests {
                 .insert(incoming.item_id.clone(), incoming);
             Ok(Applied::Merged)
         }
-        fn watermark(&self) -> Result<i64, SyncError> {
-            Ok(self.watermark.lock().unwrap().0)
+        fn pull_cursor(&self) -> Result<PullCursor, SyncError> {
+            Ok(self.cursor.lock().unwrap().clone())
         }
-        fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-            Ok(self.watermark.lock().unwrap().1.clone())
-        }
-        fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-            *self.watermark.lock().unwrap() = (ms, None);
-            Ok(())
-        }
-        fn set_watermark_keyset(&self, ms: i64, id: &str) -> Result<(), SyncError> {
-            *self.watermark.lock().unwrap() = (ms, Some(id.into()));
+        fn set_pull_cursor(&self, cursor: &PullCursor) -> Result<(), SyncError> {
+            *self.cursor.lock().unwrap() = cursor.clone();
             Ok(())
         }
     }
@@ -585,6 +585,35 @@ mod tests {
             .unwrap()
             .pairing_id
             .clone()
+    }
+
+    #[tokio::test]
+    async fn a_forged_epoch_with_a_forged_envelope_does_not_stall_the_rows_behind_it() {
+        // Whoever can write the account's rows can also write an envelope for
+        // any recipient and epoch: neither is a reason to wait.
+        let backend = Backend::default();
+        let device = Device::new("mac");
+        let (nonce, ciphertext) = crate::crypto::encrypt_row(b"forged", &key(), "forged").unwrap();
+        let mut forged =
+            CloudItem::from_sealed_b64("forged", ciphertext, nonce, "text", 1_000, "ghost");
+        forged.sign_epoch(&key(), 999);
+        backend.items.write(vec![forged]);
+        backend.items.write(vec![crate::sync::fakes::cloud_row(
+            "real", 2_000, "genuine",
+        )]);
+        backend.envelopes.lock().unwrap().push(SpaceEnvelope {
+            epoch: 999,
+            sender: "ghost".into(),
+            recipient: "mac".into(),
+            nonce: "0".repeat(48),
+            ciphertext: "forged".into(),
+        });
+
+        let stats = driver(&backend).sync(&device).await.unwrap();
+
+        assert_eq!(stats.applied, 1);
+        assert_eq!(device.text("real").as_deref(), Some("genuine"));
+        assert_eq!(device.text("forged"), None);
     }
 
     #[tokio::test]
@@ -676,12 +705,7 @@ mod tests {
                 "windows",
             );
             row.sign_epoch(&key(), 0);
-            backend
-                .items
-                .rows
-                .lock()
-                .unwrap()
-                .insert("forged".into(), row);
+            backend.items.write(vec![row]);
         }
         da.sync(&a).await.unwrap();
         db.sync(&b).await.unwrap();

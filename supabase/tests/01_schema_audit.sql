@@ -105,14 +105,23 @@ begin
         raise exception 'the unique index on (user_id, item_id) is missing: the upsert conflict target will not resolve';
     end if;
 
-    -- The cursor's index. `fetch_since` filters `created_at=gte.…` under an
-    -- RLS-supplied `user_id` and orders `created_at.asc,item_id.asc`.
+    -- The cursor's index. `fetch_since` filters `updated_at=gte.…` under an
+    -- RLS-supplied `user_id` and orders `updated_at.asc,item_id.asc`.
+    if not exists (
+        select 1 from pg_indexes
+         where schemaname = 'public' and tablename = 'clipboard_items'
+           and indexdef ilike '%(user_id, updated_at, item_id)'
+    ) then
+        raise exception 'the (user_id, updated_at, item_id) index is missing: every pull sorts the account';
+    end if;
+
+    -- The same for clients that still page on the device's stamp.
     if not exists (
         select 1 from pg_indexes
          where schemaname = 'public' and tablename = 'clipboard_items'
            and indexdef ilike '%(user_id, created_at, item_id)'
     ) then
-        raise exception 'the (user_id, created_at, item_id) index is missing: every pull becomes a sequential scan';
+        raise exception 'the (user_id, created_at, item_id) index is missing: every pull of an older client becomes a sequential scan';
     end if;
 end
 $$;

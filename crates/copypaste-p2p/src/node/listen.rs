@@ -15,7 +15,7 @@ use tracing::{debug, info, warn};
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
 use super::probe::{respond as respond_to_probe, AuthenticatedReachability};
 use super::Node;
-use crate::protocol::SyncMessage;
+use crate::protocol::{SyncMessage, VersionRange};
 use crate::sync::{run_responder_from_first, SyncChannel, SyncOutcome, SyncSource};
 use crate::transport::{Conn, Session};
 
@@ -257,11 +257,13 @@ async fn serve_peer<S, F, P>(
     }
     if let SyncMessage::Probe {
         protocol_version,
+        max_protocol_version,
         nonce,
         profile,
     } = first
     {
-        let result = respond_to_probe(&mut channel, protocol_version, nonce).await;
+        let peer_versions = VersionRange::from_wire(protocol_version, max_protocol_version);
+        let result = respond_to_probe(&mut channel, peer_versions, nonce).await;
         channel.close().await;
         match result {
             Ok(()) => {

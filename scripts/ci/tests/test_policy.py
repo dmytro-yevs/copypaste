@@ -8,7 +8,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from changes import select, verify_results
-from policy import check, dependencies, queue_errors, validate
+from policy import (DEFAULT_BRANCH_DISPATCH, RELEASE_ENVIRONMENT, RELEASE_REF_DISPATCH, UPDATER_SIGNER, check,
+                    dependencies, queue_errors, release_boundary_errors, signer_errors, validate)
+from workflow_yaml import read_workflow
 
 
 class PolicyTest(unittest.TestCase):
@@ -98,10 +100,10 @@ class PolicyTest(unittest.TestCase):
             (root / "config").mkdir()
             (root / "config/ci-policy.json").write_text(json.dumps({"schema": 1, "required_jobs": {}}))
             caller = {"name": "CI", "on": {"pull_request": None, "merge_group": None}, "permissions": {"contents": "read"},
-                      "jobs": {"call": {"uses": "./.github/workflows/reusable.yaml", "permissions": {"contents": "write", "actions": "write"}}}}
+                      "jobs": {"call": {"uses": "./.github/workflows/reusable.yaml", "permissions": {"actions": "write"}}}}
             child = {"name": "Reusable", "on": {"workflow_call": None}, "permissions": {"contents": "read"},
                      "jobs": {"publish": {"runs-on": "ubuntu-24.04", "timeout-minutes": 5,
-                                          "permissions": {"contents": "write", "actions": "write"}, "steps": [{"run": "echo fixture"}]}}}
+                                          "permissions": {"actions": "write"}, "steps": [{"run": "echo fixture"}]}}}
             static = deepcopy(self.document)
             static["name"] = "Policy"
             static["on"]["merge_group"] = None
@@ -142,6 +144,15 @@ class PolicyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_results(needs, True, True, compositor=False)
 
+    def test_signer_exercise_is_required_exactly_when_the_signer_changes(self):
+        for path in ("scripts/release/updater-signer/package-lock.json", "scripts/release/sign-update-artifact.sh"):
+            self.assertTrue(select([path])["signer"], path)
+        self.assertFalse(select(["scripts/release/publish-release.py"])["signer"])
+        needs = {"changes": {"result": "success"}, "updater-signer": {"result": "skipped"}}
+        verify_results(needs, True, False, signer=False)
+        with self.assertRaises(ValueError):
+            verify_results(needs, True, False, signer=True)
+
     def test_aggregate_rejects_failed_or_skipped_required_jobs(self):
         needs = {"changes": {"result": "success"}, "rust": {"result": "success"}}
         verify_results(needs, True, False)
@@ -151,6 +162,94 @@ class PolicyTest(unittest.TestCase):
                 verify_results(needs, True, False)
         needs["rust"]["result"] = "skipped"
         verify_results(needs, False, False)
+
+
+class ReleaseBoundaryTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(__file__).resolve().parents[3]
+        self.documents = {path.name: read_workflow(path)
+                          for path in sorted((self.root / ".github/workflows").glob("*.yml"))}
+
+    def rejected(self, workflow, job, change):
+        documents = deepcopy(self.documents)
+        change(documents[workflow]["jobs"][job])
+        return [error for error in release_boundary_errors(documents) if error.startswith(f"{workflow}: {job} ")]
+
+    def test_repository_workflows_stay_inside_the_boundary(self):
+        self.assertEqual(release_boundary_errors(self.documents), [])
+        self.assertEqual(signer_errors(self.root), [])
+        self.assertEqual(self.documents["release.yml"]["jobs"]["publish"]["environment"], RELEASE_ENVIRONMENT)
+        # Recovery and exact-source staging run from the release tag; the live catalog never does.
+        self.assertEqual(self.documents["release.yml"]["jobs"]["preflight"]["if"], RELEASE_REF_DISPATCH)
+        self.assertEqual(self.documents["module-marketplace.yml"]["jobs"]["publish"]["if"], DEFAULT_BRANCH_DISPATCH)
+
+    def test_pull_request_runs_receive_no_secret(self):
+        key = "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+        for change in (lambda job: job.update(secrets={"TAURI_SIGNING_PRIVATE_KEY": key}),
+                       lambda job: job.update(secrets="inherit")):
+            self.assertTrue(self.rejected("ci.yml", "compositor-runtime-producer", change))
+        self.assertTrue(self.rejected("ci.yml", "changes", lambda job: job["steps"][-1]["env"].update(KEY=key)))
+        # The producer that pull requests call holds no secret on any path.
+        self.assertTrue(self.rejected("compositor-runtime.yml", "build", lambda job: job.update(env={"KEY": key})))
+
+    def test_pull_request_reachable_calls_cannot_inherit_secrets(self):
+        documents = deepcopy(self.documents)
+        documents["compositor-runtime.yml"]["jobs"]["nested"] = {
+            "uses": "./.github/workflows/secret-scan.yml", "secrets": "inherit"}
+        self.assertIn("compositor-runtime.yml: nested would hand release secrets to pull-request code",
+                      release_boundary_errors(documents))
+
+    def test_workflow_level_env_cannot_carry_a_secret(self):
+        documents = deepcopy(self.documents)
+        documents["release.yml"]["env"] = {"KEY": "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"}
+        self.assertEqual(release_boundary_errors(documents),
+                         ["release.yml: workflow-level env would hand a secret to every job"])
+
+    def test_signing_and_publishing_need_the_environment_and_a_trusted_dispatch_ref(self):
+        for workflow, job in (("release.yml", "macos"), ("release.yml", "publish"),
+                              ("provider-module.yml", "desktop"), ("module-marketplace.yml", "publish")):
+            with self.subTest(workflow=workflow, job=job):
+                self.assertTrue(self.rejected(workflow, job, lambda job: job.pop("environment")))
+        documents = deepcopy(self.documents)
+        del documents["release.yml"]["jobs"]["preflight"]["if"]
+        exposed = {error.split(" ")[1] for error in release_boundary_errors(documents) if "manual run" in error}
+        self.assertLessEqual({"preflight", "macos", "qualification-ocr", "compositor-runtime-public", "publish"},
+                             exposed)
+        # Neither a status function nor an alternative may let a publisher outlive the refusal.
+        self.assertTrue(self.rejected("release.yml", "publish", lambda job: job.update({"if": "${{ always() }}"})))
+        self.assertTrue(self.rejected("module-marketplace.yml", "publish", lambda job: job.update(
+            {"if": DEFAULT_BRANCH_DISPATCH + " || inputs.module_release_tag != ''"})))
+        # Only v* release tags join the default branch, and never for the live catalog.
+        for workflow, job, condition in (
+                ("release.yml", "preflight", DEFAULT_BRANCH_DISPATCH + " || startsWith(github.ref, 'refs/tags/')"),
+                ("release.yml", "preflight", DEFAULT_BRANCH_DISPATCH + " || startsWith(github.ref, 'refs/heads/')"),
+                ("module-marketplace.yml", "publish", RELEASE_REF_DISPATCH)):
+            with self.subTest(workflow=workflow, condition=condition):
+                self.assertTrue(self.rejected(workflow, job, lambda job: job.update({"if": condition})))
+
+    def test_updater_signer_comes_only_from_the_integrity_pinned_lockfile(self):
+        script = "scripts/release/sign-update-artifact.sh"
+        manifest, lock = UPDATER_SIGNER + "/package.json", UPDATER_SIGNER + "/package-lock.json"
+
+        def locked(change):
+            def apply(text):
+                data = json.loads(text)
+                change(next(entry for name, entry in data["packages"].items() if name))
+                return json.dumps(data)
+            return apply
+
+        for name, change in ((script, lambda text: text.replace("npm ci --ignore-scripts", "npm ci")),
+                             (script, lambda text: text + "npx --yes @tauri-apps/cli signer sign\n"),
+                             (manifest, lambda text: text.replace('"2.', '"^2.')),
+                             (lock, locked(lambda entry: entry.pop("integrity"))),
+                             (lock, locked(lambda entry: entry.update(hasInstallScript=True)))):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for path in (script, manifest, lock):
+                    text = (self.root / path).read_text(encoding="utf-8")
+                    (root / path).parent.mkdir(parents=True, exist_ok=True)
+                    (root / path).write_text(change(text) if path == name else text, encoding="utf-8")
+                self.assertTrue(signer_errors(root))
 
 
 if __name__ == "__main__":

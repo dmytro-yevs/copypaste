@@ -209,11 +209,7 @@ mod tests {
         // The seeded row applies on the first sync, so drift only starts after
         // it; force some drift, then deliver a change.
         let drifted = sync.poll_interval();
-        sync.rest
-            .rows
-            .lock()
-            .unwrap()
-            .insert("b".into(), cloud_row("b", 9_000, "new"));
+        sync.rest.write(vec![cloud_row("b", 9_000, "new")]);
 
         let stats = sync.sync(&source).await.unwrap();
         assert!(stats.changed());

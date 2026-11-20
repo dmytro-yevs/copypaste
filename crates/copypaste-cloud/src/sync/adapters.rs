@@ -109,14 +109,24 @@ impl RestApi for crate::rest::SupabaseRest {
             .await
             .map_err(classify_rest)
     }
-    async fn fetch_since(
+    async fn list_since(
         &self,
         token: &str,
-        since_ms: i64,
+        position: i64,
         after_item_id: Option<&str>,
         limit: u32,
+    ) -> Result<Vec<crate::rest::RowListing>, TransportFault> {
+        crate::rest::SupabaseRest::list_since(self, token, position, after_item_id, limit)
+            .await
+            .map_err(classify_rest)
+    }
+
+    async fn fetch_rows(
+        &self,
+        token: &str,
+        item_ids: &[String],
     ) -> Result<crate::rest::RowPage, TransportFault> {
-        crate::rest::SupabaseRest::fetch_since(self, token, since_ms, after_item_id, limit)
+        crate::rest::SupabaseRest::fetch_rows(self, token, item_ids)
             .await
             .map_err(classify_rest)
     }

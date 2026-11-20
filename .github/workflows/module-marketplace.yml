@@ -18,6 +18,9 @@ permissions:
 
 jobs:
   publish:
+    # The live catalog is signed and replaced only by the default branch's publisher.
+    if: github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    environment: release
     permissions:
       contents: write
     runs-on: ubuntu-24.04

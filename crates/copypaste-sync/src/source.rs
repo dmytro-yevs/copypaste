@@ -59,6 +59,25 @@ pub enum Applied {
     Declined(LocalItem),
 }
 
+/// Where the download has reached, in the order the backend assigns.
+///
+/// Positions are the backend's own clock in microseconds, never a device's:
+/// a row written late, or by a device whose clock is wrong, is still placed
+/// after every row the backend accepted before it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PullCursor {
+    /// Position of the last row passed.
+    pub position: i64,
+    /// The tie-break within `position`.
+    pub item_id: Option<String>,
+    /// The account whose rows were counted. Another account's cursor says
+    /// nothing about this one's rows.
+    pub account: String,
+    /// Epoch of the key the rows behind the cursor were read with. Rows of a
+    /// later epoch were passed unread, so a later key starts over.
+    pub epoch: u64,
+}
+
 /// The daemon's history, as this driver needs to see it.
 ///
 /// Implementations live over the store. The driver never touches SQLite, and
@@ -163,23 +182,18 @@ pub trait CloudSource: Send + Sync {
             .collect()
     }
 
-    /// The reconciliation cursor, in Unix milliseconds. Zero on a first run.
+    /// The download cursor. The default value on a first run.
     ///
     /// # Errors
     ///
     /// [`SyncError::Source`] for a store failure.
-    fn watermark(&self) -> Result<i64, SyncError>;
+    fn pull_cursor(&self) -> Result<PullCursor, SyncError>;
 
-    /// The persisted item-id half of the download keyset. Timestamp-only
-    /// sources replay the inclusive boundary; current hosts persist both halves.
-    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        Ok(None)
-    }
-
-    /// Upload progress is independent from the download watermark. Advance it
+    /// Upload progress is independent from the download cursor. Advance it
     /// after a complete round to its start time; late peer writes lower it.
+    /// A source that keeps none re-offers everything, which upserts absorb.
     fn upload_floor(&self) -> Result<i64, SyncError> {
-        self.watermark()
+        Ok(0)
     }
 
     /// The tie-break half of [`upload_floor`](Self::upload_floor).
@@ -194,32 +208,16 @@ pub trait CloudSource: Send + Sync {
         Ok(false)
     }
 
-    /// Persist the cursor.
+    /// Persist the download cursor, all of it in one write.
     ///
     /// Must be stored independently of the item rows so that pruning history to
-    /// a storage cap cannot move it backwards (INV-N5), and should be written
-    /// in the same transaction as the rows it covers so that a crash cannot
-    /// lose it. Losing it costs re-pagination, not data.
+    /// a storage cap cannot move it backwards (INV-N5). Losing it costs
+    /// re-pagination, not data.
     ///
     /// # Errors
     ///
     /// [`SyncError::Source`] for a store failure.
-    fn set_watermark(&self, ms: i64) -> Result<(), SyncError>;
-
-    /// Persist both halves of the cursor.
-    ///
-    /// `item_id` is the last row covered by `ms`. The default drops it, which
-    /// is the millisecond-only cursor described on
-    /// [`CloudSource::watermark_item_id`]; a source that overrides one of the
-    /// two should override both, or the halves disagree.
-    ///
-    /// # Errors
-    ///
-    /// [`SyncError::Source`] for a store failure.
-    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
-        let _ = item_id;
-        self.set_watermark(ms)
-    }
+    fn set_pull_cursor(&self, cursor: &PullCursor) -> Result<(), SyncError>;
 }
 
 mod payload {

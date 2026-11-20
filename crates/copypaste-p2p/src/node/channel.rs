@@ -189,6 +189,7 @@ mod tests {
         let (mut a, mut b) = pair().await;
         a.send(SyncMessage::Hello {
             protocol_version: crate::PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "device-a".into(),
             device_name: "A".into(),
             profile: None,

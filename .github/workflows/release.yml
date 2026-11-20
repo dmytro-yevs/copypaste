@@ -67,6 +67,10 @@ permissions:
 
 jobs:
   preflight:
+    # Every signing and publishing job needs this one, so skipping it refuses
+    # a manual run of any ref other than the default branch or a v* release tag.
+    if: github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -375,6 +379,7 @@ jobs:
   macos:
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
+    environment: release
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -461,6 +466,7 @@ jobs:
   android:
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -548,6 +554,7 @@ jobs:
   windows:
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
+    environment: release
     runs-on: windows-2022
     timeout-minutes: 60
     env:
@@ -696,6 +703,7 @@ jobs:
     name: Linux build (${{ matrix.architecture }})
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
+    environment: release
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -793,9 +801,6 @@ jobs:
       version: ${{ needs.preflight.outputs.version }}
       source_run_id: ${{ github.run_id }}
       commit: ${{ needs.preflight.outputs.release_commit }}
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   compositor-runtime-external:
     name: Verify staged compositor runtime companions
@@ -826,6 +831,7 @@ jobs:
     name: Sign and bind opt-in compositor runtime companions
     needs: [preflight, policy, compositor-runtime-build, compositor-runtime-external]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -1069,6 +1075,7 @@ jobs:
       queue: max
     needs: [preflight, qualify]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

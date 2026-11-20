@@ -82,7 +82,9 @@ pub use error::AuthError;
 pub use http::transient_backoff;
 pub use session::{Session, REFRESH_MARGIN_MS};
 
-// `rest` reads the clock and the `Retry-After` header through the same two
-// functions the auth client uses; `redact_email` stays module-private because
-// only the auth calls take an email at all.
-pub(crate) use http::{now_ms, retry_after_secs};
+// `rest` reads the `Retry-After` header through the same function the auth
+// client uses; `redact_email` stays module-private because only the auth calls
+// take an email at all. Outside this module only tests read the clock.
+#[cfg(test)]
+pub(crate) use http::now_ms;
+pub(crate) use http::retry_after_secs;

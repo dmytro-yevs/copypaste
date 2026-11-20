@@ -110,6 +110,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     deleted: false,
                     origin_device_id: origin,
                     signature: String::new(),
+                    position: None,
                 },
             ));
         }
@@ -117,6 +118,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         for batch in rows.chunks(UPLOAD_BATCH) {
             self.execute(|token| async move { self.rest.upsert(&token, batch).await })
                 .await?;
+            self.note_uploaded(batch);
         }
 
         Ok(stats)
@@ -421,7 +423,7 @@ mod tests {
         let sync = driver(FakeRest::default(), FakeAuth::default());
 
         sync.push(&source).await.unwrap();
-        assert_eq!(source.watermark().unwrap(), 0);
+        assert_eq!(source.pull_cursor().unwrap(), Default::default());
     }
 
     /// The upload floor is what push offers from, so a download watermark that
@@ -430,7 +432,12 @@ mod tests {
     async fn push_offers_from_the_upload_floor_not_the_watermark() {
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "written here")]);
         // Another device's rows dragged the download cursor past ours.
-        source.set_watermark(9_000).unwrap();
+        source
+            .set_pull_cursor(&crate::sync::PullCursor {
+                position: 9_000,
+                ..Default::default()
+            })
+            .unwrap();
 
         let sync = driver(FakeRest::default(), FakeAuth::default());
         let stats = sync.push(&source).await.unwrap();

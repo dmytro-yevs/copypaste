@@ -8,7 +8,7 @@ use copypaste_sync::{
         SpaceEnvelope, SpaceKey, SpaceKeyReply, SpaceNotice, SpaceNoticeReply, SpaceRecovery,
         SpaceRecoveryReply,
     },
-    Applied, CloudSource, LocalItem, SyncError,
+    Applied, CloudSource, LocalItem, PullCursor, SyncError,
 };
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
@@ -251,18 +251,36 @@ impl CloudSource for HostStore {
         }
         Ok(result)
     }
-    fn watermark(&self) -> Result<i64, SyncError> {
-        self.stamp(CloudStateKey::WatermarkMs)
+    fn pull_cursor(&self) -> Result<PullCursor, SyncError> {
+        let keys = [
+            CloudStateKey::PullPosition,
+            CloudStateKey::PullItemId,
+            CloudStateKey::PullAccount,
+            CloudStateKey::PullEpoch,
+        ]
+        .map(CloudStateKey::as_str);
+        let mut values: BTreeMap<String, Option<String>> = self
+            .0
+            .request(&SyncHostRequest::ReadState {
+                keys: keys.map(str::to_owned).to_vec(),
+            })
+            .map_err(source_error)?;
+        let mut value = |key: &str| values.remove(key).flatten().filter(|v| !v.is_empty());
+        Ok(PullCursor {
+            position: value(keys[0])
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0)
+                .max(0),
+            item_id: value(keys[1]),
+            account: value(keys[2]).unwrap_or_default(),
+            epoch: value(keys[3]).and_then(|v| v.parse().ok()).unwrap_or(0),
+        })
     }
     fn upload_floor(&self) -> Result<i64, SyncError> {
         self.stamp(CloudStateKey::UploadFloorMs)
     }
     fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
         self.state(CloudStateKey::UploadFloorItemId.as_str())
-            .map_err(source_error)
-    }
-    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        self.state(CloudStateKey::WatermarkItemId.as_str())
             .map_err(source_error)
     }
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
@@ -272,13 +290,18 @@ impl CloudSource for HostStore {
             })
             .map_err(source_error)
     }
-    fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-        self.set_watermark_keyset(ms, "")
-    }
-    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
+    fn set_pull_cursor(&self, cursor: &PullCursor) -> Result<(), SyncError> {
         self.set_state_all(&[
-            (CloudStateKey::WatermarkMs.as_str(), &ms.to_string()),
-            (CloudStateKey::WatermarkItemId.as_str(), item_id),
+            (
+                CloudStateKey::PullPosition.as_str(),
+                &cursor.position.to_string(),
+            ),
+            (
+                CloudStateKey::PullItemId.as_str(),
+                cursor.item_id.as_deref().unwrap_or(""),
+            ),
+            (CloudStateKey::PullAccount.as_str(), &cursor.account),
+            (CloudStateKey::PullEpoch.as_str(), &cursor.epoch.to_string()),
         ])
         .map_err(source_error)
     }

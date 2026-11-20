@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
 use super::{DialCandidateSource, Node, NodeError, SyncCycle};
 use crate::peers::Peer;
-use crate::protocol::{ProtocolError, PROTOCOL_VERSION};
+use crate::protocol::{ProtocolError, MIN_PROTOCOL_VERSION};
 use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
 use crate::transport::Session;
 
@@ -201,11 +201,12 @@ impl Node {
     /// Maps a failure to receive the reply to the first message of an
     /// authenticated session.
     ///
-    /// A peer on another protocol version rejects that message when decoding
-    /// it and closes without a reply, so it never says which version it
-    /// speaks. A close at this point from a peer whose current advertisement
-    /// or last authenticated profile names another version is therefore that
-    /// version mismatch, not a lost connection to retry.
+    /// A peer with no protocol version in common rejects that message when
+    /// decoding it and closes without a reply, so it never says which versions
+    /// it speaks. Its current advertisement or last authenticated profile names
+    /// only its newest version. One below this build's minimum proves there is
+    /// no common version, so the close is that mismatch, not a lost connection
+    /// to retry. A newer one proves nothing: the peer's minimum is unknown.
     pub(super) fn first_reply_error(&self, pairing_id: &str, error: SyncError) -> NodeError {
         use copypaste_ipc::sync_issue::SyncIssueCode as Code;
         let error = session_error(error);
@@ -224,7 +225,7 @@ impl Node {
                     .protocol_version
             });
         match advertised {
-            Some(version) if version != PROTOCOL_VERSION => NodeError::PeerVersion,
+            Some(version) if version < MIN_PROTOCOL_VERSION => NodeError::PeerVersion,
             _ => error,
         }
     }
@@ -276,6 +277,7 @@ mod tests {
     use super::*;
     use crate::discovery::{DiscoveredPeer, Discovery};
     use crate::peers::{Peer, PeerStore};
+    use crate::protocol::PROTOCOL_VERSION;
     use crate::sync::testutil::{item, TestSource};
     use crate::transport::PairingToken;
     use std::sync::Arc;
@@ -315,7 +317,8 @@ mod tests {
     /// closing the authenticated channel without a reply. With the peer's own
     /// word for that version, the close is a version mismatch shown once, and
     /// the background scheduler and probes stop dialling until something
-    /// changes.
+    /// changes. A newer advertised version is only the peer's maximum, so the
+    /// same close stays a lost connection that is retried.
     #[tokio::test]
     async fn an_older_peer_closing_without_a_reply_is_a_deferred_version_mismatch() {
         use copypaste_ipc::sync_issue::SyncIssueCode as Code;
@@ -353,13 +356,24 @@ mod tests {
         );
         assert!(!client.sync_deferred(&pairing_id));
 
-        client.record_authenticated_profile(
-            &pairing_id,
-            Some(&crate::DeviceProfile {
-                protocol_version: Some(PROTOCOL_VERSION - 1),
-                ..Default::default()
-            }),
+        let advertise = |version| {
+            client.record_authenticated_profile(
+                &pairing_id,
+                Some(&crate::DeviceProfile {
+                    protocol_version: Some(version),
+                    ..Default::default()
+                }),
+            );
+        };
+        advertise(PROTOCOL_VERSION + 1);
+        assert_eq!(
+            client.sync_one(&peer, &source).await,
+            Err(NodeError::Diagnostic(Code::ConnectionLost)),
+            "a newer maximum does not prove there is no common version"
         );
+        assert!(!client.sync_deferred(&pairing_id));
+
+        advertise(PROTOCOL_VERSION - 1);
         assert_eq!(
             client.sync_one(&peer, &source).await,
             Err(NodeError::PeerVersion)

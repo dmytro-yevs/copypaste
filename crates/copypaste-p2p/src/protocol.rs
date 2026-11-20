@@ -19,11 +19,61 @@ mod items;
 pub(crate) use codec::validate_device_profile;
 pub use codec::ProtocolError;
 
-/// Version of the message set. Bumped whenever two builds would disagree on a
-/// field. No negotiation and no compatibility shim: a mismatch is a clear error
-/// rather than a degraded session. v11 moved item payloads out of JSON into the
-/// binary items envelope.
+/// Newest message set this build speaks. Bumped whenever two builds would
+/// disagree on a field. v11 moved item payloads out of JSON into the binary
+/// items envelope.
 pub const PROTOCOL_VERSION: u32 = 11;
+
+/// Oldest message set this build still speaks. Released v11 builds accept only
+/// `protocol_version == 11`, so they keep syncing with a newer build only
+/// while this stays 11.
+pub const MIN_PROTOCOL_VERSION: u32 = 11;
+
+/// The message sets one side speaks. Every versioned message states its
+/// sender's range: `protocol_version` carries `min` and `max_protocol_version`
+/// carries `max` when it differs, so a single-version range is the v11 wire
+/// form unchanged and a released v11 build accepts any range starting at 11.
+/// Versioned messages must stay readable by every version in the range; only
+/// what follows them may depend on the negotiated version. An offer or file
+/// request gets no versioned reply, so only its receiver learns both ranges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VersionRange {
+    pub(crate) min: u32,
+    pub(crate) max: u32,
+}
+
+impl VersionRange {
+    pub(crate) const SUPPORTED: Self = Self {
+        min: MIN_PROTOCOL_VERSION,
+        max: PROTOCOL_VERSION,
+    };
+
+    /// The range a received message states.
+    pub(crate) fn from_wire(protocol_version: u32, max_protocol_version: Option<u32>) -> Self {
+        Self {
+            min: protocol_version,
+            max: max_protocol_version.unwrap_or(protocol_version),
+        }
+    }
+
+    /// The `max_protocol_version` a message stating this range carries.
+    pub(crate) fn wire_max(self) -> Option<u32> {
+        (self.max != self.min).then_some(self.max)
+    }
+
+    /// The newest version both sides speak. No common version is a clear error
+    /// rather than a degraded session.
+    pub(crate) fn negotiate(self, peer: Self) -> Result<u32, ProtocolError> {
+        let version = self.max.min(peer.max);
+        if version < self.min.max(peer.min) {
+            return Err(ProtocolError::VersionMismatch {
+                ours: self.max,
+                theirs: peer.max,
+            });
+        }
+        Ok(version)
+    }
+}
 
 /// The reason a source without resume support gives for a non-zero index.
 pub const FILE_RANGE_UNSUPPORTED: &str = "Invalid file range.";
@@ -199,12 +249,16 @@ impl SyncItem {
 pub enum SyncMessage {
     Group {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         snapshot: crate::group::GroupSnapshot,
     },
     /// A bounded application-level liveness probe. It is sent only after the
     /// Noise handshake authenticated the pairing and never enters sync.
     Probe {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         nonce: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile: Option<DeviceProfile>,
@@ -212,12 +266,16 @@ pub enum SyncMessage {
     /// Echoes exactly one authenticated [`Self::Probe`] nonce.
     ProbeAck {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         nonce: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile: Option<DeviceProfile>,
     },
     Hello {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         device_id: String,
         device_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +288,8 @@ pub enum SyncMessage {
     /// Opens a manual send: the chosen versions, outside any session cursor.
     Offer {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         device_id: String,
         items: Vec<ItemSummary>,
     },
@@ -251,6 +311,8 @@ pub enum SyncMessage {
     /// Explicit file retrieval, on a separate authenticated connection.
     FileRequest {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_protocol_version: Option<u32>,
         item_id: String,
         sha256: String,
         /// The offered file size, used to bound every requested chunk index.
@@ -332,6 +394,39 @@ mod tests {
             pin_order: None,
             pin_updated_at: 0,
         }
+    }
+
+    const fn range(min: u32, max: u32) -> VersionRange {
+        VersionRange { min, max }
+    }
+
+    #[test]
+    fn overlapping_ranges_agree_on_the_newest_common_version() {
+        // A released v11 build states `protocol_version` alone.
+        let released = VersionRange::from_wire(11, None);
+        assert_eq!(range(11, 12).negotiate(released), Ok(11));
+        assert_eq!(released.negotiate(range(11, 12)), Ok(11));
+        assert_eq!(range(11, 12).negotiate(range(12, 14)), Ok(12));
+        assert_eq!(range(11, 14).negotiate(range(12, 13)), Ok(13));
+    }
+
+    #[test]
+    fn ranges_without_a_common_version_fail_closed() {
+        assert_eq!(
+            range(12, 13).negotiate(range(11, 11)),
+            Err(ProtocolError::VersionMismatch {
+                ours: 13,
+                theirs: 11
+            })
+        );
+        assert_eq!(
+            range(11, 11).negotiate(range(12, 13)),
+            Err(ProtocolError::VersionMismatch {
+                ours: 11,
+                theirs: 13
+            })
+        );
+        assert!(range(11, 12).negotiate(range(12, 11)).is_err());
     }
 
     #[test]

@@ -15,10 +15,10 @@ use crate::DeviceProfile;
 
 use super::items::{self, ItemsFrame};
 use super::{
-    SyncItem, SyncMessage, FILE_CHUNK_BYTES, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES,
-    MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE,
-    MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES,
-    MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    SyncItem, SyncMessage, VersionRange, FILE_CHUNK_BYTES, MAX_CONTENT_BYTES,
+    MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES, MAX_ID_BYTES,
+    MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES,
+    MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE,
 };
 
 /// Authenticated binary envelope for a file chunk.
@@ -35,7 +35,7 @@ const FILE_CHUNK_HEADER_BYTES: usize = 16;
 /// reach logs and user-facing errors (manifest 05 §4.7).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtocolError {
-    /// Fail closed. There is no fallback to another message set.
+    /// Fail closed: the two version ranges share no message set.
     #[error("peer speaks sync protocol v{theirs}, this build speaks v{ours}")]
     VersionMismatch { ours: u32, theirs: u32 },
 
@@ -169,12 +169,14 @@ impl SyncMessage {
                 #[derive(serde::Deserialize)]
                 struct Header {
                     protocol_version: Option<u32>,
+                    max_protocol_version: Option<u32>,
                 }
                 if let Ok(Header {
                     protocol_version: Some(version),
+                    max_protocol_version,
                 }) = serde_json::from_slice::<Header>(bytes)
                 {
-                    check_protocol_version(version)?;
+                    check_protocol_version(version, max_protocol_version)?;
                 }
                 return Err(ProtocolError::Decode(error.to_string()));
             }
@@ -217,9 +219,10 @@ impl SyncMessage {
         match self {
             Self::Group {
                 protocol_version,
+                max_protocol_version,
                 snapshot,
             } => {
-                check_protocol_version(*protocol_version)?;
+                check_protocol_version(*protocol_version, *max_protocol_version)?;
                 snapshot
                     .validate()
                     .map_err(|_| ProtocolError::Decode("invalid device group".into()))?;
@@ -229,21 +232,24 @@ impl SyncMessage {
             }
             Self::Probe {
                 protocol_version,
+                max_protocol_version,
                 profile,
                 ..
             }
             | Self::ProbeAck {
                 protocol_version,
+                max_protocol_version,
                 profile,
                 ..
             } => {
-                check_protocol_version(*protocol_version)?;
+                check_protocol_version(*protocol_version, *max_protocol_version)?;
                 if let Some(profile) = profile {
                     validate_device_profile(profile)?;
                 }
             }
             Self::Hello {
                 protocol_version,
+                max_protocol_version,
                 device_id,
                 device_name,
                 profile,
@@ -252,7 +258,7 @@ impl SyncMessage {
             } => {
                 // The version check precedes all fields because a mismatch
                 // means those fields may not have the semantics assumed here.
-                check_protocol_version(*protocol_version)?;
+                check_protocol_version(*protocol_version, *max_protocol_version)?;
                 check_id("device_id", device_id)?;
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
                 if let Some(profile) = profile {
@@ -270,10 +276,11 @@ impl SyncMessage {
             }
             Self::Offer {
                 protocol_version,
+                max_protocol_version,
                 device_id,
                 items,
             } => {
-                check_protocol_version(*protocol_version)?;
+                check_protocol_version(*protocol_version, *max_protocol_version)?;
                 check_id("device_id", device_id)?;
                 check_count("offer", items.len(), super::MAX_OFFER_ITEMS)?;
                 check_summaries(items)?;
@@ -308,13 +315,14 @@ impl SyncMessage {
             Self::Done => {}
             Self::FileRequest {
                 protocol_version,
+                max_protocol_version,
                 item_id,
                 sha256,
                 size,
                 index,
                 file,
             } => {
-                check_protocol_version(*protocol_version)?;
+                check_protocol_version(*protocol_version, *max_protocol_version)?;
                 check_id("item_id", item_id)?;
                 if *file as usize >= copypaste_payload::MAX_FILES_PER_CLIP
                     || (!sha256.is_empty() && sha256.len() != 64)
@@ -491,14 +499,16 @@ impl SyncItem {
     }
 }
 
-fn check_protocol_version(protocol_version: u32) -> Result<(), ProtocolError> {
-    if protocol_version != PROTOCOL_VERSION {
-        return Err(ProtocolError::VersionMismatch {
-            ours: PROTOCOL_VERSION,
-            theirs: protocol_version,
-        });
-    }
-    Ok(())
+fn check_protocol_version(
+    protocol_version: u32,
+    max_protocol_version: Option<u32>,
+) -> Result<(), ProtocolError> {
+    VersionRange::SUPPORTED
+        .negotiate(VersionRange::from_wire(
+            protocol_version,
+            max_protocol_version,
+        ))
+        .map(|_| ())
 }
 
 pub(crate) fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
@@ -583,7 +593,7 @@ mod tests {
     };
     use crate::DeviceProfile;
 
-    use super::{ProtocolError, FILE_CHUNK_HEADER_BYTES, FILE_CHUNK_MAGIC};
+    use super::{ProtocolError, VersionRange, FILE_CHUNK_HEADER_BYTES, FILE_CHUNK_MAGIC};
     use copypaste_payload::PayloadMetadata;
 
     fn summary(id: &str) -> ItemSummary {
@@ -668,6 +678,7 @@ mod tests {
         let messages = [
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: "linux-device".into(),
                 device_name: "Linux".into(),
                 profile: Some(profile.clone()),
@@ -676,11 +687,13 @@ mod tests {
             },
             SyncMessage::Probe {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 nonce: 1,
                 profile: Some(profile.clone()),
             },
             SyncMessage::ProbeAck {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 nonce: 1,
                 profile: Some(profile),
             },
@@ -742,6 +755,7 @@ mod tests {
     fn hello() -> SyncMessage {
         SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "dev-a".into(),
             device_name: "Laptop".into(),
             profile: Some(DeviceProfile::current()),
@@ -779,6 +793,7 @@ mod tests {
     fn a_first_file_request_keeps_the_previous_wire_shape() {
         let request = |file| SyncMessage::FileRequest {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             item_id: "item".into(),
             sha256: String::new(),
             size: 3 * FILE_CHUNK_BYTES as u64,
@@ -926,6 +941,156 @@ mod tests {
         assert_eq!(String::from_utf8(bytes).unwrap(), r#"{"t":"done"}"#);
     }
 
+    /// Released version-11 builds compare `protocol_version` for equality and
+    /// know no later field, so these bytes are a contract with them.
+    #[test]
+    fn version_11_hello_and_offer_wire_bytes_are_frozen() {
+        let hello = SyncMessage::Hello {
+            protocol_version: 11,
+            max_protocol_version: None,
+            device_id: "dev-a".into(),
+            device_name: "Laptop".into(),
+            profile: Some(DeviceProfile {
+                app_version: Some("0.1.1".into()),
+                protocol_version: Some(11),
+                platform: DevicePlatform::Macos,
+                device_class: DeviceClass::Laptop,
+                os_name: Some("macOS".into()),
+                os_version: Some("15.0".into()),
+                model: Some("Mac".into()),
+                organization_kinds: Some(3),
+            }),
+            listen_addr: Some("192.0.2.1:47654".into()),
+            since_ms: 5_000,
+        };
+        let offer = SyncMessage::Offer {
+            protocol_version: 11,
+            max_protocol_version: None,
+            device_id: "dev-a".into(),
+            items: vec![summary("a")],
+        };
+        for (message, expected) in [
+            (
+                hello,
+                r#"{"t":"hello","protocol_version":11,"device_id":"dev-a","device_name":"Laptop","profile":{"app_version":"0.1.1","protocol_version":11,"platform":"macos","device_class":"laptop","os_name":"macOS","os_version":"15.0","model":"Mac","organization_kinds":3},"listen_addr":"192.0.2.1:47654","since_ms":5000}"#,
+            ),
+            (
+                offer,
+                r#"{"t":"offer","protocol_version":11,"device_id":"dev-a","items":[{"item_id":"a","created_at":1000,"deleted":false,"content_hash":"h","origin_device_id":"dev-a","pinned":false,"pin_order":null,"pin_updated_at":0}]}"#,
+            ),
+        ] {
+            assert_eq!(
+                String::from_utf8(message.encode().unwrap()).unwrap(),
+                expected
+            );
+            assert_eq!(SyncMessage::decode(expected.as_bytes()).unwrap(), message);
+        }
+    }
+
+    /// Every other versioned message gained the same optional field.
+    #[test]
+    fn version_11_probe_group_and_file_request_wire_bytes_are_frozen() {
+        const PROFILE: &str = r#"{"app_version":null,"protocol_version":null,"platform":"macos","device_class":"laptop","os_name":null,"os_version":null,"model":null}"#;
+        let profile = Some(DeviceProfile {
+            platform: DevicePlatform::Macos,
+            device_class: DeviceClass::Laptop,
+            ..DeviceProfile::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("peers.json");
+        let snapshot = crate::PeerStore::open(&store, &crate::peers::testutil::KEY)
+            .unwrap()
+            .group_snapshot("dev-a", "Laptop", DeviceProfile::default(), None)
+            .unwrap();
+        for (message, expected) in [
+            (
+                SyncMessage::Probe {
+                    protocol_version: 11,
+                    max_protocol_version: None,
+                    nonce: 7,
+                    profile: profile.clone(),
+                },
+                format!(r#"{{"t":"probe","protocol_version":11,"nonce":7,"profile":{PROFILE}}}"#),
+            ),
+            (
+                SyncMessage::ProbeAck {
+                    protocol_version: 11,
+                    max_protocol_version: None,
+                    nonce: 7,
+                    profile,
+                },
+                format!(
+                    r#"{{"t":"probe_ack","protocol_version":11,"nonce":7,"profile":{PROFILE}}}"#
+                ),
+            ),
+            (
+                SyncMessage::Group {
+                    protocol_version: 11,
+                    max_protocol_version: None,
+                    snapshot: snapshot.clone(),
+                },
+                format!(
+                    r#"{{"t":"group","protocol_version":11,"snapshot":{}}}"#,
+                    snapshot.encode().unwrap()
+                ),
+            ),
+            (
+                SyncMessage::FileRequest {
+                    protocol_version: 11,
+                    max_protocol_version: None,
+                    item_id: "item".into(),
+                    sha256: String::new(),
+                    size: 1,
+                    index: 0,
+                    file: 0,
+                },
+                r#"{"t":"file_request","protocol_version":11,"item_id":"item","sha256":"","size":1,"index":0}"#.to_owned(),
+            ),
+        ] {
+            assert_eq!(
+                String::from_utf8(message.encode().unwrap()).unwrap(),
+                expected
+            );
+            assert_eq!(SyncMessage::decode(expected.as_bytes()).unwrap(), message);
+        }
+    }
+
+    /// A wider range adds one field after `protocol_version`, which carries
+    /// the oldest version so an exact-match version-11 decoder still accepts it.
+    #[test]
+    fn a_wider_stated_range_stays_readable_by_a_version_11_decoder() {
+        #[derive(Deserialize)]
+        #[serde(tag = "t", rename_all = "snake_case")]
+        enum ReleasedMessage {
+            Hello {
+                protocol_version: u32,
+                device_id: String,
+            },
+        }
+        let range = VersionRange { min: 11, max: 12 };
+        assert_eq!(VersionRange { min: 11, max: 11 }.wire_max(), None);
+        let hello = SyncMessage::Hello {
+            protocol_version: range.min,
+            max_protocol_version: range.wire_max(),
+            device_id: "d".into(),
+            device_name: "n".into(),
+            profile: None,
+            listen_addr: None,
+            since_ms: 0,
+        };
+        let bytes = hello.encode().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            r#"{"t":"hello","protocol_version":11,"max_protocol_version":12,"device_id":"d","device_name":"n","since_ms":0}"#
+        );
+        let ReleasedMessage::Hello {
+            protocol_version,
+            device_id,
+        } = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!((protocol_version, device_id.as_str()), (11, "d"));
+        assert_eq!(SyncMessage::decode(&bytes).unwrap(), hello);
+    }
+
     #[test]
     fn hello_with_a_different_version_is_rejected() {
         let raw = br#"{"t":"hello","protocol_version":99,"device_id":"d","device_name":"n"}"#;
@@ -938,6 +1103,14 @@ mod tests {
         );
         assert_eq!(
             SyncMessage::decode(br#"{"t":"future_message","protocol_version":99}"#),
+            Err(ProtocolError::VersionMismatch {
+                ours: PROTOCOL_VERSION,
+                theirs: 99
+            })
+        );
+        let disjoint = br#"{"t":"hello","protocol_version":98,"max_protocol_version":99,"device_id":"d","device_name":"n"}"#;
+        assert_eq!(
+            SyncMessage::decode(disjoint),
             Err(ProtocolError::VersionMismatch {
                 ours: PROTOCOL_VERSION,
                 theirs: 99
@@ -1232,6 +1405,7 @@ mod tests {
             },
             SyncMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                max_protocol_version: None,
                 device_id: String::new(),
                 device_name: "n".into(),
                 profile: None,
@@ -1269,6 +1443,7 @@ mod tests {
     fn an_overlong_device_name_is_rejected() {
         let err = SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "d".into(),
             device_name: "x".repeat(MAX_DEVICE_NAME_BYTES + 1),
             profile: None,
@@ -1290,6 +1465,7 @@ mod tests {
     fn probe_rejects_an_oversized_device_profile() {
         let err = SyncMessage::Probe {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             nonce: 7,
             profile: Some(DeviceProfile {
                 model: Some("x".repeat(129)),
@@ -1308,6 +1484,7 @@ mod tests {
     fn a_hello_rejects_a_malformed_or_oversized_listen_address() {
         let malformed = SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "d".into(),
             device_name: "n".into(),
             profile: None,
@@ -1318,6 +1495,7 @@ mod tests {
 
         let oversized = SyncMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
+            max_protocol_version: None,
             device_id: "d".into(),
             device_name: "n".into(),
             profile: None,

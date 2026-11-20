@@ -195,12 +195,19 @@ mod tests {
         downloads: Arc<AtomicUsize>,
     }
     impl RestApi for Backend {
-        async fn fetch_since(
+        async fn list_since(
             &self,
             _: &str,
             _: i64,
             _: Option<&str>,
             _: u32,
+        ) -> Result<Vec<crate::rest::RowListing>, TransportFault> {
+            panic!("membership must not read clipboard rows")
+        }
+        async fn fetch_rows(
+            &self,
+            _: &str,
+            _: &[String],
         ) -> Result<crate::rest::RowPage, TransportFault> {
             panic!("membership must not read clipboard rows")
         }
@@ -318,10 +325,10 @@ mod tests {
         fn apply_remote(&self, _: LocalItem) -> Result<Applied, SyncError> {
             unreachable!()
         }
-        fn watermark(&self) -> Result<i64, SyncError> {
+        fn pull_cursor(&self) -> Result<crate::sync::PullCursor, SyncError> {
             unreachable!()
         }
-        fn set_watermark(&self, _: i64) -> Result<(), SyncError> {
+        fn set_pull_cursor(&self, _: &crate::sync::PullCursor) -> Result<(), SyncError> {
             unreachable!()
         }
     }

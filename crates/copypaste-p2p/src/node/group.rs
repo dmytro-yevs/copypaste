@@ -2,7 +2,7 @@
 use super::{Node, NodeError, NoiseChannel};
 use crate::{
     group::GroupSnapshot,
-    protocol::{SyncMessage, PROTOCOL_VERSION},
+    protocol::{SyncMessage, VersionRange},
     sync::{SyncChannel, SyncSource},
 };
 
@@ -80,7 +80,8 @@ impl Node {
             let snapshot = self.peers.stored_group().map_err(group_error)?;
             channel
                 .send(SyncMessage::Group {
-                    protocol_version: PROTOCOL_VERSION,
+                    protocol_version: VersionRange::SUPPORTED.min,
+                    max_protocol_version: VersionRange::SUPPORTED.wire_max(),
                     snapshot,
                 })
                 .await
@@ -206,7 +207,8 @@ impl Node {
     ) -> Result<(), NodeError> {
         channel
             .send(SyncMessage::Group {
-                protocol_version: PROTOCOL_VERSION,
+                protocol_version: VersionRange::SUPPORTED.min,
+                max_protocol_version: VersionRange::SUPPORTED.wire_max(),
                 snapshot: self.prepare_group(source)?,
             })
             .await
@@ -247,7 +249,8 @@ impl Node {
         // The response includes new admissions and removals learned above.
         channel
             .send(SyncMessage::Group {
-                protocol_version: PROTOCOL_VERSION,
+                protocol_version: VersionRange::SUPPORTED.min,
+                max_protocol_version: VersionRange::SUPPORTED.wire_max(),
                 snapshot: self.prepare_group(source)?,
             })
             .await
@@ -706,7 +709,8 @@ mod tests {
                 .await
                 .unwrap();
         let request = SyncMessage::FileRequest {
-            protocol_version: PROTOCOL_VERSION,
+            protocol_version: crate::PROTOCOL_VERSION,
+            max_protocol_version: None,
             item_id: "secret-file".into(),
             sha256: String::new(),
             size: 1,

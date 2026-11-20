@@ -84,6 +84,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/014_module_storage.sql"),
         transform: |_| Ok(()),
     },
+    Migration {
+        version: 15,
+        sql: include_str!("migrations/015_module_search_item_index.sql"),
+        transform: |_| Ok(()),
+    },
 ];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
@@ -325,7 +330,7 @@ mod tests {
     #[test]
     fn version_one_history_survives_upgrade_to_the_current_version() {
         use super::super::{connection::apply_key, Store};
-        assert_eq!(LATEST_VERSION, 14);
+        assert_eq!(LATEST_VERSION, 15);
         let keyring = crate::Keyring::from_secret(&[37; 32]);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
@@ -397,6 +402,29 @@ mod tests {
             .unwrap(),
             (1, 0)
         );
+    }
+
+    #[test]
+    fn search_documents_are_found_by_item_after_upgrade_and_on_a_fresh_database() {
+        let mut upgraded = Connection::open_in_memory().unwrap();
+        upgraded.execute_batch(&schema_at(14)).unwrap();
+        record_versions(&upgraded, &(1..=14).collect::<Vec<_>>()).unwrap();
+        upgraded.pragma_update(None, "user_version", 14).unwrap();
+        let by_item = |conn: &Connection| -> String {
+            conn.query_row(
+                "EXPLAIN QUERY PLAN DELETE FROM module_search_documents WHERE item_id = ?1",
+                [""],
+                |row| row.get(3),
+            )
+            .unwrap()
+        };
+        assert!(by_item(&upgraded).starts_with("SCAN"));
+        upgrade(&mut upgraded).unwrap();
+        let fresh = super::super::test_support::store();
+        for conn in [&upgraded, &*fresh.conn().unwrap()] {
+            let plan = by_item(conn);
+            assert!(plan.contains("idx_module_search_item"), "{plan}");
+        }
     }
 
     #[test]
