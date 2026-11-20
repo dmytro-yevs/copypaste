@@ -3,3 +3,6 @@
 - CopyPaste keeps working when another program holds its LAN sync port.
 - Devices on different CopyPaste versions agree on a LAN sync protocol version before they sync.
 - On Linux, CopyPaste no longer crashes shortly after it starts on GNOME with the AppIndicator extension.
+- A lost permission, a broken module or a missing tray no longer blocks a whole screen: Modules, Settings, Transfers and Quick Paste keep working and report the problem. On Android, Modules opens even when SMS access needs setup.
+- Settings can delete all CopyPaste data from this device; paired devices and cloud copies stay. The Windows uninstaller offers the same, and `brew uninstall --zap` removes everything on macOS.
+- On Android, CopyPaste data is no longer included in cloud backups or device transfers.
