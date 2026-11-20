@@ -23,8 +23,8 @@ class CodeQlSwiftBuildTest(unittest.TestCase):
         # An empty value starts the step outside the tracer CodeQL init enabled.
         self.assertEqual(build["env"]["DYLD_INSERT_LIBRARIES"], "")
         script = (ROOT / "scripts/ci/xcodebuild-macos-release.sh").read_text()
-        self.assertIn('"SWIFT_EXEC=$scripts/trace-swiftc.sh"', script)
-        self.assertIn('SWIFT_EXEC_MANIFEST="$scripts/trace-swiftc.sh"', script)
+        self.assertIn('"SWIFT_EXEC=$traced_swiftc"', script)
+        self.assertIn('SWIFT_EXEC_MANIFEST="$traced_swiftc"', script)
 
 
 if __name__ == "__main__":
