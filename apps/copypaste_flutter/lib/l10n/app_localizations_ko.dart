@@ -3817,6 +3817,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesSmsMonitoringNeedsSetup => 'SMS 모니터링을 설정해야 합니다.';
 
   @override
+  String get modulesSmsMonitoringUnavailable => 'SMS 모니터링을 확인할 수 없습니다.';
+
+  @override
   String get modulesOperationIncomplete => '모듈 작업을 완료할 수 없습니다.';
 
   @override

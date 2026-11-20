@@ -125,7 +125,7 @@ class FileOperationsController extends ChangeNotifier {
 
   /// The latest failed action, which the view shows once.
   String? actionError;
-  bool _disposed = false, _refreshAgain = false;
+  bool _disposed = false, _refreshAgain = false, _loaded = false;
   Future<void>? _refresh;
   String? _before;
   int _generation = 0;
@@ -251,10 +251,8 @@ class FileOperationsController extends ChangeNotifier {
         }
       },
       onError: (Object _) {
-        if (_disposed) return;
-        failed = true;
-        error = AppStrings.current.transfersUpdatesUnavailable;
-        notifyListeners();
+        final message = AppStrings.current.transfersUpdatesUnavailable;
+        _reportLoadFailure(message, message);
       },
     );
     await refresh();
@@ -304,19 +302,32 @@ class FileOperationsController extends ChangeNotifier {
           ...current.where((item) => item.active),
           ...current.where((item) => !item.active),
         ]);
+        _loaded = true;
         failed = false;
         error = null;
         notifyListeners();
       } while (_refreshAgain);
     } catch (failure) {
-      if (!_disposed) {
-        failed = true;
-        error = ErrorText.reason(failure);
-        notifyListeners();
-      }
+      _reportLoadFailure(
+        ErrorText.reason(failure),
+        AppStrings.current.transfersUpdatesLoadFailed,
+      );
     } finally {
       _refresh = null;
     }
+  }
+
+  /// Only a list that never loaded is replaced by the error; later failures
+  /// keep the loaded items and are reported once.
+  void _reportLoadFailure(String? reason, String afterLoad) {
+    if (_disposed) return;
+    if (_loaded) {
+      _reportAction(afterLoad);
+      return;
+    }
+    failed = true;
+    error = reason;
+    notifyListeners();
   }
 
   /// An operation ID owns one lifetime: terminal results never become active
@@ -374,11 +385,10 @@ class FileOperationsController extends ChangeNotifier {
         notifyListeners();
       } while (_reloadIds.contains(id));
     } catch (failure) {
-      if (!_disposed) {
-        failed = true;
-        error = ErrorText.reason(failure);
-        notifyListeners();
-      }
+      _reportLoadFailure(
+        ErrorText.reason(failure),
+        AppStrings.current.transfersUpdatesLoadFailed,
+      );
     } finally {
       _loadingIds.remove(id);
       _reloadIds.remove(id);

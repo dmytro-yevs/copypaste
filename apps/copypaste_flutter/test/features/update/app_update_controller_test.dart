@@ -162,7 +162,9 @@ void main() {
     expect(controller.phase, AppUpdatePhase.installing);
     completion.completeError(PlatformException(code: 'installation_storage'));
     await initialization;
-    expect(controller.phase, AppUpdatePhase.error);
+    // The failed restore keeps the check result and only reports its reason.
+    expect(controller.phase, AppUpdatePhase.available);
+    expect(controller.release?.version, Version.parse('1.0.1'));
     expect(controller.message, 'Free up storage to install the update.');
   });
 

@@ -71,6 +71,21 @@ void main() {
     },
   );
 
+  test('a failed item update keeps the loaded list', () async {
+    final repository = _Repository()
+      ..records = [operation('report', 'running', written: 10)];
+    final controller = FileOperationsController(repository);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    repository.failItemLoads = true;
+    repository.changes.add(const FileOperationsChange(id: 'report'));
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.failed, isFalse);
+    expect(controller.items.single.id, 'report');
+    expect(controller.actionError, 'Transfer updates could not be loaded.');
+    await repository.changes.close();
+  });
+
   test(
     'running progress stays monotonic across an older list response',
     () async {
@@ -433,6 +448,7 @@ class _Repository implements FileOperationsRepository {
   final List<String> cancelled = [], opened = [], retried = [];
   final List<String?> clearIds = [];
   bool failClear = false;
+  bool failItemLoads = false;
   int loads = 0;
   @override
   Stream<FileOperationsChange> watch() => changes.stream;
@@ -443,6 +459,7 @@ class _Repository implements FileOperationsRepository {
     String? id,
   }) async {
     loads++;
+    if (id != null && !clear && failItemLoads) throw StateError('unavailable');
     if (id == null && !clear && pendingList != null) {
       final pending = pendingList!;
       pendingList = null;

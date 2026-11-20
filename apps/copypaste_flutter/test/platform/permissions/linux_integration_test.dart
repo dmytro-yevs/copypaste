@@ -185,6 +185,46 @@ void main() {
     expect(status.globalShortcuts, isTrue);
   });
 
+  test('skips unknown or invalid daemon capabilities one by one', () async {
+    port = MethodChannelLinuxIntegrationPort(
+      channel: channel,
+      platformCapabilitiesJson: () async => jsonEncode({
+        'clipboard_available': true,
+        'capabilities': {
+          'clipboard_capture': {
+            'state': 'available',
+            'backend': 'linux-wayland-data-control',
+            'guarantee': 'verified',
+            'permissions': [],
+          },
+          'future_capability': {
+            'state': 'available',
+            'backend': 'future',
+            'guarantee': 'verified',
+            'permissions': [],
+          },
+          'source_attribution': {
+            'state': 'future_state',
+            'guarantee': 'none',
+            'permissions': [],
+          },
+        },
+      }),
+    );
+
+    final status = await port.status();
+    expect(status.clipboard, isTrue);
+    expect(status.quickPaste, isTrue);
+    expect(
+      status.capability(LinuxCapabilityKind.clipboardCapture).state,
+      LinuxCapabilityState.available,
+    );
+    expect(
+      status.capability(LinuxCapabilityKind.sourceAttribution).state,
+      LinuxCapabilityState.error,
+    );
+  });
+
   test('keeps the daemon reason when a protocol is unsupported', () async {
     port = MethodChannelLinuxIntegrationPort(
       channel: channel,

@@ -434,11 +434,16 @@ class QuickPasteController extends ChangeNotifier {
     if (_disposed) return;
     await Future.wait([
       history.initialize(),
-      _refreshAccessibility(),
+      // Optional: the paste path reads the permission again.
+      _refreshAccessibility().catchError((Object _) {}),
       _loadModules(),
     ]);
     if (_disposed) return;
-    await _reconcilePinnedShortcuts();
+    try {
+      await _reconcilePinnedShortcuts();
+    } catch (_) {
+      // Optional: pinned shortcuts keep their saved keys.
+    }
     if (_disposed) return;
     _initialHistoryReady = true;
     await _host.signalReady();

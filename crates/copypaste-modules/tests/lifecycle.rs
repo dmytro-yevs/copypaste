@@ -403,6 +403,15 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
         })
         .unwrap());
     manager.set_enabled(&installed.id, true, &[]).unwrap();
+    drop(manager);
+    // An unrelated broken package must not hide or block the SMS handler.
+    let path = fixture.directory.path().join("modules/registry.json");
+    let mut registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    registry["modules"]["copypaste.broken"] =
+        json!({"version": "1.0.0", "enabled": true, "preferences": {}});
+    fs::write(&path, serde_json::to_vec(&registry).unwrap()).unwrap();
+    let manager = open();
     assert!(manager.has_sms_handler().unwrap());
     assert!(manager
         .dispatch_sms("123456", |code| {
@@ -411,11 +420,11 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
         })
         .unwrap());
     assert_eq!(published, ["123456"]);
-    assert!(manager
+    assert!(!manager
         .dispatch_sms("The entire SMS body must never be published", |_| panic!(
             "invalid output"
         ))
-        .is_err());
+        .unwrap());
     manager.set_enabled(&installed.id, false, &[]).unwrap();
     drop(manager);
     let manager = open();
@@ -884,6 +893,25 @@ fn corrupt_registry_fails_closed_and_does_not_delete_packages() {
         .path()
         .join("modules/packages/copypaste.text-tools/1.0.0")
         .exists());
+}
+
+#[test]
+fn invalid_registry_record_does_not_hide_other_modules() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    manager
+        .install(&fixture.package("1.0.0", b"fixture", |_| {}, None))
+        .unwrap();
+    drop(manager);
+    let path = fixture.directory.path().join("modules/registry.json");
+    let mut registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    registry["modules"]["../escape"] =
+        json!({"version": "1.0.0", "enabled": true, "preferences": {}});
+    fs::write(&path, serde_json::to_vec(&registry).unwrap()).unwrap();
+    let listed = fixture.manager().list().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "copypaste.text-tools");
 }
 
 #[test]

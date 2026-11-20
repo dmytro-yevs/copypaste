@@ -31,6 +31,7 @@ import '../features/settings/view/settings_screen.dart';
 import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
 import '../platform/desktop/desktop_shortcuts.dart';
+import '../shared/failure_toasts.dart';
 import '../shared/state_view.dart';
 import 'app_features.dart';
 import 'navigation/navigation.dart';
@@ -278,7 +279,12 @@ class CopyPasteApp extends StatelessWidget {
               return ValueListenableBuilder<DesktopWindowSetupIssue?>(
                 valueListenable: desktopWindow!.setupIssue,
                 builder: (context, issue, child) {
-                  if (issue == null) return child!;
+                  // Without a tray the window still works; only window and
+                  // quit failures replace the app.
+                  if (issue == null ||
+                      issue == DesktopWindowSetupIssue.trayUnavailable) {
+                    return child!;
+                  }
                   return SafeArea(
                     top: !unifiedTitleBar,
                     child: Scaffold(
@@ -307,7 +313,20 @@ class CopyPasteApp extends StatelessWidget {
                     ),
                   );
                 },
-                child: shell,
+                child: FailureToasts(
+                  listenable: desktopWindow!.setupIssue,
+                  failure: () {
+                    final issue = desktopWindow!.setupIssue.value;
+                    return issue == DesktopWindowSetupIssue.trayUnavailable
+                        ? issue!.message
+                        : null;
+                  },
+                  title: (context) => context.l10n.appWindowSetupTitle,
+                  showInitial: true,
+                  actionLabel: (context) => context.l10n.commonRetry,
+                  onAction: () => unawaited(desktopWindow!.retry()),
+                  child: shell,
+                ),
               );
             }
 

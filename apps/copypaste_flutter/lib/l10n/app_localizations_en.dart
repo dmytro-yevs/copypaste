@@ -4043,6 +4043,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modulesSmsMonitoringNeedsSetup => 'SMS monitoring needs setup.';
 
   @override
+  String get modulesSmsMonitoringUnavailable =>
+      'SMS monitoring could not be checked.';
+
+  @override
   String get modulesOperationIncomplete =>
       'The module operation could not be completed.';
 

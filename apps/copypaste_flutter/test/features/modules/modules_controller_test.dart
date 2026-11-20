@@ -301,6 +301,58 @@ void main() {
     await reconnects.close();
   });
 
+  test('initialization does not wait for a search model download', () async {
+    final repository = _PendingPreferencesRepository()
+      ..modules = [
+        const InstalledModule(
+          id: 'copypaste.search',
+          title: 'Search',
+          description: 'Search history.',
+          version: '1.0.0',
+          enabled: true,
+          sizeBytes: 10,
+          commands: [],
+          searchLanguageField: 'languages',
+          searchModels: [
+            ModuleSearchModel(
+              id: 'en',
+              title: 'English',
+              languages: ['en'],
+              sizeBytes: 10,
+              available: false,
+            ),
+          ],
+          preferenceFields: [
+            ModuleField(
+              id: 'languages',
+              title: 'Languages',
+              kind: ModuleFieldKind.choices,
+              defaultValue: <String>[],
+              options: [ModuleChoice(id: 'en', title: 'English')],
+            ),
+          ],
+          preferences: {},
+        ),
+      ];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      preferredLanguages: () => ['en'],
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+
+    expect(controller.state, ModulesLoadState.ready);
+    expect(controller.configuringModel, isTrue);
+    repository.pending.complete();
+    await pumpEventQueue();
+    expect(repository.lastPreferences, {
+      'languages': ['en'],
+    });
+    expect(controller.busy, isFalse);
+  });
+
   test('relists when the language resolves during the first list', () async {
     final repository = _ListingRepository()..modules = [testModule];
     final controller = ModulesController(
@@ -329,6 +381,15 @@ class _UnlistableAfterInstallRepository extends MemoryModulesRepository {
   Future<List<InstalledModule>> list() async {
     if (calls.contains('install')) throw const ModulesException('List failed.');
     return super.list();
+  }
+}
+
+class _PendingPreferencesRepository extends MemoryModulesRepository {
+  final pending = Completer<void>();
+  @override
+  Future<void> setPreferences(String id, Map<String, Object> values) async {
+    await pending.future;
+    await super.setPreferences(id, values);
   }
 }
 

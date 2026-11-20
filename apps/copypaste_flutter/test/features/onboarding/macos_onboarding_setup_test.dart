@@ -66,6 +66,18 @@ void main() {
     expect(controller.macos.launchAtLogin, isTrue);
   });
 
+  test('completed onboarding stays complete when system reads fail', () async {
+    final controller = _controller(
+      store: MemoryOnboardingStore(complete: true),
+      setup: _FakeMacosSetupGateway(failAccessibilityRead: true),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.complete, isTrue);
+    expect(controller.errorMessage, isNotNull);
+  });
+
   test('refresh reflects a Login Item disabled outside CopyPaste', () async {
     final setup = _FakeMacosSetupGateway(status: MacosLoginItemStatus.enabled);
     final controller = _controller(setup: setup);
@@ -260,18 +272,23 @@ class _FakeMacosSetupGateway implements MacosSetupGateway {
     this.status = MacosLoginItemStatus.notRegistered,
     this.statusAfterUpdate = MacosLoginItemStatus.enabled,
     this.failLaunchAtLoginUpdate = false,
+    this.failAccessibilityRead = false,
   });
 
   bool accessibility;
   MacosLoginItemStatus status;
   MacosLoginItemStatus statusAfterUpdate;
   bool failLaunchAtLoginUpdate;
+  bool failAccessibilityRead;
   final List<bool> launchAtLoginValues = [];
   int openSettingsCalls = 0;
   Future<MacosLoginItemStatus>? pendingUpdate;
 
   @override
-  Future<bool> accessibilityGranted() async => accessibility;
+  Future<bool> accessibilityGranted() async {
+    if (failAccessibilityRead) throw StateError('Accessibility read failed.');
+    return accessibility;
+  }
 
   @override
   Future<MacosLoginItemStatus> loginItemStatus() async => status;

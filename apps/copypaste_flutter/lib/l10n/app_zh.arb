@@ -1131,6 +1131,7 @@
   "modulesSmsMonitoringFailed": "无法启动短信监控。",
   "modulesSmsAndroidOnly": "短信访问权限仅在 Android 上可用。",
   "modulesSmsMonitoringNeedsSetup": "短信监控需要设置。",
+  "modulesSmsMonitoringUnavailable": "无法检查短信监控。",
   "modulesOperationIncomplete": "无法完成模块操作。",
   "modulesUnsupportedEvent": "该模块使用了不受支持的事件。",
   "modulesUnsupportedResult": "该模块返回了不受支持的结果。",

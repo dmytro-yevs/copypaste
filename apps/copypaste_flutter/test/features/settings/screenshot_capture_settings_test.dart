@@ -112,6 +112,15 @@ void main() {
     expect(restored.screenshotCapture.enabled, isTrue);
   });
 
+  test('unreadable screenshot status keeps settings available', () async {
+    final port = _Capture()..statusFails = true;
+    final settings = controller(port);
+    addTearDown(settings.dispose);
+    await settings.initialize();
+    expect(settings.loadState, SettingsLoadState.ready);
+    expect(settings.screenshotCapture.enabled, isTrue);
+  });
+
   test(
     'native drain failure rereads the persisted screenshot switch state',
     () async {
@@ -278,10 +287,15 @@ class _Capture implements ScreenshotCapture {
   ScreenshotCaptureStatus current = const ScreenshotCaptureStatus();
   int permissionRequests = 0;
   bool fail = false;
+  bool statusFails = false;
   @override
   bool get supported => true;
   @override
-  Future<ScreenshotCaptureStatus> status() async => current;
+  Future<ScreenshotCaptureStatus> status() async {
+    if (statusFails) throw PlatformException(code: 'status_unavailable');
+    return current;
+  }
+
   @override
   Future<ScreenshotCaptureStatus> setEnabled(bool enabled) async {
     current = ScreenshotCaptureStatus(

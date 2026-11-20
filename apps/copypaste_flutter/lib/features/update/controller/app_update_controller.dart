@@ -89,10 +89,20 @@ class AppUpdateController extends ChangeNotifier {
         await _applyInstallResult(result);
       }
     } on PlatformException catch (error) {
-      _fail(_platformErrorMessage(error.code));
+      _restoreFailed(previousPhase, _platformErrorMessage(error.code));
     } catch (_) {
-      _fail(AppStrings.current.updateRestoreInstallationFailed);
+      _restoreFailed(
+        previousPhase,
+        AppStrings.current.updateRestoreInstallationFailed,
+      );
     }
+  }
+
+  /// A pending installation that cannot be restored keeps the check result.
+  void _restoreFailed(AppUpdatePhase previousPhase, String message) {
+    if (_disposed) return;
+    _message = message;
+    _setPhase(previousPhase);
   }
 
   Future<void> check() async {

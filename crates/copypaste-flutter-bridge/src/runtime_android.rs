@@ -201,6 +201,8 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
             let (Some(vm), Some(host)) = (JAVA_VM.get(), INFERENCE_HOST_CLASS.get()) else {
                 return;
             };
+            // Modules are optional: their failures must not keep history,
+            // capture and sync from starting.
             if runtime
                 .set_inference_launcher(Arc::new(copypaste_modules::AndroidInferenceLauncher::new(
                     Arc::clone(vm),
@@ -209,12 +211,10 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
                 .is_err()
             {
                 tracing::error!("could not initialize the Android inference launcher");
-                return;
             }
             let runtime = Arc::new(runtime);
             if runtime.attach_module_services().is_err() {
                 tracing::error!("could not attach the module host services");
-                return;
             }
             let _ = RUNTIME.set(runtime);
         }

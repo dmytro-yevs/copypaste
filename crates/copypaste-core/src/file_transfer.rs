@@ -193,8 +193,17 @@ pub fn upgrade_legacy(store: &Store, key: &ItemKey) -> Result<u64, FileTransferE
             .unwrap_or_default();
         context.file = Some(metadata);
         let descriptor = serde_json::to_vec(&transfer).map_err(|_| FileTransferError::Integrity)?;
+        // The rewrite is one transaction; a failed row stays legacy and intact
+        // for the next startup instead of blocking the others.
+        let content_ciphertext = match crate::binary::seal(&descriptor, key, &row.id) {
+            Ok(ciphertext) => ciphertext,
+            Err(error) => {
+                tracing::warn!(%error, "A legacy file was left intact after its offer migration failed.");
+                continue;
+            }
+        };
         let item = NewItem {
-            content_ciphertext: crate::binary::seal(&descriptor, key, &row.id)?,
+            content_ciphertext,
             id: row.id,
             nonce: Vec::new(),
             content_type: row.content_type,
@@ -205,14 +214,17 @@ pub fn upgrade_legacy(store: &Store, key: &ItemKey) -> Result<u64, FileTransferE
             app_name: row.app_name,
             payload_metadata: context.to_json(copypaste_ipc::content_type::FILE),
         };
-        store.insert_file_transfer(
+        if let Err(error) = store.insert_file_transfer(
             item,
             &mut std::io::Cursor::new(&*bytes),
             &transfer,
             key,
             true,
             true,
-        )?;
+        ) {
+            tracing::warn!(%error, "A legacy file was left intact after its offer migration failed.");
+            continue;
+        }
         count += 1;
     }
     Ok(count)

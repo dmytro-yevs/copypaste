@@ -16,6 +16,9 @@ class SmsModuleReceiver : BroadcastReceiver() {
             try {
                 MainActivity.ensureRuntime(context.applicationContext)
                 SmsModuleService.synchronize(context, NativeSmsModules.handlerState())
+            } catch (_: Exception) {
+                // An unavailable runtime leaves SMS monitoring as it was.
+            } catch (_: LinkageError) {
             } finally { pending.finish() }
         }
     }

@@ -3842,6 +3842,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesSmsMonitoringNeedsSetup => 'SMS の監視にはセットアップが必要です。';
 
   @override
+  String get modulesSmsMonitoringUnavailable => 'SMS の監視を確認できませんでした。';
+
+  @override
   String get modulesOperationIncomplete => 'モジュールの操作を完了できませんでした。';
 
   @override

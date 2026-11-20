@@ -121,7 +121,7 @@ impl ModuleManager {
         fs::create_dir_all(root.join("packages"))?;
         fs::create_dir_all(root.join("data"))?;
         let root = fs::canonicalize(root)?;
-        let registry = match fs::read(root.join("registry.json")) {
+        let mut registry = match fs::read(root.join("registry.json")) {
             Ok(bytes) if bytes.len() <= 1024 * 1024 => {
                 serde_json::from_slice::<Registry>(&bytes).map_err(|_| ModuleError::State)?
             }
@@ -132,14 +132,19 @@ impl ModuleManager {
             },
             Err(error) => return Err(error.into()),
         };
-        if registry.schema_version != 1
-            || registry.modules.len() > 128
-            || registry.modules.iter().any(|(id, record)| {
-                !valid_id(id) || semver::Version::parse(&record.version).is_err()
-            })
-        {
+        if registry.schema_version != 1 || registry.modules.len() > 128 {
             return Err(ModuleError::State);
         }
+        // The id and version name package and data paths, so an invalid record
+        // is never used. It must not make the other modules unavailable; its
+        // files stay on disk.
+        registry.modules.retain(|id, record| {
+            let valid = valid_id(id) && semver::Version::parse(&record.version).is_ok();
+            if !valid {
+                tracing::warn!("ignoring an invalid module registry record");
+            }
+            valid
+        });
         let verifier = PackageVerifier::new(public_key, app_version, target)?;
         let staging_owner = crate::staging_cleanup::open(&root)?;
         let manager = Self {
@@ -249,7 +254,10 @@ impl ModuleManager {
 
     pub fn list(&self) -> Result<Vec<InstalledModule>, ModuleError> {
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
-        self.finish_pending_removals()?;
+        // Cleanup debt stays persisted; a failed retry must not hide the list.
+        if let Err(error) = self.finish_pending_removals() {
+            tracing::warn!(%error, "module removal cleanup failed");
+        }
         let state = self.state.lock().map_err(|_| ModuleError::State)?;
         Ok(self.summaries(&state.registry))
     }
@@ -558,11 +566,16 @@ impl ModuleManager {
             if !record.enabled || record.removing {
                 continue;
             }
-            let manifest = self.manifest(id, record)?;
+            // A broken unrelated package must not disable search for others.
+            let Ok(manifest) = self.manifest(id, record) else {
+                continue;
+            };
             let Some(provider) = &manifest.search_provider else {
                 continue;
             };
-            let model = selected_model(provider, &record.preferences)?;
+            let Ok(model) = selected_model(provider, &record.preferences) else {
+                continue;
+            };
             if !self.model_healthy(id, model) {
                 continue;
             }
@@ -794,8 +807,14 @@ impl ModuleManager {
             if record.removing || (enabled_only && !record.enabled) {
                 continue;
             }
-            if let Some(provider) = &self.manifest(id, record)?.sync_provider {
-                providers.push((id.clone(), provider.command.clone()));
+            // One broken package must not hide or keep running the others.
+            match self.manifest(id, record) {
+                Ok(manifest) => {
+                    if let Some(provider) = &manifest.sync_provider {
+                        providers.push((id.clone(), provider.command.clone()));
+                    }
+                }
+                Err(error) => tracing::warn!(%error, module = id, "skipping an unreadable module"),
             }
         }
         Ok(providers)
@@ -816,13 +835,21 @@ impl ModuleManager {
     pub fn has_sms_handler(&self) -> Result<bool, ModuleError> {
         let state = self.state.lock().map_err(|_| ModuleError::State)?;
         for (id, record) in &state.registry.modules {
-            if record.enabled
-                && !record.removing
-                && self
-                    .manifest(id, record)?
-                    .event_handlers
-                    .iter()
-                    .any(|handler| handler.event == ModuleEvent::SmsReceived)
+            if !record.enabled || record.removing {
+                continue;
+            }
+            // One broken package must not hide other modules' handlers.
+            let manifest = match self.manifest(id, record) {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    tracing::warn!(%error, module = id, "skipping an unreadable module");
+                    continue;
+                }
+            };
+            if manifest
+                .event_handlers
+                .iter()
+                .any(|handler| handler.event == ModuleEvent::SmsReceived)
             {
                 return Ok(true);
             }
@@ -848,7 +875,14 @@ impl ModuleManager {
                 if !record.enabled || record.removing {
                     continue;
                 }
-                for handler in &self.manifest(id, record)?.event_handlers {
+                let manifest = match self.manifest(id, record) {
+                    Ok(manifest) => manifest,
+                    Err(error) => {
+                        tracing::warn!(%error, module = id, "skipping an unreadable module");
+                        continue;
+                    }
+                };
+                for handler in &manifest.event_handlers {
                     if handler.event == ModuleEvent::SmsReceived {
                         handlers.push((id.clone(), handler.command.clone()));
                     }
@@ -858,11 +892,19 @@ impl ModuleManager {
         };
         let mut codes = std::collections::BTreeSet::new();
         for (id, command) in handlers {
-            let result = self.invoke(
+            // A failing handler yields no code; it must not block the others
+            // or keep the message queued forever.
+            let result = match self.invoke(
                 &id,
                 &command,
                 BTreeMap::from([("text".into(), Value::String(text.into()))]),
-            )?;
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::warn!(%error, module = id, "an SMS handler failed");
+                    continue;
+                }
+            };
             if let ModuleOutput::Text { text: code } = result {
                 if code.is_empty() {
                     continue;
@@ -870,9 +912,8 @@ impl ModuleManager {
                 if !(4..=10).contains(&code.len())
                     || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
                 {
-                    return Err(ModuleError::Invalid(
-                        "The SMS module returned an invalid code.".into(),
-                    ));
+                    tracing::warn!(module = id, "an SMS handler returned an invalid code");
+                    continue;
                 }
                 codes.insert(code);
             }
