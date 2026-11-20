@@ -153,7 +153,8 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         for error in (None, RuntimeError("seed failed")):
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                app = mock.Mock()
+                app = mock.Mock(pid=4242, returncode=0)
+                app.poll.return_value = None
                 arguments = [
                     "driver", "--artifacts", str(root), "--version", "1.0.26",
                     "--architecture", "x86_64", "--desktop", "GNOME", "--session", "x11",
@@ -169,7 +170,8 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                      mock.patch.object(driver, "runtime_gui_entrypoint", return_value=root / "gui"), \
                      mock.patch.object(driver, "start_gui_runtime", return_value=(app, root / "socket")), \
                      mock.patch.object(driver, "wait_for_startup_status"), \
-                     mock.patch.object(driver, "seed_upgrade_canary", side_effect=error) as seed:
+                     mock.patch.object(driver, "seed_upgrade_canary", side_effect=error) as seed, \
+                     contextlib.redirect_stderr(io.StringIO()) as stderr:
                     if error:
                         with self.assertRaisesRegex(RuntimeError, "seed failed"):
                             driver.main()
@@ -179,6 +181,31 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 app.terminate.assert_called_once()
                 app.wait.assert_called_once_with(timeout=5)
                 app.kill.assert_not_called()
+                self.assertEqual(
+                    stderr.getvalue(),
+                    "packaged GUI pid 4242 was still running when the scenario failed\n" if error else "",
+                )
+
+    def test_scenario_failure_reports_how_the_gui_ended_and_keeps_its_output(self):
+        capability = "c" * 64
+        for already_ended, returncode, expected in (
+            (True, -signal.SIGSEGV, "had already ended with signal SIGSEGV when the scenario failed"),
+            (False, -signal.SIGSEGV, "ended with signal SIGSEGV as the scenario failed"),
+            (True, 3, "had already ended with exit status 3 when the scenario failed"),
+            (False, -signal.SIGKILL, "was still running when the scenario failed"),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                environment = {"TMPDIR": str(root), "COPYPASTE_QUALIFICATION_CAPABILITY": capability}
+                driver.gui_log_path(environment).write_text(f"native output {capability}\n", encoding="utf-8")
+                with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    driver.report_gui_failure(
+                        SimpleNamespace(pid=7, returncode=returncode), already_ended, environment, root,
+                    )
+                self.assertEqual(stderr.getvalue(), f"packaged GUI pid 7 {expected}\n")
+                self.assertEqual(
+                    (root / "gui-failure-output.log").read_text(encoding="utf-8"), "native output [redacted]\n",
+                )
 
     def test_clean_install_requires_a_new_profile_and_rejects_existing_or_linked_state(self):
         with tempfile.TemporaryDirectory() as directory:
