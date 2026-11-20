@@ -58,6 +58,18 @@ class QualifiedModulePublisherTest(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 publisher.validate_release(release | change, tag, commit)
 
+    def test_keeps_a_published_version_only_when_it_supports_the_application(self):
+        tag = "module-copypaste.sms-codes-v0.1.1"
+        manifest = publisher.ROOT / "modules/sms-codes/module.json"
+        module = {"id": "copypaste.sms-codes", "version": "0.1.1"}
+        release = {"id": 7, "tag_name": tag, "target_commitish": "b" * 40,
+                   "draft": False, "prerelease": False}
+        published = {"id": "copypaste.sms-codes", "version": "0.1.1", "app_versions": ">=0.1.0, <2.0.0"}
+        with patch.object(publisher.subprocess, "check_output", return_value=json.dumps(published)):
+            self.assertTrue(publisher.kept_release("r/r", release, tag, manifest, module, "0.1.1"))
+            self.assertFalse(publisher.kept_release("r/r", release, tag, manifest, module, "2.0.0"))
+            self.assertFalse(publisher.kept_release("r/r", release | {"draft": True}, tag, manifest, module, "0.1.1"))
+
 
 if __name__ == "__main__":
     unittest.main()

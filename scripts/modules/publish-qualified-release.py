@@ -46,6 +46,32 @@ def validate_release(release: dict, tag: str, commit: str) -> None:
         raise ValueError("module release tag or source commit differs from qualification")
 
 
+def supports_application(module: dict, version: str) -> bool:
+    bounds = re.fullmatch(r">=([0-9]+\.[0-9]+\.[0-9]+), <([0-9]+\.[0-9]+\.[0-9]+)",
+                          str(module.get("app_versions", "")))
+    if bounds is None:
+        return False
+    lower, upper, current = (tuple(map(int, value.split("."))) for value in (*bounds.groups(), version))
+    return lower <= current < upper
+
+
+def kept_release(repository: str, release: dict, tag: str, manifest: Path, module: dict,
+                 application_version: str) -> bool:
+    """An unchanged module version published from an earlier commit stays as it is
+    when it already supports this application release."""
+    if (release.get("tag_name") != tag or release.get("draft") is not False
+            or release.get("prerelease") is not False
+            or not re.fullmatch(r"[0-9a-f]{40}", str(release.get("target_commitish")))):
+        return False
+    published = json.loads(subprocess.check_output([
+        "gh", "api", "-H", "Accept: application/vnd.github.raw+json",
+        f"repos/{repository}/contents/{manifest.resolve().relative_to(ROOT).as_posix()}"
+        f"?ref={release['target_commitish']}",
+    ], text=True))
+    return (published.get("id") == module["id"] and published.get("version") == module["version"]
+            and supports_application(published, application_version))
+
+
 def qualified_paths(directory: Path, module: dict) -> list[Path]:
     paths = sorted(directory.iterdir())
     if not paths or any(not path.is_file() or path.is_symlink() for path in paths):
@@ -97,6 +123,10 @@ def publish(repository: str, directory: Path, manifest: Path, commit: str, run_i
         "--release-tag", tag,
     ], check=True)
     release = publisher.find_release(repository, tag)
+    if (release is not None and release.get("target_commitish") != commit
+            and kept_release(repository, release, tag, manifest, module, application_version)):
+        print(f"kept published module release {tag}; it supports CopyPaste {application_version}")
+        return
     if release is None:
         notes = f"{module['title']} module for CopyPaste {application_version}."
         subprocess.run([
