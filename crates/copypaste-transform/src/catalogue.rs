@@ -377,8 +377,8 @@ pub fn apply(step: &Step, input: &str, ctx: &Context) -> Result<Output, Transfor
 }
 
 /// Locales with an embedded catalogue translation.
-pub const LOCALES: [&str; 12] = [
-    "de", "en", "es", "fr", "it", "ja", "ko", "pl", "pt", "tr", "uk", "zh",
+pub const LOCALES: [&str; 13] = [
+    "de", "en", "es", "fr", "it", "ja", "ko", "pl", "pt", "ru", "tr", "uk", "zh",
 ];
 
 fn locale_source(locale: &str) -> &'static str {
@@ -391,6 +391,7 @@ fn locale_source(locale: &str) -> &'static str {
         "ko" => include_str!("../l10n/ko.json"),
         "pl" => include_str!("../l10n/pl.json"),
         "pt" => include_str!("../l10n/pt.json"),
+        "ru" => include_str!("../l10n/ru.json"),
         "tr" => include_str!("../l10n/tr.json"),
         "uk" => include_str!("../l10n/uk.json"),
         "zh" => include_str!("../l10n/zh.json"),

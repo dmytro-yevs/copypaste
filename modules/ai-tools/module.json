@@ -373,6 +373,28 @@
       "preferences/lookback/options/month/title": "Últimos 30 dias",
       "preferences/lookback/options/all/title": "Todo o histórico"
     },
+    "ru": {
+      "title": "Инструменты ИИ",
+      "description": "Подключайте ИИ-ассистентов и управляйте тем, что они видят.",
+      "commands/connections/title": "Подключённые инструменты",
+      "commands/connections/description": "Просматривайте, ограничивайте и отзывайте подключённые инструменты ИИ.",
+      "commands/setup/title": "Подключить инструмент ИИ",
+      "commands/setup/description": "Показать настройки MCP для инструмента ИИ.",
+      "preferences/other-devices/title": "Включать элементы с других устройств",
+      "preferences/excluded-devices/title": "Исключённые устройства",
+      "preferences/content-kinds/title": "Типы содержимого",
+      "preferences/content-kinds/options/text/title": "Текст",
+      "preferences/content-kinds/options/link/title": "Ссылки",
+      "preferences/content-kinds/options/rich-text/title": "Форматированный текст",
+      "preferences/content-kinds/options/image/title": "Изображения",
+      "preferences/content-kinds/options/file/title": "Имена и размеры файлов",
+      "preferences/excluded-apps/title": "Исключённые приложения",
+      "preferences/lookback/title": "Период истории",
+      "preferences/lookback/options/day/title": "Последние 24 часа",
+      "preferences/lookback/options/week/title": "Последние 7 дней",
+      "preferences/lookback/options/month/title": "Последние 30 дней",
+      "preferences/lookback/options/all/title": "Вся история"
+    },
     "tr": {
       "title": "Yapay zekâ araçları",
       "description": "Yapay zekâ asistanlarını bağlayın ve neleri görebileceklerini denetleyin.",

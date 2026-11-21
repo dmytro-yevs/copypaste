@@ -130,5 +130,27 @@
       "kind": "text",
       "default": ""
     }
-  ]
+  ],
+  "localizations": {
+    "ru": {
+      "title": "Синхронизация Supabase",
+      "description": "Синхронизируйте зашифрованную историю буфера обмена между macOS, Android и Windows с вашим проектом Supabase.",
+      "commands/status/title": "Состояние учётной записи",
+      "commands/status/description": "Показывает состояние учётной записи и синхронизации.",
+      "commands/sign-in/title": "Войти",
+      "commands/sign-in/description": "Используйте одну и ту же парольную фразу синхронизации на всех устройствах. Устройства в пространстве могут оставить её пустой и получить ключ с других ваших устройств.",
+      "commands/sign-up/title": "Создать аккаунт",
+      "commands/sign-up/description": "Используйте одну и ту же парольную фразу синхронизации на всех устройствах. Парольная фраза никогда не покидает ваше устройство.",
+      "commands/sync-now/title": "Синхронизировать сейчас",
+      "commands/sync-now/description": "Загрузить и скачать подходящую историю сейчас.",
+      "commands/change-passphrase/title": "Изменить парольную фразу синхронизации",
+      "commands/change-passphrase/description": "Задайте новую парольную фразу для добавления устройств с её помощью. Используйте её после удаления устройства.",
+      "commands/sign-out-others/title": "Выйти на других устройствах",
+      "commands/sign-out-others/description": "Завершить сеанс учётной записи на всех других устройствах. Им снова понадобится пароль учётной записи.",
+      "commands/sign-out/title": "Выйти",
+      "commands/sign-out/description": "Забыть сеанс учётной записи и ключ синхронизации на этом устройстве.",
+      "preferences/url/title": "URL проекта Supabase",
+      "preferences/anon_key/title": "Публичный ключ Supabase"
+    }
+  }
 }

@@ -203,5 +203,12 @@
       "default": [],
       "required": true
     }
-  ]
+  ],
+  "localizations": {
+    "ru": {
+      "title": "Семантический поиск",
+      "description": "Находит элементы по смыслу с помощью локальной модели, выбранной для ваших языков.",
+      "preferences/languages/title": "Языки поиска"
+    }
+  }
 }

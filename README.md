@@ -1,5 +1,7 @@
 # CopyPaste
 
+[Русский](README.ru.md)
+
 CopyPaste keeps encrypted clipboard history on macOS, Android, Windows, and Linux.
 It supports search, Quick Paste, private capture controls, device pairing, and
 optional OCR, semantic search, SMS Codes, and Supabase Sync modules.

@@ -749,6 +749,19 @@
       "surfaces/item_actions/save/title": "Salvar como trecho",
       "surfaces/tray_actions/new/title": "Novo trecho"
     },
+    "ru": {
+      "title": "Фрагменты",
+      "description": "Просматривайте, упорядочивайте и редактируйте фрагменты и коллекции.",
+      "commands/library/title": "Библиотека фрагментов",
+      "commands/library/description": "Просматривайте, упорядочивайте и редактируйте фрагменты и коллекции.",
+      "commands/new/title": "Новый фрагмент",
+      "commands/new/description": "Создать фрагмент",
+      "preferences/record-pasted/title": "Записывать вставленные фрагменты в историю",
+      "preferences/require-auth/title": "Проверять перед использованием скрытых фрагментов",
+      "surfaces/quick_paste/title": "Фрагменты",
+      "surfaces/item_actions/save/title": "Сохранить как фрагмент",
+      "surfaces/tray_actions/new/title": "Новый фрагмент"
+    },
     "tr": {
       "title": "Parçacıklar",
       "description": "Parçacıklara ve koleksiyonlara göz atın, bunları düzenleyin.",

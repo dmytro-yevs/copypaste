@@ -2,6 +2,7 @@
 Type=Application
 Name=CopyPaste
 Comment=Encrypted clipboard history
+Comment[ru]=Зашифрованная история буфера обмена
 Exec=/usr/lib/copypaste/copypaste %U
 Icon=com.copypaste.CopyPaste
 Terminal=false

@@ -14,5 +14,13 @@
     "description": "Recognize a single unambiguous authentication or transaction code locally.",
     "arguments": [{"id": "text", "title": "SMS text", "kind": "text", "default": "", "required": true}]
   }],
-  "preferences": []
+  "preferences": [],
+  "localizations": {
+    "ru": {
+      "title": "SMS-коды",
+      "description": "Автоматически копирует коды входа, подтверждения и транзакций из новых SMS-сообщений.",
+      "commands/extract-code/title": "Распознать код из SMS",
+      "commands/extract-code/description": "Распознаёт единственный однозначный код аутентификации или транзакции локально."
+    }
+  }
 }

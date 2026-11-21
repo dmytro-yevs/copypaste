@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Буфер обмена сохранён</string>
+    <string name="capture_channel_description">Подтверждает, что CopyPaste сохранил изменение буфера обмена.</string>
+    <string name="capture_title">Буфер обмена сохранён</string>
+    <string name="capture_body_default">В CopyPaste добавлен новый элемент.</string>
+    <string name="capture_image">Изображение</string>
+    <string name="capture_image_size">Изображение · %1$d × %2$d</string>
+    <string name="background_channel_name">Фоновая активность</string>
+    <string name="background_channel_description">Поддерживает включённые функции CopyPaste активными в фоне.</string>
+    <string name="background_title">CopyPaste активен</string>
+    <string name="background_text">Включённые функции работают в фоне.</string>
+    <string name="share_saved">Сохранено в CopyPaste</string>
+    <string name="share_failed">CopyPaste не удалось сохранить этот элемент</string>
+    <string name="chooser_open_file">Открыть файл CopyPaste</string>
+    <string name="pairing_invalid_qr">Отсканируйте QR-код сопряжения CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">Не удалось открыть сканер Google. Введите код сопряжения вручную.</string>
+    <string name="files_read_failed">Не удалось прочитать выбранный файл. Проверьте доступ к файлам и свободное место на диске.</string>
+    <string name="files_picker_closed">Выбор файлов закрыт.</string>
+</resources>

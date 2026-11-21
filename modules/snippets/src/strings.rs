@@ -1,4 +1,4 @@
-//! Runtime strings shown in the app, in the twelve app locales. The table is
+//! Runtime strings shown in the app, in the app locales. The table is
 //! generated from the app's own translations (`scripts/generate-strings.py`).
 //! Messages the app never had (host and storage errors) stay English, as the
 //! runtime kept them before snippets became a module.
@@ -76,9 +76,9 @@ impl Strings {
         match self.language {
             "ja" | "ko" | "zh" => "other",
             "fr" if count <= 1 => "one",
-            "uk" if last == 1 && last_two != 11 => "one",
-            "uk" if few => "few",
-            "uk" => "many",
+            "ru" | "uk" if last == 1 && last_two != 11 => "one",
+            "ru" | "uk" if few => "few",
+            "ru" | "uk" => "many",
             "pl" if count == 1 => "one",
             "pl" if few => "few",
             "pl" => "many",
@@ -104,6 +104,7 @@ mod tests {
     #[test]
     fn locales_fall_back_and_plurals_pick_the_language_category() {
         assert_eq!(Strings::new("uk_UA").get("snippetsScopeAll"), "Усі");
+        assert_eq!(Strings::new("ru_RU").get("snippetsScopeAll"), "Все");
         assert_eq!(Strings::new("xx").get("snippetsScopeAll"), "All");
         assert!(TABLE.windows(2).all(|pair| pair[0].0 < pair[1].0));
         let uk = Strings::new("uk");
