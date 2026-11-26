@@ -280,7 +280,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get updateInstallationBlocked =>
-      'Система Android заблокувала встановлення оновлення.';
+      'Захист пристрою (Play Protect, Auto Blocker) заблокував це оновлення. Дозвольте його там, а потім перевірте знову.';
 
   @override
   String get updateInstallationConflict =>

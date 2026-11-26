@@ -239,7 +239,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateInstallationCancelled => '更新安装已取消。';
 
   @override
-  String get updateInstallationBlocked => 'Android 阻止了更新安装。';
+  String get updateInstallationBlocked =>
+      '设备保护功能（Play Protect、Auto Blocker）阻止了此更新。请在其中允许后再次检查。';
 
   @override
   String get updateInstallationConflict => '更新与已安装的应用冲突。';

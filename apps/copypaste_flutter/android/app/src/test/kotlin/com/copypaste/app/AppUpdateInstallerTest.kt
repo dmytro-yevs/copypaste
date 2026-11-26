@@ -108,6 +108,16 @@ class AppUpdateInstallerTest {
     }
 
     @Test
+    fun reportsVerifierRejectionAsBlocked() {
+        val callback = start()
+        update.receive(
+            response(callback, PackageInstaller.STATUS_FAILURE_ABORTED)
+                .putExtra(appUpdateLegacyStatusExtra, -22),
+        )
+        assertEquals("installation_blocked", update.state())
+    }
+
+    @Test
     fun abandonsUncommittedSessionOnRestore() {
         start()
         val sessionId = packageInstaller.mySessions.single().sessionId

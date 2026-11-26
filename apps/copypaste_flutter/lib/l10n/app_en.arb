@@ -306,9 +306,9 @@
   "@updateInstallationCancelled": {
     "description": "Update error message shown when the user or the system cancels the update installation."
   },
-  "updateInstallationBlocked": "Android blocked the update installation.",
+  "updateInstallationBlocked": "Device protection (Play Protect, Auto Blocker) blocked this update. Allow it there, then check again.",
   "@updateInstallationBlocked": {
-    "description": "Update error message on Android shown when the system refuses to install the update."
+    "description": "Update error message on Android shown next to the Check again action when device protection refuses to install the update. Play Protect and Auto Blocker are product names."
   },
   "updateInstallationConflict": "The update conflicts with the installed app.",
   "@updateInstallationConflict": {

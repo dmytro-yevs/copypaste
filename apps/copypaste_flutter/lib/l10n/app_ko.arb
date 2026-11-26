@@ -74,7 +74,7 @@
   "updateDowngradeRefused": "다운로드한 패키지가 현재 버전보다 최신이 아닙니다.",
   "updateHomebrewRequired": "여기에서 업데이트하려면 Homebrew로 CopyPaste를 설치하십시오.",
   "updateInstallationCancelled": "업데이트 설치가 취소되었습니다.",
-  "updateInstallationBlocked": "Android가 업데이트 설치를 차단했습니다.",
+  "updateInstallationBlocked": "기기 보호 기능(Play Protect, Auto Blocker)이 이 업데이트를 차단했습니다. 해당 설정에서 허용한 다음 다시 확인하십시오.",
   "updateInstallationConflict": "업데이트가 설치된 앱과 충돌합니다.",
   "updateInstallationIncompatible": "업데이트가 이 기기와 호환되지 않습니다.",
   "updateInstallationStorage": "업데이트를 설치하려면 저장 공간을 확보하십시오.",

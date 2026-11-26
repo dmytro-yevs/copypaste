@@ -15,6 +15,7 @@ class AppUpdateController extends ChangeNotifier {
     'github.com',
     '/dmytro-yevs/copypaste/releases/latest',
   );
+  static const _blockedCode = 'installation_blocked';
 
   AppUpdateController({
     required AppUpdateRepository repository,
@@ -89,7 +90,13 @@ class AppUpdateController extends ChangeNotifier {
         await _applyInstallResult(result);
       }
     } on PlatformException catch (error) {
-      _restoreFailed(previousPhase, _platformErrorMessage(error.code));
+      final message = _platformErrorMessage(error.code);
+      // A blocked installation needs the user, so it is shown with a retry.
+      if (error.code == _blockedCode) {
+        _fail(message);
+      } else {
+        _restoreFailed(previousPhase, message);
+      }
     } catch (_) {
       _restoreFailed(
         previousPhase,
@@ -351,7 +358,7 @@ class AppUpdateController extends ChangeNotifier {
     'downgrade_refused' => AppStrings.current.updateDowngradeRefused,
     'homebrew_unavailable' => AppStrings.current.updateHomebrewRequired,
     'installation_cancelled' => AppStrings.current.updateInstallationCancelled,
-    'installation_blocked' => AppStrings.current.updateInstallationBlocked,
+    _blockedCode => AppStrings.current.updateInstallationBlocked,
     'installation_conflict' => AppStrings.current.updateInstallationConflict,
     'installation_incompatible' =>
       AppStrings.current.updateInstallationIncompatible,

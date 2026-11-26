@@ -256,7 +256,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get updateInstallationCancelled => '업데이트 설치가 취소되었습니다.';
 
   @override
-  String get updateInstallationBlocked => 'Android가 업데이트 설치를 차단했습니다.';
+  String get updateInstallationBlocked =>
+      '기기 보호 기능(Play Protect, Auto Blocker)이 이 업데이트를 차단했습니다. 해당 설정에서 허용한 다음 다시 확인하십시오.';
 
   @override
   String get updateInstallationConflict => '업데이트가 설치된 앱과 충돌합니다.';

@@ -132,6 +132,28 @@ void main() {
     expect(controller.message, 'The update installation was cancelled.');
   });
 
+  test('keeps the retry when the device blocks the update', () async {
+    final completion = Completer<AppUpdateInstallResult>();
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: _FakeUpdatePlatform(installCompletion: completion),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    final installation = controller.install();
+    await Future<void>.delayed(Duration.zero);
+    completion.completeError(PlatformException(code: 'installation_blocked'));
+    await installation;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.busy, isFalse);
+    expect(
+      controller.message,
+      'Device protection (Play Protect, Auto Blocker) blocked this update. '
+      'Allow it there, then check again.',
+    );
+  });
+
   test('reads the installed version after Android confirms success', () async {
     final completion = Completer<AppUpdateInstallResult>();
     final platform = _FakeUpdatePlatform(installCompletion: completion);

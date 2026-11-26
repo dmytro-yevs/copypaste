@@ -283,7 +283,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get updateInstallationBlocked =>
-      'Android bloqueó la instalación de la actualización.';
+      'La protección del dispositivo (Play Protect, Auto Blocker) bloqueó esta actualización. Permítela allí y vuelve a buscar.';
 
   @override
   String get updateInstallationConflict =>

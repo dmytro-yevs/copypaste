@@ -562,10 +562,10 @@ abstract class AppLocalizations {
   /// **'The update installation was cancelled.'**
   String get updateInstallationCancelled;
 
-  /// Update error message on Android shown when the system refuses to install the update.
+  /// Update error message on Android shown next to the Check again action when device protection refuses to install the update. Play Protect and Auto Blocker are product names.
   ///
   /// In en, this message translates to:
-  /// **'Android blocked the update installation.'**
+  /// **'Device protection (Play Protect, Auto Blocker) blocked this update. Allow it there, then check again.'**
   String get updateInstallationBlocked;
 
   /// Update error message on Android shown when the update package conflicts with the installed app, for example a different signature.
