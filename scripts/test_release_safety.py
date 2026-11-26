@@ -698,6 +698,26 @@ class ReleaseSafetyTest(unittest.TestCase):
         )
         self.assertIn("Review cnativeapi native menu bitmap clear-size patch", patch)
 
+    def test_windows_installer_ships_only_signed_project_binaries(self):
+        build = (ROOT / "scripts/release/build-windows-flutter.ps1").read_text(encoding="utf-8")
+        staged = re.search(r"\$projectBinaries = @\((.*?)\)", build, re.S).group(1)
+        names = set(re.findall(r'"([^"]+)"', staged))
+        self.assertIn("$uninstallerName", staged)
+        names.add(re.search(r'\$uninstallerName = "([^"]+)"', build).group(1))
+        signed = re.findall(
+            r'<pe-file path="([^"]+)">',
+            (ROOT / "packaging/windows/signpath/application.xml").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(set(signed), names)
+
+        script = (ROOT / "packaging/windows/copypaste.nsi").read_text(encoding="utf-8")
+        generator, installer = script.split("\n!else\n")
+        self.assertIn("WriteUninstaller", generator)
+        self.assertNotIn("WriteUninstaller", installer)
+        self.assertIn('File "${SOURCE_DIR}\\Uninstall.exe"', installer)
+        # A plugin call unpacks its DLL into the temporary directory at run time.
+        self.assertNotIn("::", script)
+
     def test_linux_tray_menu_patch_stops_tracking_items_the_menu_has_freed(self):
         root = ROOT / "apps/copypaste_flutter/linux"
         patch = (root / "cmake/native_tray_menu_items.cmake").read_text(encoding="utf-8")
