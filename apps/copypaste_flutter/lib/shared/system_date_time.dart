@@ -80,6 +80,30 @@ String formatSystemRecentTime(BuildContext context, DateTime value) {
   );
 }
 
+/// A period in the style of [formatSystemRecentTime]; an end on the day it
+/// began shows only its time.
+String formatSystemRecentPeriod(
+  BuildContext context,
+  DateTime start,
+  DateTime end,
+) {
+  final from = start.toLocal();
+  final to = end.toLocal();
+  final localizations = Localizations.of<MaterialLocalizations>(
+    context,
+    MaterialLocalizations,
+  );
+  final sameDay =
+      from.year == to.year && from.month == to.month && from.day == to.day;
+  final ended = sameDay && localizations != null
+      ? localizations.formatTimeOfDay(
+          TimeOfDay.fromDateTime(to),
+          alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+        )
+      : formatSystemRecentTime(context, end);
+  return '${formatSystemRecentTime(context, start)} – $ended';
+}
+
 /// Compact, locale-aware inclusive calendar range with a single-date shortcut.
 String formatSystemDateRange(
   BuildContext context,

@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter/services.dart';
@@ -203,88 +204,116 @@ class _SyncDetails extends StatelessWidget {
                   title: context.l10n.syncStatusNoPairedDevices,
                   message: context.l10n.syncNoPairedDevicesMessage,
                 )
-        : ListView.builder(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            itemCount:
-                status.peers.length +
-                (status.diagnosticsAvailable ? 2 : 3) +
-                (status.log.isEmpty ? 1 : status.log.length),
-            itemBuilder: (context, index) {
-              if (!status.diagnosticsAvailable) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-                    child: Alert(
-                      title: Text(context.l10n.syncActivityLogUnavailableTitle),
-                      content: Text(
-                        context.l10n.syncActivityLogUnavailableMessage,
+        : LayoutBuilder(
+            builder: (context, constraints) => Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.zero,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Devices stay in view; they scroll only when they cannot
+                  // fit beside the room kept for the activity list.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: math.max(
+                        constraints.maxHeight / 2,
+                        constraints.maxHeight -
+                            AppLayoutSize.syncActivityMinHeight,
                       ),
                     ),
-                  );
-                }
-                index -= 1;
-              }
-              if (index == 0) {
-                return Text(
-                  context.l10n.syncDetailsDevicesHeading,
-                  style: AppTheme.deviceCardTextStyle(context, muted: true),
-                ).semiBold();
-              }
-              index -= 1;
-              if (index == status.peers.length) {
-                return Padding(
-                  padding: const EdgeInsets.only(
-                    top: AppSpacing.xxl,
-                    bottom: AppSpacing.md,
+                    child: _devices(context),
                   ),
-                  child: Text(
-                    context.l10n.syncDetailsActivityHeading,
-                    style: AppTheme.deviceCardTextStyle(context, muted: true),
-                  ).semiBold(),
-                );
-              }
-              if (index > status.peers.length) {
-                if (status.log.isEmpty) {
-                  return Text(
-                    context.l10n.syncDetailsNoRecentProblems,
-                    style: AppTheme.deviceMetadataTextStyle(context),
-                  );
-                }
-                final entry = status.log[index - status.peers.length - 1];
-                final peer = status.peers
-                    .where((peer) => peer.id == entry.peerId)
-                    .firstOrNull;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-                  child: _SyncLogRow(
-                    entry: entry,
-                    name: peer?.name ?? context.l10n.syncDetailsUnknownPeer,
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      top: AppSpacing.xxl,
+                      bottom: AppSpacing.md,
+                    ),
+                    child: Text(
+                      context.l10n.syncDetailsActivityHeading,
+                      style: AppTheme.deviceCardTextStyle(context, muted: true),
+                    ).semiBold(),
                   ),
-                );
-              }
-              final peer = status.peers[index];
-              final device = devices?.snapshot?.peers
-                  .where((device) => device.id == peer.id)
-                  .firstOrNull;
-              return _SyncPeerRow(
-                key: ValueKey('sync-peer-${peer.id}'),
-                peer: peer,
-                deviceClass:
-                    device?.details?.profile?.deviceClass ??
-                    DeviceClass.unknown,
-                phase: status.phase == SyncPhase.unavailable
-                    ? SyncPhase.unavailable
-                    : peer.phase,
-                ping: device == null
-                    ? context.l10n.devicesPingUnavailable
-                    : devices!.peerLatencyLabel(device),
-                presence: peer.connectionLabel,
-                endpoint: device?.details?.endpoint?.lanEndpoint,
-                lastSeen: device?.lastSeen,
-              );
-            },
+                  Expanded(child: _activity(context)),
+                ],
+              ),
+            ),
           ),
   );
+
+  Widget _devices(BuildContext context) => ListView(
+    key: const ValueKey<String>('sync-details-devices'),
+    shrinkWrap: true,
+    padding: EdgeInsets.zero,
+    children: [
+      if (!status.diagnosticsAvailable)
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+          child: Alert(
+            title: Text(context.l10n.syncActivityLogUnavailableTitle),
+            content: Text(context.l10n.syncActivityLogUnavailableMessage),
+          ),
+        ),
+      Text(
+        context.l10n.syncDetailsDevicesHeading,
+        style: AppTheme.deviceCardTextStyle(context, muted: true),
+      ).semiBold(),
+      for (final peer in status.peers) _peer(context, peer),
+    ],
+  );
+
+  Widget _peer(BuildContext context, PeerSyncStatus peer) {
+    final device = devices?.snapshot?.peers
+        .where((device) => device.id == peer.id)
+        .firstOrNull;
+    return _SyncPeerRow(
+      key: ValueKey('sync-peer-${peer.id}'),
+      peer: peer,
+      deviceClass: device?.details?.profile?.deviceClass ?? DeviceClass.unknown,
+      phase: status.phase == SyncPhase.unavailable
+          ? SyncPhase.unavailable
+          : peer.phase,
+      ping: device == null
+          ? context.l10n.devicesPingUnavailable
+          : devices!.peerLatencyLabel(device),
+      presence: peer.connectionLabel,
+      endpoint: device?.details?.endpoint?.lanEndpoint,
+      lastSeen: device?.lastSeen,
+    );
+  }
+
+  Widget _activity(BuildContext context) {
+    if (status.log.isEmpty) {
+      return Align(
+        alignment: AlignmentDirectional.topStart,
+        child: Text(
+          context.l10n.syncDetailsNoRecentProblems,
+          style: AppTheme.deviceMetadataTextStyle(context),
+        ),
+      );
+    }
+    return ListView.builder(
+      key: const ValueKey<String>('sync-details-activity'),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      itemCount: status.log.length,
+      itemBuilder: (context, index) {
+        final entry = status.log[index];
+        final peer = status.peers
+            .where((peer) => peer.id == entry.peerId)
+            .firstOrNull;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+          child: _SyncLogRow(
+            entry: entry,
+            name: peer?.name ?? context.l10n.syncDetailsUnknownPeer,
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _SyncPeerRow extends StatelessWidget {
@@ -498,15 +527,28 @@ class _SyncLogRow extends StatelessWidget {
   final String name;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(
-        '${formatSystemRecentTime(context, entry.timestamp)} · $name',
-        style: AppTheme.deviceMetadataTextStyle(context),
-      ),
-      const Gap(AppSpacing.xs),
-      Text(entry.message, style: AppTheme.deviceCardTextStyle(context)),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final period = switch (entry.resolved) {
+      final ended? => formatSystemRecentPeriod(context, entry.timestamp, ended),
+      null => formatSystemRecentTime(context, entry.timestamp),
+    };
+    final style = AppTheme.deviceCardTextStyle(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '$period · $name',
+          style: AppTheme.deviceMetadataTextStyle(context),
+        ),
+        const Gap(AppSpacing.xs),
+        // A problem that is still active carries the tone of its device card.
+        Text(
+          entry.message,
+          style: entry.open
+              ? style.copyWith(color: _toneColor(context, entry.tone))
+              : style,
+        ),
+      ],
+    );
+  }
 }

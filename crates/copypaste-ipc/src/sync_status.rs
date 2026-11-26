@@ -79,7 +79,8 @@ impl Default for SyncStatus {
     }
 }
 
-/// A completed attempt, retained independently of the current connection state.
+/// One problem that needed the user: when it began and, once it cleared, when
+/// it ended. Retained independently of the current connection state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncLogEntry {
     pub pairing_id: String,
@@ -90,6 +91,8 @@ pub struct SyncLogEntry {
     pub received: u64,
     #[serde(default)]
     pub issue_code: Option<crate::sync_issue::SyncIssueCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

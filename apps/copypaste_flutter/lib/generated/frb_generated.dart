@@ -18,7 +18,6 @@ import 'dart:convert';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -7711,8 +7710,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSyncLogEntry dco_decode_runtime_sync_log_entry(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return RuntimeSyncLogEntry(
       pairingId: dco_decode_String(arr[0]),
       timestampMs: dco_decode_i_64(arr[1]),
@@ -7722,6 +7721,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       received: dco_decode_u_64(arr[5]),
       issueTitle: dco_decode_opt_String(arr[6]),
       issueSeverity: dco_decode_opt_String(arr[7]),
+      resolvedMs: dco_decode_opt_box_autoadd_i_64(arr[8]),
     );
   }
 
@@ -11211,6 +11211,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_received = sse_decode_u_64(deserializer);
     var var_issueTitle = sse_decode_opt_String(deserializer);
     var var_issueSeverity = sse_decode_opt_String(deserializer);
+    var var_resolvedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     return RuntimeSyncLogEntry(
       pairingId: var_pairingId,
       timestampMs: var_timestampMs,
@@ -11220,6 +11221,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       received: var_received,
       issueTitle: var_issueTitle,
       issueSeverity: var_issueSeverity,
+      resolvedMs: var_resolvedMs,
     );
   }
 
@@ -14402,6 +14404,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.received, serializer);
     sse_encode_opt_String(self.issueTitle, serializer);
     sse_encode_opt_String(self.issueSeverity, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.resolvedMs, serializer);
   }
 
   @protected

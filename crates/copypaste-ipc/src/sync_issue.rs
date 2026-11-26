@@ -140,33 +140,11 @@ impl SyncIssueCode {
         }
     }
 
-    pub const fn resolved_message(self) -> &'static str {
-        match self {
-            Self::VersionMismatch => "Compatible versions confirmed.",
-            Self::ConnectionLost | Self::SecureChannelInterrupted | Self::TimedOut => {
-                "Connection check succeeded."
-            }
-            Self::UnknownFailure => "Synchronization completed.",
-            Self::ResourcesUnavailable => "Synchronization resources are available again.",
-            Self::HistoryBusy
-            | Self::HistoryUnavailable
-            | Self::StorageFull
-            | Self::StoragePermissionDenied
-            | Self::HistoryLocked
-            | Self::HistoryCorrupt
-            | Self::HistoryIncompatible
-            | Self::LocalPayloadInvalid => "History access restored.",
-            Self::EncryptionUnavailable => "Encryption is available again.",
-            Self::MembershipUnavailable | Self::MembershipRejected => "Device group accepted.",
-            Self::InvalidPeerData | Self::ProtocolLimit | Self::LocalProtocolError => {
-                "Synchronization data validated."
-            }
-            Self::ItemsTooLarge => "No clips over the size limit remain pending.",
-            Self::ItemsUnavailable => "No unavailable clips remain pending.",
-            Self::ItemsRejected => "No rejected clips remain pending.",
-            Self::ClockSkew => "No clips with invalid timestamps remain pending.",
-            Self::MorePending => "The pending queue is synchronized.",
-        }
+    /// Whether the condition needs the user: a blocker, or clips that were
+    /// left out. Only these outlive a restart and enter the activity history.
+    /// The rest clear on their own and are reported while they last.
+    pub const fn needs_attention(self) -> bool {
+        self.blocking() || (self.pending() && !matches!(self, Self::MorePending))
     }
 
     pub const fn blocking(self) -> bool {

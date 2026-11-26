@@ -430,6 +430,101 @@ void main() {
     },
   );
 
+  testWidgets('a cleared problem is one activity row with its period', (
+    tester,
+  ) async {
+    final repository = FakeSettingsRepository()
+      ..capture = CaptureSettingsState(
+        running: true,
+        paused: false,
+        epoch: 0,
+        syncStatus: SyncStatus(
+          revision: 1,
+          phase: SyncPhase.synced,
+          peers: const [
+            PeerSyncStatus(
+              id: 'phone',
+              name: 'Android phone',
+              phase: SyncPhase.synced,
+              connection: DeviceConnectionState.online,
+            ),
+          ],
+          log: [
+            SyncLogEntry(
+              peerId: 'phone',
+              timestamp: DateTime(2026, 10, 25, 10, 10),
+              resolved: DateTime(2026, 10, 25, 10, 18),
+              kind: 'problem_detected',
+              issueTitle: 'Storage full',
+              issueSeverity: 'error',
+            ),
+          ],
+        ),
+      );
+    final controller = _controller(repository);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(_app(controller));
+    await tester.tap(find.byKey(const ValueKey<String>('sync-header-open')));
+    await tester.pumpAndSettle();
+    expect(find.text('Storage full'), findsOneWidget);
+    expect(
+      find.textContaining(RegExp(r'10:10.* – .*10:18.* · Android phone$')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('only the activity list scrolls; devices stay in view', (
+    tester,
+  ) async {
+    final repository = FakeSettingsRepository()
+      ..capture = CaptureSettingsState(
+        running: true,
+        paused: false,
+        epoch: 0,
+        syncStatus: SyncStatus(
+          revision: 1,
+          phase: SyncPhase.synced,
+          peers: const [
+            PeerSyncStatus(
+              id: 'phone',
+              name: 'Android phone',
+              phase: SyncPhase.synced,
+              connection: DeviceConnectionState.online,
+            ),
+          ],
+          log: [
+            for (var index = 0; index < 40; index++)
+              SyncLogEntry(
+                peerId: 'phone',
+                timestamp: DateTime(2026, 10, 25, 10, index),
+                kind: 'problem_detected',
+                issueTitle: 'Problem $index',
+              ),
+          ],
+        ),
+      );
+    final controller = _controller(repository);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(_app(controller));
+    await tester.tap(find.byKey(const ValueKey<String>('sync-header-open')));
+    await tester.pumpAndSettle();
+    final device = find.byWidgetPredicate(
+      (widget) => widget is DeviceLabel && widget.name == 'Android phone',
+    );
+    final before = tester.getTopLeft(device);
+    expect(find.text('Problem 0'), findsOneWidget);
+    await tester.drag(
+      find.byKey(const ValueKey<String>('sync-details-activity')),
+      const Offset(0, -600),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Problem 0'), findsNothing);
+    expect(tester.getTopLeft(device), before);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('sync details fit a narrow phone with enlarged text', (
     tester,
   ) async {

@@ -23,14 +23,6 @@ struct State {
     journal: super::journal::Journal,
 }
 impl State {
-    /// Records a peer condition, logging it once when it first appears.
-    fn condition(&mut self, id: &str, code: SyncIssueCode) -> bool {
-        let recorded = self.journal.condition(id, code, 0);
-        if recorded {
-            tracing::warn!("peer sync issue: {}", code.as_str());
-        }
-        recorded
-    }
     /// Every observed mismatch restarts the wait: a peer still dialling in on
     /// another version keeps proving the condition current.
     fn version_condition(&mut self, id: &str, code: SyncIssueCode) {
@@ -113,18 +105,14 @@ impl SyncActivity {
     pub(super) fn evidence(&self, id: &str, evidence: SyncEvidence) {
         self.mutate(|state| {
             state.version_evidence(id, evidence);
-            let resolved = state.journal.evidence(id, evidence);
-            if resolved {
-                tracing::info!("peer sync issue resolved");
-            }
-            resolved
+            state.journal.evidence(id, evidence)
         });
     }
     pub(super) fn failure(&self, id: &str, error: NodeError) {
         self.mutate(|state| {
             error.sync_issue().is_some_and(|code| {
                 state.version_condition(id, code);
-                state.condition(id, code)
+                state.journal.condition(id, code, 0)
             })
         });
     }
@@ -331,7 +319,7 @@ impl SessionObservation {
             }
             if let Some(code) = error.and_then(NodeError::sync_issue) {
                 state.version_condition(&self.pairing_id, code);
-                state.condition(&self.pairing_id, code);
+                state.journal.condition(&self.pairing_id, code, 0);
             }
             if let Some(stats) = stats.filter(|_| current_result) {
                 tracing::debug!(
@@ -340,13 +328,11 @@ impl SessionObservation {
                     stats.received
                 );
                 state.version_evidence(&self.pairing_id, SyncEvidence::HistoryComplete);
-                if state.journal.evidence_at(
+                state.journal.evidence_at(
                     &self.pairing_id,
                     SyncEvidence::HistoryComplete,
                     self.observation,
-                ) {
-                    tracing::info!("peer sync issue resolved");
-                }
+                );
                 for (code, count) in [
                     (SyncIssueCode::ItemsTooLarge, stats.skipped_too_large),
                     (SyncIssueCode::ItemsRejected, stats.skipped_invalid),
@@ -424,11 +410,12 @@ mod tests {
         );
         let completed = activity.snapshot(&peers, true);
         assert_eq!(completed.phase, SyncPhase::Synced);
-        assert_eq!(completed.log.len(), 2);
+        assert_eq!(completed.log.len(), 1);
+        assert!(completed.log[0].resolved_ms.is_some());
         let idle = activity.begin("peer");
         assert_eq!(activity.snapshot(&peers, true).phase, SyncPhase::Synced);
         idle.finish(Some(&SyncStats::default()), None);
-        assert_eq!(activity.snapshot(&peers, true).log.len(), 2);
+        assert_eq!(activity.snapshot(&peers, true).log.len(), 1);
         let running = activity.begin("peer");
         activity.local_changed(None);
         running.finish(Some(&SyncStats::default()), None);
