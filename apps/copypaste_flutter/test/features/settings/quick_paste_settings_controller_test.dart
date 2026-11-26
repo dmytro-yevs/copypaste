@@ -32,6 +32,25 @@ void main() {
     },
   );
 
+  test('hiding the queue tab is saved and announced', () async {
+    final store = MemoryQuickPastePreferencesStore();
+    final controller = QuickPasteSettingsController(
+      store: store,
+      registrar: _Registrar(),
+      windowHost: _WindowHost(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    var notified = 0;
+    controller.addListener(() => notified += 1);
+
+    expect(await controller.setQueueTab(false), isTrue);
+
+    expect(controller.queueTab, isFalse);
+    expect((await store.read()).queueTab, isFalse);
+    expect(notified, greaterThan(0));
+  });
+
   test(
     'the saved shortcut can be retried after cancellation restoration fails',
     () async {
@@ -358,6 +377,7 @@ void main() {
 
     expect(find.text('Quick Paste'), findsWidgets);
     expect(find.text('Paste automatically'), findsOneWidget);
+    expect(find.text('Queue tab'), findsOneWidget);
     expect(find.byType(Switch), findsWidgets);
 
     Finder rowSwitch(String title) => find.descendant(

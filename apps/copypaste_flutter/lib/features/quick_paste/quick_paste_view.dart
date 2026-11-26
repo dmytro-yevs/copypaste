@@ -422,7 +422,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   _preparePresentationFrame();
-                  final menu = _menu(context);
+                  final menu = _MenuScope(child: _menu(context));
                   final menuWidth =
                       (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
                           .clamp(
@@ -611,7 +611,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
           children: [for (final result in results) _resultRow(result)],
         ),
         const Gap(AppSpacing.xs),
-        Divider(color: AppTheme.popupBorder(context)),
+        const Divider(),
         const Gap(AppSpacing.xs),
         Expanded(child: _history(context)),
       ],
@@ -902,7 +902,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
           if (pinnedIds.isNotEmpty) ...[
             if (recentIds.isNotEmpty) ...[
               const Gap(AppSpacing.xs),
-              Divider(color: AppTheme.popupBorder(context)),
+              const Divider(),
               const Gap(AppSpacing.xs),
             ],
             ConstrainedBox(
@@ -1619,6 +1619,54 @@ class _ModulePanel extends StatelessWidget {
   }
 }
 
+/// What every row of the menu shares: one divider colour, and shortcut keys
+/// in equal slots so the modifiers of stacked rows form a column.
+class _MenuScope extends StatelessWidget {
+  const _MenuScope({required this.child});
+
+  final Widget child;
+
+  static final _modifiers = {
+    LogicalKeyboardKey.control,
+    LogicalKeyboardKey.alt,
+    LogicalKeyboardKey.meta,
+    LogicalKeyboardKey.shift,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final display = Data.of<KeyboardShortcutDisplayHandle>(context);
+    return ComponentTheme<DividerTheme>(
+      data: DividerTheme(color: AppTheme.popupBorder(context)),
+      child: KeyboardShortcutDisplayMapper(
+        builder: (context, key) {
+          final label = display.buildKeyboardDisplay(context, key);
+          return _modifiers.contains(key) ? label : _ShortcutKeySlot(label);
+        },
+        child: child,
+      ),
+    );
+  }
+}
+
+/// At least one em of the shortcut text, the width any single key fits in.
+class _ShortcutKeySlot extends StatelessWidget {
+  const _ShortcutKeySlot(this.label);
+
+  final Widget label;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = DefaultTextStyle.of(context).style.fontSize ?? 0;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minWidth: MediaQuery.textScalerOf(context).scale(size),
+      ),
+      child: label,
+    );
+  }
+}
+
 class _Footer extends StatelessWidget {
   const _Footer({required this.controller});
 
@@ -1626,53 +1674,62 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = AppTheme.clipboardMenuButtonStyle();
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: () => confirmClear(context, controller),
-          child: Text(context.l10n.commonClear),
+        _action(
+          LucideIcons.trash2,
+          l10n.quickPasteClearHistory,
+          () => confirmClear(context, controller),
         ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: controller.openSettings,
-          child: Row(
-            children: [
-              Expanded(child: Text(context.l10n.quickPastePreferences)),
-              MenuShortcut(
-                activator: desktopShortcut(LogicalKeyboardKey.comma),
-                combiner: const SizedBox.shrink(),
-              ),
-            ],
-          ),
+        _action(
+          LucideIcons.settings,
+          l10n.quickPasteSettings,
+          controller.openSettings,
+          shortcut: LogicalKeyboardKey.comma,
         ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: () => showAbout(context),
-          child: Text(context.l10n.quickPasteAbout),
+        _action(
+          LucideIcons.info,
+          l10n.quickPasteAbout,
+          () => showAbout(context),
         ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: controller.quit,
-          child: Row(
-            children: [
-              Expanded(child: Text(context.l10n.quickPasteQuit)),
-              MenuShortcut(
-                activator: desktopShortcut(LogicalKeyboardKey.keyQ),
-                combiner: const SizedBox.shrink(),
-              ),
-            ],
-          ),
+        _action(
+          LucideIcons.power,
+          l10n.quickPasteQuit,
+          controller.quit,
+          shortcut: LogicalKeyboardKey.keyQ,
         ),
       ],
     );
   }
+
+  /// Laid out like a clip row, so icons and labels share its columns.
+  Widget _action(
+    IconData icon,
+    String label,
+    VoidCallback onPressed, {
+    LogicalKeyboardKey? shortcut,
+  }) => Button.ghost(
+    style: AppTheme.clipboardMenuButtonStyle(),
+    alignment: Alignment.centerLeft,
+    onPressed: onPressed,
+    child: Row(
+      children: [
+        AppIconFrame(
+          size: AppIconSize.sm,
+          child: Icon(icon, size: AppIconSize.sm),
+        ),
+        const Gap(AppSpacing.sm),
+        Expanded(child: Text(label)),
+        if (shortcut != null)
+          MenuShortcut(
+            activator: desktopShortcut(shortcut),
+            combiner: const SizedBox.shrink(),
+          ),
+      ],
+    ),
+  );
 
   static Future<void> confirmClear(
     BuildContext context,

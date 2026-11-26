@@ -364,13 +364,16 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickPastePathUnavailable => 'パス不明';
 
   @override
-  String get quickPastePreferences => '環境設定…';
+  String get quickPasteSettings => '設定…';
 
   @override
   String get quickPasteAbout => 'CopyPaste について';
 
   @override
   String get quickPasteQuit => '終了';
+
+  @override
+  String get quickPasteClearHistory => '履歴を消去…';
 
   @override
   String get quickPasteClearHistoryTitle => '履歴を消去しますか？';
@@ -1914,6 +1917,13 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'パスワード欄にフォーカスがある間、クリップは伏せて表示されます。';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => '「キュー」タブ';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Quick Paste に Paste Queue を表示します。';
 
   @override
   String get settingsAccessibilityRequiredTitle => 'アクセシビリティの許可が必要です';

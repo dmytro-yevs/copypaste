@@ -255,8 +255,16 @@ class QuickPasteController extends ChangeNotifier {
   List<QuickPasteTab> get tabs => [
     QuickPasteTab.history,
     for (final (id, _) in _surfaces) QuickPasteTab.module(id),
-    if (_createQueue != null) QuickPasteTab.queue,
+    if (_createQueue != null && _preferences.queueTab) QuickPasteTab.queue,
   ];
+
+  /// Returns to History when the selected tab is no longer offered.
+  void _leaveUnavailableTab() {
+    if (tabs.contains(_tab)) return;
+    _tab = QuickPasteTab.history;
+    _focusedResult = null;
+    _moduleForm = null;
+  }
 
   /// The title of a module tab; null for the built-in tabs.
   String? moduleTabTitle(QuickPasteTab tab) => _surface(tab.moduleId)?.title;
@@ -494,6 +502,7 @@ class QuickPasteController extends ChangeNotifier {
     final preferences = await _preferencesStore.read();
     if (!_isCurrent(presentationId)) return;
     _preferences = preferences;
+    _leaveUnavailableTab();
     // The target is sampled once per presentation, before anything renders.
     await Future.wait([_detectMaskedMode(), _loadDefaultPipeline(targetApp)]);
     if (!_isCurrent(presentationId)) return;
@@ -1018,11 +1027,7 @@ class QuickPasteController extends ChangeNotifier {
     }
     if (_disposed) return;
     _surfaces = List.unmodifiable(surfaces);
-    if (!tabs.contains(_tab)) {
-      _tab = QuickPasteTab.history;
-      _focusedResult = null;
-      _moduleForm = null;
-    }
+    _leaveUnavailableTab();
     notifyListeners();
   }
 

@@ -404,13 +404,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get quickPastePathUnavailable => 'Ruta no disponible';
 
   @override
-  String get quickPastePreferences => 'Preferencias…';
+  String get quickPasteSettings => 'Ajustes…';
 
   @override
   String get quickPasteAbout => 'Acerca de';
 
   @override
   String get quickPasteQuit => 'Salir';
+
+  @override
+  String get quickPasteClearHistory => 'Borrar el historial…';
 
   @override
   String get quickPasteClearHistoryTitle => '¿Borrar el historial?';
@@ -2082,6 +2085,13 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Oculta los recortes mientras se usa un campo de contraseña.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Pestaña Cola';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Muestra Paste Queue en Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle => 'Se requiere Accesibilidad';

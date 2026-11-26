@@ -164,6 +164,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _quickPasteShortcutKey = GlobalKey();
   final _quickPasteAutoPasteKey = GlobalKey();
   final _quickPasteMaskPasswordFieldsKey = GlobalKey();
+  final _quickPasteQueueTabKey = GlobalKey();
   final _aboutSectionKey = GlobalKey();
   final _startInBackgroundKey = GlobalKey();
   final _windowGlassKey = GlobalKey();
@@ -480,6 +481,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   maskPasswordFieldsKey: _quickPasteMaskPasswordFieldsKey,
                   maskPasswordFieldsHighlighted: _isHighlighted(
                     _SettingsTargetId.quickPasteMaskPasswordFields,
+                  ),
+                  queueTabKey: _quickPasteQueueTabKey,
+                  queueTabHighlighted: _isHighlighted(
+                    _SettingsTargetId.quickPasteQueueTab,
                   ),
                 ),
                 SettingsSectionId.diagnostics => _featureSection(
@@ -1177,6 +1182,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           label: context.l10n.settingsMaskPasswordFieldsTitle,
           description: context.l10n.settingsMaskPasswordFieldsDescription,
           targetKey: _quickPasteMaskPasswordFieldsKey,
+        ),
+        SettingsSearchTarget(
+          id: _SettingsTargetId.quickPasteQueueTab,
+          section: SettingsSectionId.quickPaste,
+          label: context.l10n.settingsQuickPasteQueueTabTitle,
+          description: context.l10n.settingsQuickPasteQueueTabDescription,
+          targetKey: _quickPasteQueueTabKey,
         ),
       ],
       for (final contribution in widget.featureSections)
@@ -2838,6 +2850,8 @@ class _QuickPasteSection extends StatelessWidget {
     required this.autoPasteHighlighted,
     required this.maskPasswordFieldsKey,
     required this.maskPasswordFieldsHighlighted,
+    required this.queueTabKey,
+    required this.queueTabHighlighted,
   });
 
   final QuickPasteSettingsController controller;
@@ -2846,6 +2860,8 @@ class _QuickPasteSection extends StatelessWidget {
   final bool autoPasteHighlighted;
   final Key maskPasswordFieldsKey;
   final bool maskPasswordFieldsHighlighted;
+  final Key queueTabKey;
+  final bool queueTabHighlighted;
 
   @override
   Widget build(BuildContext context) {
@@ -2979,6 +2995,19 @@ class _QuickPasteSection extends StatelessWidget {
                       onChanged: controller.busy
                           ? null
                           : controller.setMaskPasswordFields,
+                    ),
+                  ),
+                  SettingRow(
+                    key: queueTabKey,
+                    highlighted: queueTabHighlighted,
+                    title: context.l10n.settingsQuickPasteQueueTabTitle,
+                    description:
+                        context.l10n.settingsQuickPasteQueueTabDescription,
+                    trailing: Switch(
+                      value: controller.queueTab,
+                      onChanged: controller.busy
+                          ? null
+                          : controller.setQueueTab,
                     ),
                   ),
                 ],
@@ -3157,6 +3186,7 @@ abstract final class _SettingsTargetId {
   static const String quickPasteAutoPaste = 'result-quick-paste-auto-paste';
   static const String quickPasteMaskPasswordFields =
       'result-quick-paste-mask-password-fields';
+  static const String quickPasteQueueTab = 'result-quick-paste-queue-tab';
   static const String startInBackground = 'result-start-in-background';
   static const String restoreClipboard = 'result-restore-clipboard';
   static const String logLevel = 'result-log-level';

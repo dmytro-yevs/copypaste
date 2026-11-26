@@ -201,6 +201,7 @@ class SyncLogEntry {
     this.received = 0,
     this.issueTitle,
     this.issueSeverity,
+    this.resolved,
   });
   final String peerId;
   final DateTime timestamp;
@@ -210,6 +211,14 @@ class SyncLogEntry {
   final int received;
   final String? issueTitle;
   final String? issueSeverity;
+
+  /// When the problem cleared; null while it is still active.
+  final DateTime? resolved;
+
+  /// A problem the backend still reports as active.
+  bool get open => kind == 'problem_detected' && resolved == null;
+  SyncTone get tone =>
+      issueSeverity == 'error' ? SyncTone.error : SyncTone.warning;
   @override
   bool operator ==(Object other) =>
       other is SyncLogEntry &&
@@ -220,7 +229,8 @@ class SyncLogEntry {
       sent == other.sent &&
       received == other.received &&
       issueTitle == other.issueTitle &&
-      issueSeverity == other.issueSeverity;
+      issueSeverity == other.issueSeverity &&
+      resolved == other.resolved;
   @override
   int get hashCode => Object.hash(
     peerId,
@@ -231,6 +241,7 @@ class SyncLogEntry {
     received,
     issueTitle,
     issueSeverity,
+    resolved,
   );
   String get message {
     final strings = AppStrings.current;

@@ -38,7 +38,10 @@ import 'package:copypaste_flutter/features/quick_paste/repository/quick_paste_de
 import 'package:copypaste_flutter/features/transforms/models/transform_models.dart';
 import 'package:copypaste_flutter/platform/security/device_authenticator.dart';
 
+import 'package:copypaste_flutter/features/paste_queue/controller/paste_queue_controller.dart';
+
 import '../modules/modules_test_support.dart';
+import '../paste_queue/paste_queue_test_support.dart';
 import '../transforms/transform_test_support.dart';
 import '../../support/focus_traversal.dart';
 
@@ -579,7 +582,7 @@ void main() {
     variant: TargetPlatformVariant({TargetPlatform.macOS}),
   );
 
-  testWidgets('file clip shows its name and a one-line middle-ellipsized path', (
+  testWidgets('file clip shows its name over a middle-ellipsized folder line', (
     tester,
   ) async {
     final repository = _Repository();
@@ -617,7 +620,7 @@ void main() {
     );
     expect(rendered.maxLines, 1);
     expect(rendered.data, startsWith('/Users'));
-    expect(rendered.data, endsWith('report.bin'));
+    expect(rendered.data, endsWith('nested'));
     expect(rendered.data, contains('…'));
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -1102,7 +1105,7 @@ void main() {
         expect(pinned.position, same(pinnedPosition));
         expect(recent.offset, 400);
         expect(pinned.offset, 80);
-        for (final label in ['Clear', 'Preferences…', 'About', 'Quit']) {
+        for (final label in ['Clear history…', 'Settings…', 'About', 'Quit']) {
           final buttons = find.ancestor(
             of: find.text(label),
             matching: find.byType(Button),
@@ -1573,8 +1576,8 @@ void main() {
       tester.widgetList<SourceAppLabel>(sourceApps).map((label) => label.name),
       everyElement('Editor'),
     );
-    expect(find.text('Clear'), findsOneWidget);
-    expect(find.text('Preferences…'), findsOneWidget);
+    expect(find.text('Clear history…'), findsOneWidget);
+    expect(find.text('Settings…'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
     expect(find.text('Quit'), findsOneWidget);
     expect(find.byType(Command), findsNothing);
@@ -1603,8 +1606,8 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('Recent clip')).dy),
     );
     expect(
-      tester.getTopLeft(find.text('Preferences…')).dy,
-      greaterThan(tester.getTopLeft(find.text('Clear')).dy),
+      tester.getTopLeft(find.text('Settings…')).dy,
+      greaterThan(tester.getTopLeft(find.text('Clear history…')).dy),
     );
     expect(
       tester
@@ -1704,7 +1707,7 @@ void main() {
     );
     final pinned = find.byKey(const ValueKey('quick-paste-pinned'));
     final pinnedRect = tester.getRect(pinned);
-    final footerRect = tester.getRect(find.text('Clear'));
+    final footerRect = tester.getRect(find.text('Clear history…'));
     expect(find.descendant(of: historyScroll, matching: pinned), findsNothing);
     expect(
       pinnedRect.top,
@@ -1717,7 +1720,7 @@ void main() {
     final scroll = tester.widget<ScrollView>(historyScroll);
     expect(scroll.controller!.offset, greaterThan(0));
     expect(tester.getRect(pinned), pinnedRect);
-    expect(tester.getRect(find.text('Clear')), footerRect);
+    expect(tester.getRect(find.text('Clear history…')), footerRect);
     expect(tester.takeException(), isNull);
   });
 
@@ -1749,10 +1752,10 @@ void main() {
       final pinnedScroll = find.byKey(
         const ValueKey('quick-paste-pinned-scroll'),
       );
-      final footerRect = tester.getRect(find.text('Clear'));
+      final footerRect = tester.getRect(find.text('Clear history…'));
       await tester.drag(pinnedScroll, const Offset(0, -300));
       await tester.pumpAndSettle();
-      expect(tester.getRect(find.text('Clear')), footerRect);
+      expect(tester.getRect(find.text('Clear history…')), footerRect);
       expect(tester.takeException(), isNull);
     });
   }
@@ -3627,6 +3630,72 @@ void main() {
       expect(controller.defaultPipeline?.name, 'Global');
     });
   });
+
+  test(
+    'a hidden queue tab is not offered and does not stay selected',
+    () async {
+      final store = MemoryQuickPastePreferencesStore();
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: store,
+        host: _ContextHost(),
+        createQueue: (hideWindow) => PasteQueueController(
+          repository: FakePasteQueueRepository(),
+          pasteHost: FakeForegroundPasteHost(),
+          hideWindow: hideWindow,
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      await controller.selectTab(QuickPasteTab.queue);
+      expect(controller.tab, QuickPasteTab.queue);
+
+      store.value = store.value.copyWith(queueTab: false);
+      await controller.opened(2);
+
+      expect(controller.tabs, [QuickPasteTab.history]);
+      expect(controller.tab, QuickPasteTab.history);
+    },
+  );
+
+  // Loads real glyph metrics, which stay loaded: keep this test last.
+  testWidgets(
+    'shortcut modifiers share a column whatever the width of their keys',
+    (tester) async {
+      await tester.runAsync(() async {
+        final font = FontLoader('packages/shadcn_flutter/GeistSans')
+          ..addFont(
+            rootBundle.load(
+              'packages/shadcn_flutter/lib/fonts/Geist-Regular.otf',
+            ),
+          );
+        await font.load();
+      });
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost()..permissionGranted = true,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle(const Duration(milliseconds: 150));
+
+      // The recent clip, the pinned clip, Settings and Quit: `1`, the pin's
+      // letter, `,` and `Q`.
+      final modifiers = find.text('⌘');
+      expect(modifiers, findsNWidgets(4));
+      final columns = [
+        for (final element in modifiers.evaluate())
+          (element.renderObject! as RenderBox).localToGlobal(Offset.zero).dx,
+      ];
+      expect(columns, everyElement(closeTo(columns.first, 0.1)));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
 }
 
 const _libraryModule = InstalledModule(

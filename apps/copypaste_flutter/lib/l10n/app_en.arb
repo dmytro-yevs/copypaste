@@ -438,8 +438,8 @@
   "@quickPastePathUnavailable": {
     "description": "Shown under a file clip in Quick Paste when the file location is unknown."
   },
-  "quickPastePreferences": "Preferences…",
-  "@quickPastePreferences": {
+  "quickPasteSettings": "Settings…",
+  "@quickPasteSettings": {
     "description": "Menu item in the Quick Paste footer that opens the application settings."
   },
   "quickPasteAbout": "About",
@@ -449,6 +449,10 @@
   "quickPasteQuit": "Quit",
   "@quickPasteQuit": {
     "description": "Menu item in the Quick Paste footer that quits the application. Verb."
+  },
+  "quickPasteClearHistory": "Clear history…",
+  "@quickPasteClearHistory": {
+    "description": "Menu item in the Quick Paste footer that asks to clear the clipboard history."
   },
   "quickPasteClearHistoryTitle": "Clear history?",
   "@quickPasteClearHistoryTitle": {
@@ -2471,6 +2475,14 @@
   "settingsMaskPasswordFieldsDescription": "Clips are masked while a password field has focus.",
   "@settingsMaskPasswordFieldsDescription": {
     "description": "One-line description of the Hide previews in password fields setting."
+  },
+  "settingsQuickPasteQueueTabTitle": "Queue tab",
+  "@settingsQuickPasteQueueTabTitle": {
+    "description": "Settings row title for showing the Paste Queue tab in Quick Paste."
+  },
+  "settingsQuickPasteQueueTabDescription": "Show Paste Queue in Quick Paste.",
+  "@settingsQuickPasteQueueTabDescription": {
+    "description": "Description of the setting that shows the Paste Queue tab in Quick Paste."
   },
   "settingsAccessibilityRequiredTitle": "Accessibility is required",
   "@settingsAccessibilityRequiredTitle": {

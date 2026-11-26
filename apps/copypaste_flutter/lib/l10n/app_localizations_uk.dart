@@ -395,13 +395,16 @@ class AppLocalizationsUk extends AppLocalizations {
   String get quickPastePathUnavailable => 'Шлях недоступний';
 
   @override
-  String get quickPastePreferences => 'Параметри…';
+  String get quickPasteSettings => 'Налаштування…';
 
   @override
   String get quickPasteAbout => 'Про програму';
 
   @override
   String get quickPasteQuit => 'Вийти';
+
+  @override
+  String get quickPasteClearHistory => 'Очистити історію…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Очистити історію?';
@@ -2076,6 +2079,13 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Кліпи замасковано, поки фокус у полі пароля.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Вкладка «Черга»';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Показувати Paste Queue у Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

@@ -394,13 +394,16 @@ class AppLocalizationsTr extends AppLocalizations {
   String get quickPastePathUnavailable => 'Yol kullanılamıyor';
 
   @override
-  String get quickPastePreferences => 'Tercihler…';
+  String get quickPasteSettings => 'Ayarlar…';
 
   @override
   String get quickPasteAbout => 'Hakkında';
 
   @override
   String get quickPasteQuit => 'Çık';
+
+  @override
+  String get quickPasteClearHistory => 'Geçmişi temizle…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Geçmiş temizlensin mi?';
@@ -2045,6 +2048,13 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Bir parola alanı odaktayken öğeler maskelenir.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Kuyruk sekmesi';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Paste Queue\'yu Quick Paste\'te gösterir.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

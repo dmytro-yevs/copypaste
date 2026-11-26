@@ -403,13 +403,16 @@ class AppLocalizationsDe extends AppLocalizations {
   String get quickPastePathUnavailable => 'Pfad nicht verfügbar';
 
   @override
-  String get quickPastePreferences => 'Einstellungen …';
+  String get quickPasteSettings => 'Einstellungen …';
 
   @override
   String get quickPasteAbout => 'Info';
 
   @override
   String get quickPasteQuit => 'Beenden';
+
+  @override
+  String get quickPasteClearHistory => 'Verlauf löschen …';
 
   @override
   String get quickPasteClearHistoryTitle => 'Verlauf löschen?';
@@ -2076,6 +2079,13 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Einträge werden maskiert, solange ein Passwortfeld aktiv ist.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Tab „Warteschlange“';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Paste Queue in Quick Paste anzeigen.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

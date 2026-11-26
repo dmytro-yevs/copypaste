@@ -2027,6 +2027,9 @@ class RuntimeSyncLogEntry {
   final String? issueTitle;
   final String? issueSeverity;
 
+  /// When the problem cleared; absent while it is still active.
+  final PlatformInt64? resolvedMs;
+
   const RuntimeSyncLogEntry({
     required this.pairingId,
     required this.timestampMs,
@@ -2036,6 +2039,7 @@ class RuntimeSyncLogEntry {
     required this.received,
     this.issueTitle,
     this.issueSeverity,
+    this.resolvedMs,
   });
 
   @override
@@ -2047,7 +2051,8 @@ class RuntimeSyncLogEntry {
       sent.hashCode ^
       received.hashCode ^
       issueTitle.hashCode ^
-      issueSeverity.hashCode;
+      issueSeverity.hashCode ^
+      resolvedMs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2061,7 +2066,8 @@ class RuntimeSyncLogEntry {
           sent == other.sent &&
           received == other.received &&
           issueTitle == other.issueTitle &&
-          issueSeverity == other.issueSeverity;
+          issueSeverity == other.issueSeverity &&
+          resolvedMs == other.resolvedMs;
 }
 
 class RuntimeSyncStatus {

@@ -341,13 +341,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickPastePathUnavailable => '路径不可用';
 
   @override
-  String get quickPastePreferences => '偏好设置…';
+  String get quickPasteSettings => '设置…';
 
   @override
   String get quickPasteAbout => '关于';
 
   @override
   String get quickPasteQuit => '退出';
+
+  @override
+  String get quickPasteClearHistory => '清除历史记录…';
 
   @override
   String get quickPasteClearHistoryTitle => '清除历史记录？';
@@ -1846,6 +1849,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsMaskPasswordFieldsDescription => '密码字段获得焦点时，剪贴项会被遮盖。';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => '队列标签页';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      '在 Quick Paste 中显示 Paste Queue。';
 
   @override
   String get settingsAccessibilityRequiredTitle => '需要辅助功能权限';

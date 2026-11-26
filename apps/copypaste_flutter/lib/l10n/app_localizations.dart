@@ -763,8 +763,8 @@ abstract class AppLocalizations {
   /// Menu item in the Quick Paste footer that opens the application settings.
   ///
   /// In en, this message translates to:
-  /// **'Preferences…'**
-  String get quickPastePreferences;
+  /// **'Settings…'**
+  String get quickPasteSettings;
 
   /// Menu item in the Quick Paste footer that shows information about the application.
   ///
@@ -777,6 +777,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Quit'**
   String get quickPasteQuit;
+
+  /// Menu item in the Quick Paste footer that asks to clear the clipboard history.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear history…'**
+  String get quickPasteClearHistory;
 
   /// Title of the Quick Paste confirmation dialog that deletes all unpinned clipboard items.
   ///
@@ -3495,6 +3501,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Clips are masked while a password field has focus.'**
   String get settingsMaskPasswordFieldsDescription;
+
+  /// Settings row title for showing the Paste Queue tab in Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue tab'**
+  String get settingsQuickPasteQueueTabTitle;
+
+  /// Description of the setting that shows the Paste Queue tab in Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Paste Queue in Quick Paste.'**
+  String get settingsQuickPasteQueueTabDescription;
 
   /// macOS alert title when the Accessibility permission is needed for automatic paste. Accessibility is the macOS permission name.
   ///

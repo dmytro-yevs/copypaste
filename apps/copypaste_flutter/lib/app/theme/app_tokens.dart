@@ -98,6 +98,9 @@ abstract final class AppLayoutSize {
   static const double quickPasteInspectorWidth = 360;
   static const double transformPaletteWidth = 640;
   static const double settingsStackedControlWidth = 420;
+
+  /// Room the sync details keep for activity below a long device list.
+  static const double syncActivityMinHeight = 240;
   static const double settingsNavigationWidth = 240;
   static const double settingsContentMaxWidth = 900;
   static const double mobileNavigationMaxWidth = 328;

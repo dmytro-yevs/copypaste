@@ -735,6 +735,8 @@ pub struct RuntimeSyncLogEntry {
     pub received: u64,
     pub issue_title: Option<String>,
     pub issue_severity: Option<String>,
+    /// When the problem cleared; absent while it is still active.
+    pub resolved_ms: Option<i64>,
 }
 
 fn issue_severity(value: copypaste_ipc::sync_issue::SyncIssueSeverity) -> &'static str {
@@ -795,6 +797,7 @@ pub(crate) fn runtime_sync_status(status: copypaste_ipc::SyncStatus) -> RuntimeS
                 error: entry.error,
                 sent: entry.sent,
                 received: entry.received,
+                resolved_ms: entry.resolved_ms,
             })
             .collect(),
         revision: status.revision,

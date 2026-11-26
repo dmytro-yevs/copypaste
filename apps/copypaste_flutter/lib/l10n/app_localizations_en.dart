@@ -393,13 +393,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickPastePathUnavailable => 'Path unavailable';
 
   @override
-  String get quickPastePreferences => 'Preferences…';
+  String get quickPasteSettings => 'Settings…';
 
   @override
   String get quickPasteAbout => 'About';
 
   @override
   String get quickPasteQuit => 'Quit';
+
+  @override
+  String get quickPasteClearHistory => 'Clear history…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Clear history?';
@@ -2026,6 +2029,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Clips are masked while a password field has focus.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Queue tab';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Show Paste Queue in Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle => 'Accessibility is required';

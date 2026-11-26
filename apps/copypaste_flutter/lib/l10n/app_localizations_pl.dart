@@ -400,13 +400,16 @@ class AppLocalizationsPl extends AppLocalizations {
   String get quickPastePathUnavailable => 'Ścieżka niedostępna';
 
   @override
-  String get quickPastePreferences => 'Preferencje…';
+  String get quickPasteSettings => 'Ustawienia…';
 
   @override
   String get quickPasteAbout => 'Informacje';
 
   @override
   String get quickPasteQuit => 'Zakończ';
+
+  @override
+  String get quickPasteClearHistory => 'Wyczyść historię…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Wyczyścić historię?';
@@ -2076,6 +2079,13 @@ class AppLocalizationsPl extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Wpisy są zamaskowane, gdy aktywne jest pole hasła.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Karta Kolejka';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Pokazuje Paste Queue w Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

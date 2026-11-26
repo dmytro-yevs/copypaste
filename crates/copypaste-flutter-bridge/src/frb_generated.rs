@@ -8677,6 +8677,7 @@ impl SseDecode for crate::api::RuntimeSyncLogEntry {
         let mut var_received = <u64>::sse_decode(deserializer);
         let mut var_issueTitle = <Option<String>>::sse_decode(deserializer);
         let mut var_issueSeverity = <Option<String>>::sse_decode(deserializer);
+        let mut var_resolvedMs = <Option<i64>>::sse_decode(deserializer);
         return crate::api::RuntimeSyncLogEntry {
             pairing_id: var_pairingId,
             timestamp_ms: var_timestampMs,
@@ -8686,6 +8687,7 @@ impl SseDecode for crate::api::RuntimeSyncLogEntry {
             received: var_received,
             issue_title: var_issueTitle,
             issue_severity: var_issueSeverity,
+            resolved_ms: var_resolvedMs,
         };
     }
 }
@@ -11884,6 +11886,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSyncLogEntry {
             self.received.into_into_dart().into_dart(),
             self.issue_title.into_into_dart().into_dart(),
             self.issue_severity.into_into_dart().into_dart(),
+            self.resolved_ms.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -14857,6 +14860,7 @@ impl SseEncode for crate::api::RuntimeSyncLogEntry {
         <u64>::sse_encode(self.received, serializer);
         <Option<String>>::sse_encode(self.issue_title, serializer);
         <Option<String>>::sse_encode(self.issue_severity, serializer);
+        <Option<i64>>::sse_encode(self.resolved_ms, serializer);
     }
 }
 

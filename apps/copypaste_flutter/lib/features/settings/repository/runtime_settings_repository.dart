@@ -238,6 +238,12 @@ class RuntimeSettingsRepository
             error: entry.error,
             sent: entry.sent.toInt(),
             received: entry.received.toInt(),
+            resolved: switch (entry.resolvedMs) {
+              final ended? => DateTime.fromMillisecondsSinceEpoch(
+                ended.toInt(),
+              ),
+              null => null,
+            },
           ),
         )
         .toList(growable: false),

@@ -47,6 +47,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool get busy => _busy;
   bool get autoPaste => _preferences.autoPaste;
   bool get maskPasswordFields => _preferences.maskPasswordFields;
+  bool get queueTab => _preferences.queueTab;
   DesktopShortcut get shortcut => _preferences.shortcut;
   bool get shortcutEnabled => _preferences.shortcutEnabled;
 
@@ -159,6 +160,25 @@ class QuickPasteSettingsController extends ChangeNotifier
     try {
       await _store.write(next);
       if (_disposed) return false;
+      _preferences = next;
+      return true;
+    } catch (_) {
+      _errorMessage = AppStrings.current.settingsRuntimeChangeFailed;
+      return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> setQueueTab(bool value) async {
+    if (_disposed || _busy || value == _preferences.queueTab) return false;
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    final next = _preferences.copyWith(queueTab: value);
+    try {
+      await _store.write(next);
       _preferences = next;
       return true;
     } catch (_) {
