@@ -3180,7 +3180,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('/Users/person/Documents/report.pdf').first);
+    await tester.tap(find.text('/Users/person/Documents').first);
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey<String>('history-copy-options')),
