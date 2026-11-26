@@ -2070,6 +2070,14 @@ class AppLocalizationsUk extends AppLocalizations {
       'Вибір кліпу повертає до попередньої програми й вставляє його.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Приховувати перегляд у полях пароля';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Кліпи замасковано, поки фокус у полі пароля.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'Потрібен дозвіл «Універсальний доступ»';
 

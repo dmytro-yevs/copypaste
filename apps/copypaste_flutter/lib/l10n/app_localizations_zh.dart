@@ -1842,6 +1842,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAutoPasteDescription => '选择剪贴项后会返回上一个应用并粘贴。';
 
   @override
+  String get settingsMaskPasswordFieldsTitle => '在密码字段中隐藏预览';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription => '密码字段获得焦点时，剪贴项会被遮盖。';
+
+  @override
   String get settingsAccessibilityRequiredTitle => '需要辅助功能权限';
 
   @override

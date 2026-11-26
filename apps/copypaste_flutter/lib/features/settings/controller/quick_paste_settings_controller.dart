@@ -46,6 +46,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool get initialized => _initialized;
   bool get busy => _busy;
   bool get autoPaste => _preferences.autoPaste;
+  bool get maskPasswordFields => _preferences.maskPasswordFields;
   DesktopShortcut get shortcut => _preferences.shortcut;
   bool get shortcutEnabled => _preferences.shortcutEnabled;
 
@@ -139,6 +140,29 @@ class QuickPasteSettingsController extends ChangeNotifier
     } catch (_) {
       _preferences = before;
       _errorMessage = AppStrings.current.settingsRuntimeAutoPasteUpdateFailed;
+      return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Applies from the next Quick Paste opening, which reads the preferences.
+  Future<bool> setMaskPasswordFields(bool value) async {
+    if (_disposed || _busy || value == _preferences.maskPasswordFields) {
+      return false;
+    }
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    final next = _preferences.copyWith(maskPasswordFields: value);
+    try {
+      await _store.write(next);
+      if (_disposed) return false;
+      _preferences = next;
+      return true;
+    } catch (_) {
+      _errorMessage = AppStrings.current.settingsRuntimeChangeFailed;
       return false;
     } finally {
       _busy = false;

@@ -8,6 +8,7 @@ class QuickPastePreferences {
     required this.autoPaste,
     required this.shortcut,
     this.shortcutEnabled = true,
+    this.maskPasswordFields = true,
   });
 
   factory QuickPastePreferences.defaults() => QuickPastePreferences(
@@ -21,14 +22,20 @@ class QuickPastePreferences {
   /// Whether the global shortcut is registered; [shortcut] is kept either way.
   final bool shortcutEnabled;
 
+  /// Whether a focused password field masks previews and turns transforms
+  /// off; switched off, it is treated as any other paste target.
+  final bool maskPasswordFields;
+
   QuickPastePreferences copyWith({
     bool? autoPaste,
     DesktopShortcut? shortcut,
     bool? shortcutEnabled,
+    bool? maskPasswordFields,
   }) => QuickPastePreferences(
     autoPaste: autoPaste ?? this.autoPaste,
     shortcut: shortcut ?? this.shortcut,
     shortcutEnabled: shortcutEnabled ?? this.shortcutEnabled,
+    maskPasswordFields: maskPasswordFields ?? this.maskPasswordFields,
   );
 }
 
@@ -77,6 +84,7 @@ class SharedPreferencesQuickPastePreferencesStore
         autoPaste: json['autoPaste'] as bool? ?? true,
         shortcut: shortcut,
         shortcutEnabled: json['shortcutEnabled'] as bool? ?? true,
+        maskPasswordFields: json['maskPasswordFields'] as bool? ?? true,
       );
     } catch (_) {
       return QuickPastePreferences.defaults();
@@ -91,6 +99,7 @@ class SharedPreferencesQuickPastePreferencesStore
         'autoPaste': preferences.autoPaste,
         'shortcut': preferences.shortcut.toJson(),
         'shortcutEnabled': preferences.shortcutEnabled,
+        'maskPasswordFields': preferences.maskPasswordFields,
       }),
     );
   }

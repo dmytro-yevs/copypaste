@@ -308,7 +308,7 @@ void main() {
     expect(shortcut.isValid, isFalse);
   });
 
-  testWidgets('renders the desktop shortcut and auto-paste setting', (
+  testWidgets('renders the desktop shortcut and the Quick Paste switches', (
     tester,
   ) async {
     final controller = QuickPasteSettingsController(
@@ -360,16 +360,22 @@ void main() {
     expect(find.text('Paste automatically'), findsOneWidget);
     expect(find.byType(Switch), findsWidgets);
 
+    Finder rowSwitch(String title) => find.descendant(
+      of: find.byKey(ValueKey<String>('settings-row-$title')),
+      matching: find.byType(Switch),
+    );
     await tester.ensureVisible(find.text('Paste automatically'));
-    final pasteCard = find.ancestor(
-      of: find.text('Paste automatically'),
-      matching: find.byType(Card),
-    );
-    await tester.tap(
-      find.descendant(of: pasteCard, matching: find.byType(Switch)),
-    );
+    await tester.tap(rowSwitch('Paste automatically'));
     await tester.pump();
     expect(controller.autoPaste, isFalse);
+
+    // The first change has settled, so the next switch is enabled again.
+    await tester.pump();
+    const masking = 'Hide previews in password fields';
+    await tester.ensureVisible(find.text(masking));
+    await tester.tap(rowSwitch(masking));
+    await tester.pump();
+    expect(controller.maskPasswordFields, isFalse);
     expect(tester.takeException(), isNull);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 

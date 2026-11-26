@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Ausgewählten Eintrag in die vorherige App einfügen.",
   "settingsAutoPasteKeywords": "Bedienungshilfen automatisch accessibility automatic",
   "settingsAutoPasteDescription": "Ein ausgewählter Eintrag wird direkt in die vorherige App eingefügt.",
+  "settingsMaskPasswordFieldsTitle": "Vorschauen in Passwortfeldern ausblenden",
+  "settingsMaskPasswordFieldsDescription": "Einträge werden maskiert, solange ein Passwortfeld aktiv ist.",
   "settingsAccessibilityRequiredTitle": "Bedienungshilfen erforderlich",
   "settingsAccessibilityRequiredMessage": "Bis die Berechtigung erteilt ist, wird ein ausgewählter Eintrag nur kopiert, nicht eingefügt.",
   "settingsQuickPasteAttentionTitle": "Problem mit Quick Paste",

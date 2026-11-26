@@ -2464,6 +2464,14 @@
   "@settingsAutoPasteDescription": {
     "description": "Description of the automatic paste setting."
   },
+  "settingsMaskPasswordFieldsTitle": "Hide previews in password fields",
+  "@settingsMaskPasswordFieldsTitle": {
+    "description": "Settings row title for masking Quick Paste clips while a password field has focus."
+  },
+  "settingsMaskPasswordFieldsDescription": "Clips are masked while a password field has focus.",
+  "@settingsMaskPasswordFieldsDescription": {
+    "description": "One-line description of the Hide previews in password fields setting."
+  },
   "settingsAccessibilityRequiredTitle": "Accessibility is required",
   "@settingsAccessibilityRequiredTitle": {
     "description": "macOS alert title when the Accessibility permission is needed for automatic paste. Accessibility is the macOS permission name."

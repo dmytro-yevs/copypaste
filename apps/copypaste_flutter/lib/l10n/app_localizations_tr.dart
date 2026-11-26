@@ -2039,6 +2039,14 @@ class AppLocalizationsTr extends AppLocalizations {
       'Bir öğe seçildiğinde önceki uygulamaya dönülür ve öğe yapıştırılır.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Parola alanlarında önizlemeleri gizle';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Bir parola alanı odaktayken öğeler maskelenir.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'Erişilebilirlik izni gerekli';
 

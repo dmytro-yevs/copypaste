@@ -1461,7 +1461,8 @@ class QuickPasteController extends ChangeNotifier {
   Future<void> _detectMaskedMode() async {
     final host = _host;
     bool? secure;
-    if (host is ForegroundPasteHost) {
+    // Switched off, a password field is a target like any other.
+    if (_preferences.maskPasswordFields && host is ForegroundPasteHost) {
       try {
         secure = await (host as ForegroundPasteHost).secureFieldFocused();
       } on Object {

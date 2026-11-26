@@ -3484,6 +3484,18 @@ abstract class AppLocalizations {
   /// **'Selecting a clip returns to the previous app and pastes it.'**
   String get settingsAutoPasteDescription;
 
+  /// Settings row title for masking Quick Paste clips while a password field has focus.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide previews in password fields'**
+  String get settingsMaskPasswordFieldsTitle;
+
+  /// One-line description of the Hide previews in password fields setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Clips are masked while a password field has focus.'**
+  String get settingsMaskPasswordFieldsDescription;
+
   /// macOS alert title when the Accessibility permission is needed for automatic paste. Accessibility is the macOS permission name.
   ///
   /// In en, this message translates to:

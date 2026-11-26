@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Wklejaj wybrany wpis do poprzedniej aplikacji.",
   "settingsAutoPasteKeywords": "dostępność automatyczne accessibility automatic",
   "settingsAutoPasteDescription": "Wybranie wpisu powoduje powrót do poprzedniej aplikacji i wklejenie go.",
+  "settingsMaskPasswordFieldsTitle": "Ukrywaj podglądy w polach hasła",
+  "settingsMaskPasswordFieldsDescription": "Wpisy są zamaskowane, gdy aktywne jest pole hasła.",
   "settingsAccessibilityRequiredTitle": "Wymagane uprawnienie Dostępność",
   "settingsAccessibilityRequiredMessage": "Dopóki uprawnienie nie zostanie przyznane, wybranie wpisu kopiuje go bez wklejania.",
   "settingsQuickPasteAttentionTitle": "Quick Paste wymaga uwagi",

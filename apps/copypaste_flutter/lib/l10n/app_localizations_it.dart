@@ -2073,6 +2073,14 @@ class AppLocalizationsIt extends AppLocalizations {
       'Quando selezioni un elemento, torni all\'app precedente e l\'elemento viene incollato.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Nascondi le anteprime nei campi password';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Maschera gli elementi mentre un campo password è attivo.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'È richiesta l\'autorizzazione Accessibilità';
 

@@ -21,12 +21,32 @@ void main() {
     expect(preferences.shortcut, DesktopShortcut.defaultForPlatform());
     expect(preferences.autoPaste, isFalse);
   });
+
+  test('password field masking is on until it is saved off', () async {
+    final store = SharedPreferencesQuickPastePreferencesStore(
+      preferences: _Preferences(
+        jsonEncode({
+          'autoPaste': true,
+          'shortcut': DesktopShortcut.defaultForPlatform().toJson(),
+        }),
+      ),
+    );
+    final saved = await store.read();
+    expect(saved.maskPasswordFields, isTrue);
+
+    await store.write(saved.copyWith(maskPasswordFields: false));
+
+    expect((await store.read()).maskPasswordFields, isFalse);
+  });
 }
 
 class _Preferences extends Fake implements SharedPreferencesAsync {
-  _Preferences(this.encoded);
-  final String encoded;
+  _Preferences(String encoded) : _saved = [encoded];
+  final List<String> _saved;
 
   @override
-  Future<String?> getString(String key) async => encoded;
+  Future<String?> getString(String key) async => _saved.last;
+
+  @override
+  Future<void> setString(String key, String value) async => _saved.add(value);
 }

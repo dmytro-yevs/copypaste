@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Вставляти вибраний кліп у попередню програму.",
   "settingsAutoPasteKeywords": "універсальний доступ автоматично accessibility automatic",
   "settingsAutoPasteDescription": "Вибір кліпу повертає до попередньої програми й вставляє його.",
+  "settingsMaskPasswordFieldsTitle": "Приховувати перегляд у полях пароля",
+  "settingsMaskPasswordFieldsDescription": "Кліпи замасковано, поки фокус у полі пароля.",
   "settingsAccessibilityRequiredTitle": "Потрібен дозвіл «Універсальний доступ»",
   "settingsAccessibilityRequiredMessage": "Поки дозвіл не надано, вибраний кліп копіюється без вставлення.",
   "settingsQuickPasteAttentionTitle": "Quick Paste потребує уваги",

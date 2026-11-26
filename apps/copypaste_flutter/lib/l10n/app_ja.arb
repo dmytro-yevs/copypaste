@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "選択したクリップを前のアプリにペーストします。",
   "settingsAutoPasteKeywords": "アクセシビリティ 自動 accessibility automatic",
   "settingsAutoPasteDescription": "クリップを選択すると、前のアプリに戻ってペーストします。",
+  "settingsMaskPasswordFieldsTitle": "パスワード欄ではプレビューを非表示",
+  "settingsMaskPasswordFieldsDescription": "パスワード欄にフォーカスがある間、クリップは伏せて表示されます。",
   "settingsAccessibilityRequiredTitle": "アクセシビリティの許可が必要です",
   "settingsAccessibilityRequiredMessage": "許可されるまでは、クリップを選択するとペーストせずにコピーのみ行います。",
   "settingsQuickPasteAttentionTitle": "Quick Paste の確認が必要です",

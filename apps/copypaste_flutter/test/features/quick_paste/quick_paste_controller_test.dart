@@ -3531,6 +3531,23 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    test('a password target is ordinary with its masking off', () async {
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(
+          QuickPastePreferences.defaults().copyWith(maskPasswordFields: false),
+        ),
+        host: _SecureHost()..permissionGranted = true,
+        transforms: FakeTransformRepository(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+
+      expect(controller.maskedMode, isFalse);
+      expect(controller.canTransform, isTrue);
+    });
+
     test(
       'a secret paste asks for the owner and restores the clipboard',
       () async {

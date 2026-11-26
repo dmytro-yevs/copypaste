@@ -2072,6 +2072,14 @@ class AppLocalizationsPt extends AppLocalizations {
       'Ao selecionar um clipe, o CopyPaste volta ao app anterior e cola o clipe.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Ocultar pré-visualizações em campos de senha';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Oculta os clipes enquanto um campo de senha está em foco.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'É necessária a permissão de Acessibilidade';
 
