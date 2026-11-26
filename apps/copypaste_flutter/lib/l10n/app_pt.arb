@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Colar o clipe selecionado no app anterior.",
   "settingsAutoPasteKeywords": "acessibilidade automático accessibility automatic",
   "settingsAutoPasteDescription": "Ao selecionar um clipe, o CopyPaste volta ao app anterior e cola o clipe.",
+  "settingsMaskPasswordFieldsTitle": "Ocultar pré-visualizações em campos de senha",
+  "settingsMaskPasswordFieldsDescription": "Oculta os clipes enquanto um campo de senha está em foco.",
   "settingsAccessibilityRequiredTitle": "É necessária a permissão de Acessibilidade",
   "settingsAccessibilityRequiredMessage": "Até que a permissão seja concedida, selecionar um clipe apenas o copia, sem colar.",
   "settingsQuickPasteAttentionTitle": "O Quick Paste precisa de atenção",

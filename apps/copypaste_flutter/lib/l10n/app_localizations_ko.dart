@@ -1896,6 +1896,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsAutoPasteDescription => '클립을 선택하면 이전 앱으로 돌아가서 붙여넣습니다.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle => '암호 필드에서 미리 보기 숨기기';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      '암호 필드에 포커스가 있는 동안 클립이 가려집니다.';
+
+  @override
   String get settingsAccessibilityRequiredTitle => '손쉬운 사용 권한 필요';
 
   @override

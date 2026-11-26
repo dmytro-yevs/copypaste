@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Incolla l'elemento selezionato nell'app precedente.",
   "settingsAutoPasteKeywords": "accessibilità automatico accessibility automatic",
   "settingsAutoPasteDescription": "Quando selezioni un elemento, torni all'app precedente e l'elemento viene incollato.",
+  "settingsMaskPasswordFieldsTitle": "Nascondi le anteprime nei campi password",
+  "settingsMaskPasswordFieldsDescription": "Maschera gli elementi mentre un campo password è attivo.",
   "settingsAccessibilityRequiredTitle": "È richiesta l'autorizzazione Accessibilità",
   "settingsAccessibilityRequiredMessage": "Finché l'autorizzazione non viene concessa, selezionando un elemento lo copi senza incollarlo.",
   "settingsQuickPasteAttentionTitle": "Quick Paste richiede attenzione",

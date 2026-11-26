@@ -2076,6 +2076,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Al seleccionar un recorte, se vuelve a la app anterior y se pega.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Ocultar vistas previas en campos de contraseña';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Oculta los recortes mientras se usa un campo de contraseña.';
+
+  @override
   String get settingsAccessibilityRequiredTitle => 'Se requiere Accesibilidad';
 
   @override

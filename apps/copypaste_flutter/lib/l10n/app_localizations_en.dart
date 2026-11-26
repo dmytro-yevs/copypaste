@@ -2020,6 +2020,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Selecting a clip returns to the previous app and pastes it.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Hide previews in password fields';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Clips are masked while a password field has focus.';
+
+  @override
   String get settingsAccessibilityRequiredTitle => 'Accessibility is required';
 
   @override

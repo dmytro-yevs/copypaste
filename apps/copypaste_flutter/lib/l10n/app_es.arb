@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Pegar el recorte seleccionado en la app anterior.",
   "settingsAutoPasteKeywords": "accesibilidad automático accessibility automatic",
   "settingsAutoPasteDescription": "Al seleccionar un recorte, se vuelve a la app anterior y se pega.",
+  "settingsMaskPasswordFieldsTitle": "Ocultar vistas previas en campos de contraseña",
+  "settingsMaskPasswordFieldsDescription": "Oculta los recortes mientras se usa un campo de contraseña.",
   "settingsAccessibilityRequiredTitle": "Se requiere Accesibilidad",
   "settingsAccessibilityRequiredMessage": "Hasta que se conceda el permiso, al seleccionar un recorte se copia sin pegarlo.",
   "settingsQuickPasteAttentionTitle": "Quick Paste requiere atención",

@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "Seçilen öğeyi önceki uygulamaya yapıştırın.",
   "settingsAutoPasteKeywords": "erişilebilirlik otomatik accessibility automatic",
   "settingsAutoPasteDescription": "Bir öğe seçildiğinde önceki uygulamaya dönülür ve öğe yapıştırılır.",
+  "settingsMaskPasswordFieldsTitle": "Parola alanlarında önizlemeleri gizle",
+  "settingsMaskPasswordFieldsDescription": "Bir parola alanı odaktayken öğeler maskelenir.",
   "settingsAccessibilityRequiredTitle": "Erişilebilirlik izni gerekli",
   "settingsAccessibilityRequiredMessage": "İzin verilene kadar, seçilen öğe yapıştırılmadan yalnızca kopyalanır.",
   "settingsQuickPasteAttentionTitle": "Quick Paste dikkat gerektiriyor",

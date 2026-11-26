@@ -1909,6 +1909,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsAutoPasteDescription => 'クリップを選択すると、前のアプリに戻ってペーストします。';
 
   @override
+  String get settingsMaskPasswordFieldsTitle => 'パスワード欄ではプレビューを非表示';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'パスワード欄にフォーカスがある間、クリップは伏せて表示されます。';
+
+  @override
   String get settingsAccessibilityRequiredTitle => 'アクセシビリティの許可が必要です';
 
   @override

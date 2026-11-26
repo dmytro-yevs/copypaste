@@ -561,6 +561,8 @@
   "settingsAutoPasteSearchDescription": "将所选剪贴项粘贴到上一个应用中。",
   "settingsAutoPasteKeywords": "辅助功能 自动 accessibility automatic",
   "settingsAutoPasteDescription": "选择剪贴项后会返回上一个应用并粘贴。",
+  "settingsMaskPasswordFieldsTitle": "在密码字段中隐藏预览",
+  "settingsMaskPasswordFieldsDescription": "密码字段获得焦点时，剪贴项会被遮盖。",
   "settingsAccessibilityRequiredTitle": "需要辅助功能权限",
   "settingsAccessibilityRequiredMessage": "在授予权限之前，选择剪贴项只会复制而不会粘贴。",
   "settingsQuickPasteAttentionTitle": "Quick Paste 需要处理",

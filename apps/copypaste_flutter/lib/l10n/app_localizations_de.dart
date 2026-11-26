@@ -2070,6 +2070,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ein ausgewählter Eintrag wird direkt in die vorherige App eingefügt.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Vorschauen in Passwortfeldern ausblenden';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Einträge werden maskiert, solange ein Passwortfeld aktiv ist.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'Bedienungshilfen erforderlich';
 

@@ -46,6 +46,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool get initialized => _initialized;
   bool get busy => _busy;
   bool get autoPaste => _preferences.autoPaste;
+  bool get maskPasswordFields => _preferences.maskPasswordFields;
   DesktopShortcut get shortcut => _preferences.shortcut;
   bool get shortcutEnabled => _preferences.shortcutEnabled;
 
@@ -139,6 +140,29 @@ class QuickPasteSettingsController extends ChangeNotifier
     } catch (_) {
       _preferences = before;
       _errorMessage = AppStrings.current.settingsRuntimeAutoPasteUpdateFailed;
+      return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Applies from the next Quick Paste opening, which reads the preferences.
+  Future<bool> setMaskPasswordFields(bool value) async {
+    if (_disposed || _busy || value == _preferences.maskPasswordFields) {
+      return false;
+    }
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    final next = _preferences.copyWith(maskPasswordFields: value);
+    try {
+      await _store.write(next);
+      if (_disposed) return false;
+      _preferences = next;
+      return true;
+    } catch (_) {
+      _errorMessage = AppStrings.current.settingsRuntimeChangeFailed;
       return false;
     } finally {
       _busy = false;
@@ -256,11 +280,14 @@ class QuickPasteSettingsController extends ChangeNotifier
     }
   }
 
+  /// Ends a recording and registers the saved shortcut again whenever it is
+  /// not the active one.
   Future<void> cancelShortcutRecording() async {
+    final saved = _preferences.shortcutEnabled ? _preferences.shortcut : null;
     if (_disposed ||
         !_supported ||
         _busy ||
-        (!_recordingShortcut && _registeredShortcut == _preferences.shortcut)) {
+        (!_recordingShortcut && _registeredShortcut == saved)) {
       return;
     }
     _busy = true;
@@ -484,8 +511,20 @@ class QuickPasteSettingsController extends ChangeNotifier
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(refreshAccessibility());
-      unawaited(refreshLinuxIntegration());
+      unawaited(_refreshRegistration());
     }
+  }
+
+  /// Registers a shortcut that is not active when the user returns: one a
+  /// recording left released, or one another application held. A rejected
+  /// combination and a failed start wait for the user instead.
+  Future<void> _refreshRegistration() async {
+    if (!_startFailed &&
+        _shortcutRefusal?.reason != DesktopShortcutRefusalReason.rejected) {
+      await cancelShortcutRecording();
+    }
+    // In turn: both hold [busy].
+    await refreshLinuxIntegration();
   }
 
   @override

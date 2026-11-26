@@ -2070,6 +2070,14 @@ class AppLocalizationsPl extends AppLocalizations {
       'Wybranie wpisu powoduje powrót do poprzedniej aplikacji i wklejenie go.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Ukrywaj podglądy w polach hasła';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Wpisy są zamaskowane, gdy aktywne jest pole hasła.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'Wymagane uprawnienie Dostępność';
 

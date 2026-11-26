@@ -2081,6 +2081,14 @@ class AppLocalizationsFr extends AppLocalizations {
       'Sélectionner un élément ramène à l’app précédente et l’y colle.';
 
   @override
+  String get settingsMaskPasswordFieldsTitle =>
+      'Masquer les aperçus dans les champs de mot de passe';
+
+  @override
+  String get settingsMaskPasswordFieldsDescription =>
+      'Masque les éléments tant qu’un champ de mot de passe est actif.';
+
+  @override
   String get settingsAccessibilityRequiredTitle =>
       'L’autorisation Accessibilité est requise';
 
