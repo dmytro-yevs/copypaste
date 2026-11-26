@@ -74,7 +74,7 @@
   "updateDowngradeRefused": "Завантажений пакет не новіший за цю версію.",
   "updateHomebrewRequired": "Встановіть CopyPaste через Homebrew, щоб оновлювати програму тут.",
   "updateInstallationCancelled": "Встановлення оновлення скасовано.",
-  "updateInstallationBlocked": "Система Android заблокувала встановлення оновлення.",
+  "updateInstallationBlocked": "Захист пристрою (Play Protect, Auto Blocker) заблокував це оновлення. Дозвольте його там, а потім перевірте знову.",
   "updateInstallationConflict": "Оновлення конфліктує зі встановленою програмою.",
   "updateInstallationIncompatible": "Оновлення несумісне з цим пристроєм.",
   "updateInstallationStorage": "Звільніть місце в пам’яті, щоб встановити оновлення.",

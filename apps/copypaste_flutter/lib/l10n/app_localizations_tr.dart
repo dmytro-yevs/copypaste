@@ -276,7 +276,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get updateInstallationBlocked =>
-      'Android güncelleme kurulumunu engelledi.';
+      'Cihaz koruması (Play Protect, Auto Blocker) bu güncellemeyi engelledi. Oradan izin verin, ardından yeniden denetleyin.';
 
   @override
   String get updateInstallationConflict =>

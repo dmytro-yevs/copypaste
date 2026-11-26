@@ -74,7 +74,7 @@
   "updateDowngradeRefused": "İndirilen paket bu sürümden daha yeni değil.",
   "updateHomebrewRequired": "Burada güncellemek için CopyPaste'i Homebrew ile yükleyin.",
   "updateInstallationCancelled": "Güncelleme kurulumu iptal edildi.",
-  "updateInstallationBlocked": "Android güncelleme kurulumunu engelledi.",
+  "updateInstallationBlocked": "Cihaz koruması (Play Protect, Auto Blocker) bu güncellemeyi engelledi. Oradan izin verin, ardından yeniden denetleyin.",
   "updateInstallationConflict": "Güncelleme, yüklü uygulamayla çakışıyor.",
   "updateInstallationIncompatible": "Güncelleme bu cihazla uyumlu değil.",
   "updateInstallationStorage": "Güncellemeyi yüklemek için depolama alanı boşaltın.",

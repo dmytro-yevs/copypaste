@@ -74,7 +74,7 @@
   "updateDowngradeRefused": "El paquete descargado no es más reciente que esta versión.",
   "updateHomebrewRequired": "Instala CopyPaste con Homebrew para actualizarlo aquí.",
   "updateInstallationCancelled": "Se canceló la instalación de la actualización.",
-  "updateInstallationBlocked": "Android bloqueó la instalación de la actualización.",
+  "updateInstallationBlocked": "La protección del dispositivo (Play Protect, Auto Blocker) bloqueó esta actualización. Permítela allí y vuelve a buscar.",
   "updateInstallationConflict": "La actualización entra en conflicto con la app instalada.",
   "updateInstallationIncompatible": "La actualización no es compatible con este dispositivo.",
   "updateInstallationStorage": "Libera espacio de almacenamiento para instalar la actualización.",

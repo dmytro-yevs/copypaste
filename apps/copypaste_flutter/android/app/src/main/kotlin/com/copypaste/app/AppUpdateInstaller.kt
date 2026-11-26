@@ -96,7 +96,9 @@ internal class AppUpdateInstaller(private val context: Context) {
                     .commit()
             }
         } else {
-            finish(appUpdateResultCode(status))
+            finish(
+                appUpdateResultCode(status, intent.getIntExtra(appUpdateLegacyStatusExtra, 0)),
+            )
         }
     }
 

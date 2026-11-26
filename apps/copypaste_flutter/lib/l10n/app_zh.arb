@@ -74,7 +74,7 @@
   "updateDowngradeRefused": "下载的软件包版本不高于当前版本。",
   "updateHomebrewRequired": "请使用 Homebrew 安装 CopyPaste，才能在此处更新。",
   "updateInstallationCancelled": "更新安装已取消。",
-  "updateInstallationBlocked": "Android 阻止了更新安装。",
+  "updateInstallationBlocked": "设备保护功能（Play Protect、Auto Blocker）阻止了此更新。请在其中允许后再次检查。",
   "updateInstallationConflict": "更新与已安装的应用冲突。",
   "updateInstallationIncompatible": "更新与此设备不兼容。",
   "updateInstallationStorage": "请释放存储空间以安装更新。",
