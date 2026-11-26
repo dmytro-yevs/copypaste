@@ -256,11 +256,14 @@ class QuickPasteSettingsController extends ChangeNotifier
     }
   }
 
+  /// Ends a recording and registers the saved shortcut again whenever it is
+  /// not the active one.
   Future<void> cancelShortcutRecording() async {
+    final saved = _preferences.shortcutEnabled ? _preferences.shortcut : null;
     if (_disposed ||
         !_supported ||
         _busy ||
-        (!_recordingShortcut && _registeredShortcut == _preferences.shortcut)) {
+        (!_recordingShortcut && _registeredShortcut == saved)) {
       return;
     }
     _busy = true;
@@ -484,8 +487,20 @@ class QuickPasteSettingsController extends ChangeNotifier
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(refreshAccessibility());
-      unawaited(refreshLinuxIntegration());
+      unawaited(_refreshRegistration());
     }
+  }
+
+  /// Registers a shortcut that is not active when the user returns: one a
+  /// recording left released, or one another application held. A rejected
+  /// combination and a failed start wait for the user instead.
+  Future<void> _refreshRegistration() async {
+    if (!_startFailed &&
+        _shortcutRefusal?.reason != DesktopShortcutRefusalReason.rejected) {
+      await cancelShortcutRecording();
+    }
+    // In turn: both hold [busy].
+    await refreshLinuxIntegration();
   }
 
   @override

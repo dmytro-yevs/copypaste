@@ -53,15 +53,26 @@ class _ShortcutRecorderState extends State<ShortcutRecorder> {
   }
 
   Future<void> _startRecording() async {
-    if (!await widget.onBeginRecording() || !mounted) return;
+    if (!await widget.onBeginRecording()) return;
+    if (!mounted) {
+      // The owner already released the registration for this recorder.
+      await widget.onCancelRecording();
+      return;
+    }
     setState(() => _recording = true);
     _focusNode.requestFocus();
   }
 
   Future<void> _cancelRecording() async {
-    if (!_recording) return;
+    if (!_recording || !mounted) return;
     setState(() => _recording = false);
     await widget.onCancelRecording();
+  }
+
+  // Without focus no key reaches the recorder, so the released registration
+  // would stay released: leaving the control or the window ends the recording.
+  void _handleFocusChange(bool focused) {
+    if (!focused) _cancelRecording();
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -96,6 +107,7 @@ class _ShortcutRecorderState extends State<ShortcutRecorder> {
     final shortcut = widget.shortcut;
     return Focus(
       focusNode: _focusNode,
+      onFocusChange: _handleFocusChange,
       onKeyEvent: _handleKey,
       child: Row(
         mainAxisSize: MainAxisSize.min,

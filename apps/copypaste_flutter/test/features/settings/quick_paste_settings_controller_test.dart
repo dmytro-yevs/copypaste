@@ -135,6 +135,38 @@ void main() {
       expect(registrar.registered, replacement);
     });
 
+    test('a shortcut another app held is registered on return', () async {
+      registrar.nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'osStatus': -9878},
+      );
+      await controller.initialize();
+      expect(registrar.registered, isNull);
+
+      controller.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await pumpEventQueue();
+
+      expect(registrar.registered, DesktopShortcut.defaultForPlatform());
+      expect(controller.shortcutRefusal, isNull);
+    });
+
+    test('a rejected shortcut is not registered again on return', () async {
+      registrar.nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'win32Error': 87},
+      );
+      await controller.initialize();
+
+      controller.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await pumpEventQueue();
+
+      expect(registrar.registered, isNull);
+      expect(
+        controller.shortcutRefusal?.reason,
+        DesktopShortcutRefusalReason.rejected,
+      );
+    });
+
     test('a rejected change keeps the saved shortcut working', () async {
       await controller.initialize();
       registrar.nextRegisterError = PlatformException(
