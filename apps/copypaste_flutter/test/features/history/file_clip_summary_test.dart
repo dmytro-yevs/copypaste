@@ -34,4 +34,29 @@ void main() {
     expect(find.text('a.pdf, b.png, c.txt'), findsOneWidget);
     expect(find.text(', +2'), findsOneWidget);
   });
+
+  testWidgets('a single file shows its name once, over its folder', (
+    tester,
+  ) async {
+    final clip = HistoryClip(
+      id: 'file',
+      contentType: 'file',
+      preview: '/docs/reports/a.pdf',
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      file: const HistoryFileDetails(
+        name: 'a.pdf',
+        sourceReference: '/docs/reports/a.pdf',
+        sizeBytes: 10,
+      ),
+    );
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: Scaffold(child: FileClipSummary(clip: clip)),
+      ),
+    );
+
+    expect(find.text('a.pdf'), findsOneWidget);
+    expect(find.text('/docs/reports'), findsOneWidget);
+  });
 }

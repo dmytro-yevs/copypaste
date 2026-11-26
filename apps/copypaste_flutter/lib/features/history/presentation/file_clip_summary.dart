@@ -3,8 +3,8 @@ import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:copypaste_flutter/shared/middle_ellipsis.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-/// A file clip as its name over a one-line, middle-ellipsized source path, or
-/// a multi-file clip as its file count over its member names.
+/// A file clip as its name over its one-line, middle-ellipsized source folder,
+/// or a multi-file clip as its file count over its member names.
 class FileClipSummary extends StatelessWidget {
   const FileClipSummary({super.key, required this.clip, this.pathKey});
 
@@ -14,20 +14,34 @@ class FileClipSummary extends StatelessWidget {
   /// Member names shown before the remaining count.
   static const visibleMemberNames = 3;
 
+  static final _separator = RegExp(r'[/\\]');
+
+  /// The folder holding [filename], so the line under the name does not repeat
+  /// it; [path] itself when it does not end in that name.
+  static String _folder(String path, String filename) {
+    if (filename.isEmpty || !path.endsWith(filename)) return path;
+    final folder = path.substring(0, path.length - filename.length);
+    if (!folder.endsWith('/') && !folder.endsWith(r'\')) return path;
+    final trimmed = folder.substring(0, folder.length - 1);
+    // A root such as `/` or `C:\` keeps its separator.
+    return trimmed.contains(_separator) ? trimmed : folder;
+  }
+
   @override
   Widget build(BuildContext context) {
     final file = clip.file;
     if (file != null && file.isSet) return _buildSet(context, file);
     final reference = clip.file?.sourceReference;
-    final path = reference?.trim().isNotEmpty == true
+    final source = reference?.trim().isNotEmpty == true
         ? reference!
-        : clip.preview.contains(RegExp(r'[/\\]'))
+        : clip.preview.contains(_separator)
         ? clip.preview
         : '';
     final name = clip.file?.name?.trim();
     final filename = name?.isNotEmpty == true
         ? name!
-        : (path.isEmpty ? clip.preview : path).split(RegExp(r'[/\\]')).last;
+        : (source.isEmpty ? clip.preview : source).split(_separator).last;
+    final path = _folder(source, filename);
     final theme = Theme.of(context);
     final pathStyle = theme.typography.xSmall.copyWith(
       color: theme.colorScheme.mutedForeground,

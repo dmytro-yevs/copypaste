@@ -404,13 +404,16 @@ class AppLocalizationsPt extends AppLocalizations {
   String get quickPastePathUnavailable => 'Caminho indisponível';
 
   @override
-  String get quickPastePreferences => 'Preferências…';
+  String get quickPasteSettings => 'Configurações…';
 
   @override
   String get quickPasteAbout => 'Sobre';
 
   @override
   String get quickPasteQuit => 'Encerrar';
+
+  @override
+  String get quickPasteClearHistory => 'Limpar o histórico…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Limpar o histórico?';
@@ -2078,6 +2081,13 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Oculta os clipes enquanto um campo de senha está em foco.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Aba Fila';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Mostra a Paste Queue no Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

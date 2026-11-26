@@ -406,13 +406,16 @@ class AppLocalizationsIt extends AppLocalizations {
   String get quickPastePathUnavailable => 'Percorso non disponibile';
 
   @override
-  String get quickPastePreferences => 'Preferenze…';
+  String get quickPasteSettings => 'Impostazioni…';
 
   @override
   String get quickPasteAbout => 'Informazioni';
 
   @override
   String get quickPasteQuit => 'Esci';
+
+  @override
+  String get quickPasteClearHistory => 'Cancella la cronologia…';
 
   @override
   String get quickPasteClearHistoryTitle => 'Cancellare la cronologia?';
@@ -2079,6 +2082,13 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       'Maschera gli elementi mentre un campo password è attivo.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => 'Scheda Coda';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Mostra Paste Queue in Quick Paste.';
 
   @override
   String get settingsAccessibilityRequiredTitle =>

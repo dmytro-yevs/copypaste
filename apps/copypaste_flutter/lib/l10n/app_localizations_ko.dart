@@ -361,13 +361,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickPastePathUnavailable => '경로를 알 수 없음';
 
   @override
-  String get quickPastePreferences => '환경설정…';
+  String get quickPasteSettings => '설정…';
 
   @override
   String get quickPasteAbout => '정보';
 
   @override
   String get quickPasteQuit => '종료';
+
+  @override
+  String get quickPasteClearHistory => '기록 지우기…';
 
   @override
   String get quickPasteClearHistoryTitle => '기록을 지우시겠습니까?';
@@ -1901,6 +1904,13 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get settingsMaskPasswordFieldsDescription =>
       '암호 필드에 포커스가 있는 동안 클립이 가려집니다.';
+
+  @override
+  String get settingsQuickPasteQueueTabTitle => '대기열 탭';
+
+  @override
+  String get settingsQuickPasteQueueTabDescription =>
+      'Quick Paste에 Paste Queue를 표시합니다.';
 
   @override
   String get settingsAccessibilityRequiredTitle => '손쉬운 사용 권한 필요';
