@@ -46,6 +46,26 @@ winget install CopyPaste.CopyPaste
 `winget upgrade CopyPaste.CopyPaste` updates it. Maintainers: see the
 [Windows release setup](packaging/windows/README.md) for signing and winget publication.
 
+## Install on Android
+
+Download `CopyPaste-v<version>-android.apk` from the
+[latest release](https://github.com/dmytro-yevs/copypaste/releases/latest) and open
+it. CopyPaste is not on Google Play, so the device's protection may step in:
+
+- **Play Protect scan.** Android may offer to scan an app it has not seen before.
+  Let it scan, then continue the install.
+- **Samsung Auto Blocker.** On recent Galaxy devices it is on by default and blocks
+  installs from outside Google Play and Galaxy Store, in-app updates included. Turn
+  it off in **Settings → Security and privacy → Auto Blocker**, install, then turn it
+  back on.
+- **Developer verification.** Since 30 September 2026, certified devices in Brazil,
+  Indonesia, Singapore, and Thailand install apps only from developers verified by
+  Google. If the install is refused there, use `adb install <file>.apk`, or Android's
+  advanced flow for unverified apps, which adds a one-day wait.
+- **CopyPaste SMS.** In some countries Play Protect blocks apps that read SMS when
+  they come from a browser, messenger, or file manager, so the SMS companion app
+  cannot be installed there that way. Only the SMS Codes module needs it.
+
 ## History organization
 
 History supports local-calendar date ranges, quick periods, and combined server-side
