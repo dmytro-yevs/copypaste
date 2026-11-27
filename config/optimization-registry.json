@@ -3127,11 +3127,11 @@
     },
     {
       "id": "RUN-064",
-      "title": "Bound stable update metadata and isolate Windows installer handoff",
+      "title": "Bound stable update metadata and hand off to the Windows installer directly",
       "domain": "runtime",
       "implementation_status": "present_in_source",
       "priority": "P1",
-      "owner_module": "GitHubAppUpdateRepository / Windows update helper",
+      "owner_module": "GitHubAppUpdateRepository / Windows update channel",
       "platforms": [
         "macOS",
         "Android",
@@ -3139,10 +3139,10 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/update/repository/github_app_update_repository.dart",
-        "apps/copypaste_flutter/windows/runner/app_update_helper.cpp",
-        "apps/copypaste_flutter/windows/runner/CMakeLists.txt"
+        "apps/copypaste_flutter/windows/runner/app_update_channel.cpp",
+        "packaging/windows/copypaste.nsi"
       ],
-      "invariant": "Stable update checks fetch one canonical latest release; prerelease checks retain channel discovery. Request and body reading share one existing 30-second deadline. The signed installer helper starts without loading Flutter or bundle DLLs, then exits after verified installer handoff. No signature or digest check is removed.",
+      "invariant": "Stable update checks fetch one canonical latest release; prerelease checks retain channel discovery. Request and body reading share one existing 30-second deadline. The application verifies the installer and starts it directly, with no helper process and no temporary executable; the installer waits a bounded 30 seconds for the application and its daemon to exit. No signature or digest check is removed.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -3159,7 +3159,7 @@
         }
       ],
       "supersedes": [],
-      "functional_validation": "86 targeted portable Flutter tests passed. Installed Windows helper launch, signing and installer handoff remain unverified; native resource qualification is not established.",
+      "functional_validation": "86 targeted portable Flutter tests passed before the helper process was removed. The direct Windows installer handoff, the installer's exit wait and signing remain unverified; native resource qualification is not established.",
       "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
     },
     {

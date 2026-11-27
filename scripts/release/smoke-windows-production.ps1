@@ -21,23 +21,13 @@ try {
     if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode)" }
     if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw "installed application is missing" }
     if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { throw "installed CLI is missing" }
-    $helper = Join-Path $installDirectory "copypaste-update-helper.exe"
-    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
-        throw "installed update helper is missing"
-    }
-    $probeDirectory = Join-Path ([IO.Path]::GetTempPath()) ("copypaste-update-probe-" + [guid]::NewGuid())
-    New-Item -ItemType Directory -Path $probeDirectory | Out-Null
-    try {
-        $probeHelper = Join-Path $probeDirectory "update-helper.exe"
-        Copy-Item -LiteralPath $helper -Destination $probeHelper
-        $probe = Start-Process -FilePath $probeHelper -WorkingDirectory $probeDirectory -Wait -PassThru
-        # Invalid arguments deliberately return 1. A loader failure means that
-        # the updater still depends on files in the application bundle.
-        if ($probe.ExitCode -ne 1) {
-            throw "standalone update helper failed its isolated launch: $($probe.ExitCode)"
-        }
-    } finally {
-        Remove-Item -LiteralPath $probeDirectory -Recurse -Force
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "installed uninstaller is missing" }
+    # The uninstaller ships as a signed file; one written at install time would carry no signature.
+    $applicationSigner = (Get-AuthenticodeSignature -LiteralPath $app).SignerCertificate
+    $uninstallerSigner = (Get-AuthenticodeSignature -LiteralPath $uninstaller).SignerCertificate
+    if ($null -eq $applicationSigner -or $null -eq $uninstallerSigner -or
+        $uninstallerSigner.Thumbprint -cne $applicationSigner.Thumbprint) {
+        throw "installed uninstaller is not signed by the application signer"
     }
     $cliVersion = & $cli --version
     if ($LASTEXITCODE -ne 0 -or $cliVersion -cne "copypaste $Version") {

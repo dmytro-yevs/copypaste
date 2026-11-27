@@ -5,7 +5,7 @@
     <pe-file path="CopyPaste.exe"><authenticode-sign/></pe-file>
     <pe-file path="copypaste-cli.exe"><authenticode-sign/></pe-file>
     <pe-file path="copypaste-daemon.exe"><authenticode-sign/></pe-file>
-    <pe-file path="copypaste-update-helper.exe"><authenticode-sign/></pe-file>
     <pe-file path="copypaste_flutter_bridge.dll"><authenticode-sign/></pe-file>
+    <pe-file path="Uninstall.exe"><authenticode-sign/></pe-file>
   </zip-file>
 </artifact-configuration>

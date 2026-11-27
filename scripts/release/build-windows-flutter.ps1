@@ -30,10 +30,12 @@ $outputRoot = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 $installerName = "CopyPaste-v$Version-windows-x86_64-setup.exe"
 $installer = Join-Path $outputRoot $installerName
 $signScript = Join-Path $PSScriptRoot "windows-sign.ps1"
+$installerScript = Join-Path $root "packaging\windows\copypaste.nsi"
+$uninstallerName = "Uninstall.exe"
 # External signing covers only binaries built from this repository; upstream libraries stay unsigned.
 $projectBinaries = @(
     "CopyPaste.exe", "copypaste-cli.exe", "copypaste-daemon.exe",
-    "copypaste-update-helper.exe", "copypaste_flutter_bridge.dll"
+    "copypaste_flutter_bridge.dll", $uninstallerName
 )
 
 function Get-ApplicationBinaries {
@@ -67,6 +69,33 @@ function Import-SignedFiles([string]$SignedDirectory, [hashtable]$Destinations) 
     }
 }
 
+# The uninstaller is produced here, before signing, so it is signed with the
+# application binaries and shipped as a file instead of being written unsigned
+# by the installer on the user's computer.
+function Build-Uninstaller {
+    $makensis = (Get-Command makensis.exe -ErrorAction Stop).Source
+    $uninstaller = Join-Path $releaseDirectory $uninstallerName
+    $generatorDirectory = Join-Path $root "target\windows-uninstaller"
+    $generator = Join-Path $generatorDirectory "uninstaller-generator.exe"
+    Remove-Item -LiteralPath $uninstaller -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $generatorDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $generatorDirectory | Out-Null
+    try {
+        & $makensis "/DVERSION=$Version" "/DUNINSTALLER_OUTPUT=$uninstaller" `
+            "/DOUTPUT_FILE=$generator" $installerScript
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $generator -PathType Leaf)) {
+            throw "NSIS did not produce the uninstaller generator"
+        }
+        # The generator writes the uninstaller and quits from .onInit, which NSIS reports as 2.
+        $generation = Start-Process -FilePath $generator -ArgumentList "/S" -Wait -PassThru
+        if ($generation.ExitCode -ne 2 -or -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+            throw "NSIS did not write the uninstaller (exit $($generation.ExitCode))"
+        }
+    } finally {
+        Remove-Item -LiteralPath $generatorDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Build-Application {
     & python (Join-Path $root "scripts/ci/timed.py") compilation cargo build --release --locked -p copypaste-daemon -p copypaste-cli
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
@@ -83,9 +112,6 @@ function Build-Application {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -PathType Leaf)) {
         throw "Flutter did not produce CopyPaste.exe"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "copypaste-update-helper.exe") -PathType Leaf)) {
-        throw "Flutter did not produce the standalone update helper"
-    }
     $applicationHash = (Get-FileHash -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -Algorithm SHA256).Hash
     Copy-Item -LiteralPath (Join-Path $root "target\release\copypaste-daemon.exe") `
         -Destination (Join-Path $releaseDirectory "copypaste-daemon.exe") -Force
@@ -94,6 +120,7 @@ function Build-Application {
     if ((Get-FileHash -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -Algorithm SHA256).Hash -cne $applicationHash) {
         throw "Bundling runtime helpers changed the Flutter application"
     }
+    Build-Uninstaller
 
     & $signScript -Operation Validate
     if ($LASTEXITCODE -ne 0) { throw "Windows signing state is invalid" }
@@ -131,7 +158,7 @@ function Build-Installer {
     New-Item -ItemType Directory -Force -Path $packageDirectory | Out-Null
     $package = Join-Path $packageDirectory $installerName
     & $makensis "/DVERSION=$Version" "/DSOURCE_DIR=$releaseDirectory" `
-        "/DOUTPUT_FILE=$package" (Join-Path $root "packaging\windows\copypaste.nsi")
+        "/DOUTPUT_FILE=$package" $installerScript
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $package -PathType Leaf)) {
         throw "NSIS did not produce the Windows installer"
     }

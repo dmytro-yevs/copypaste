@@ -141,3 +141,7 @@ dev-fake-clipboard = []
 # `copypaste-fs`'s.
 [target.'cfg(windows)'.dependencies]
 interprocess.workspace = true
+
+# Cargo selects build dependencies by host, so only Windows hosts compile this.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

@@ -156,8 +156,6 @@ bool HasValidAuthenticodeDigest(const std::wstring& path) {
          status == CERT_E_CHAINING;
 }
 
-}  // namespace
-
 std::optional<std::wstring> CurrentExecutable() {
   std::vector<wchar_t> path(32768);
   const DWORD length = ::GetModuleFileNameW(nullptr, path.data(),
@@ -165,6 +163,8 @@ std::optional<std::wstring> CurrentExecutable() {
   if (length == 0 || length >= path.size()) return std::nullopt;
   return std::wstring(path.data(), length);
 }
+
+}  // namespace
 
 bool VerifyCopyPasteInstaller(const std::wstring& installer_path,
                               const std::string& expected_sha256) {

@@ -21,8 +21,9 @@ open-source projects and signs releases from CI.
      "GitHub.com" connector).
    - Create two artifact configurations with these slugs and contents:
      - `application`: [signpath/application.xml](signpath/application.xml)
-       (CopyPaste's own executables and its bridge library; upstream libraries
-       such as the Flutter engine stay unsigned, as the Foundation terms require).
+       (CopyPaste's own executables, its bridge library, and the uninstaller
+       that the release generates before signing; upstream libraries such as
+       the Flutter engine stay unsigned, as the Foundation terms require).
      - `installer`: [signpath/installer.xml](signpath/installer.xml)
    - Note the organization ID, project slug, and release signing policy slug.
      Requests to that policy wait for manual approval in SignPath.
