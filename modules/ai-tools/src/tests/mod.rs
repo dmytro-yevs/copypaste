@@ -697,11 +697,12 @@ fn the_manifest_validates_with_every_app_locale() {
     let locales: Vec<&String> = manifest.localizations.keys().collect();
     assert_eq!(
         locales,
-        ["de", "es", "fr", "it", "ja", "ko", "pl", "pt", "tr", "uk", "zh"]
+        ["de", "es", "fr", "it", "ja", "ko", "pl", "pt", "ru", "tr", "uk", "zh"]
     );
     let keys = |locale: &str| manifest.localizations[locale].keys().collect::<Vec<_>>();
     assert!(locales.iter().all(|locale| keys(locale) == keys("uk")));
     assert_eq!(manifest.localized("uk").title, "Інструменти ШІ");
+    assert_eq!(manifest.localized("ru").title, "Инструменты ИИ");
     assert!(manifest.preferences.iter().all(|field| field.synced));
     assert!(manifest
         .commands

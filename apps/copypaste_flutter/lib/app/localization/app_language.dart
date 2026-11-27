@@ -8,6 +8,7 @@ enum AppLanguage {
   system(null, ''),
   english(Locale('en'), 'English'),
   ukrainian(Locale('uk'), 'Українська'),
+  russian(Locale('ru'), 'Русский'),
   spanish(Locale('es'), 'Español'),
   german(Locale('de'), 'Deutsch'),
   french(Locale('fr'), 'Français'),

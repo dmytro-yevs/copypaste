@@ -80,12 +80,20 @@ void main() {
   test('resolves unsupported system languages to English', () {
     expect(
       AppLocalization.resolve(const [
-        Locale('ru'),
+        Locale('nl'),
         Locale('xx'),
       ], AppLocalization.supportedLocales),
       const Locale('en'),
     );
+    expect(
+      AppLocalization.resolve(
+        const [Locale('ru')],
+        AppLocalization.supportedLocales,
+      ),
+      const Locale('ru'),
+    );
     expect(AppLanguage.fromTag('pt-BR'), AppLanguage.portuguese);
+    expect(AppLanguage.fromTag('ru-RU'), AppLanguage.russian);
   });
 }
 

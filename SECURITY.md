@@ -1,5 +1,7 @@
 # Security
 
+[Русский](SECURITY.ru.md)
+
 Report vulnerabilities through the repository's private security advisory channel.
 Include the affected version and platform, reproduction steps using synthetic data,
 and the impact.
