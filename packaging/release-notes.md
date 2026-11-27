@@ -1,8 +1,6 @@
-- The updated Supabase module delivers clips that were uploaded late or from a device with a wrong clock, and no longer stops syncing at a clip encrypted with a newer key.
-- Opening History and searching it take less work on large histories.
-- CopyPaste keeps working when another program holds its LAN sync port.
-- Devices on different CopyPaste versions agree on a LAN sync protocol version before they sync.
-- On Linux, CopyPaste no longer crashes shortly after it starts on GNOME with the AppIndicator extension.
-- A lost permission, a broken module or a missing tray no longer blocks a whole screen: Modules, Settings, Transfers and Quick Paste keep working and report the problem. On Android, Modules opens even when SMS access needs setup.
-- Settings can delete all CopyPaste data from this device; paired devices and cloud copies stay. The Windows uninstaller offers the same, and `brew uninstall --zap` removes everything on macOS.
-- On Android, CopyPaste data is no longer included in cloud backups or device transfers.
+- The Quick Paste shortcut is registered again when it was lost: after a shortcut recording that was left open, or when another application held the combination at launch.
+- A new Quick Paste setting, "Hide previews in password fields", turns off masking while a password field has focus.
+- In Quick Paste, shortcut hints line up in one column, the footer actions have icons and clearer names, a file shows its folder under its name, and a new setting hides the Queue tab.
+- Sync activity lists only problems that need you, one line each with the time it lasted; brief connection drops no longer fill it. The device list stays in place while activity scrolls.
+- On Android, an update refused by device protection (Play Protect, Auto Blocker) is reported as blocked and can be retried. The README explains installing outside Google Play.
+- On Windows, the installer and uninstaller trip fewer antivirus heuristics: the uninstaller ships signed, the installer no longer unpacks a helper DLL, and an update starts the verified installer directly.
