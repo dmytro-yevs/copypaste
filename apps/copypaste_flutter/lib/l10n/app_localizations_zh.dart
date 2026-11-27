@@ -315,6 +315,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickPasteOpenAppSemantics => '打开 CopyPaste';
 
   @override
+  String get quickPasteToggleClipDetails => '显示或隐藏剪贴项详情';
+
+  @override
   String get quickPasteSearchPlaceholder => '输入以搜索…';
 
   @override
@@ -442,6 +445,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transfersShowFile => '显示文件';
 
   @override
+  String get transfersHiddenFile => '隐藏的文件';
+
+  @override
   String get transfersPhaseSending => '正在发送';
 
   @override
@@ -497,7 +503,8 @@ class AppLocalizationsZh extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '通知 · $count 条未读',
+      other: '$count 条未读通知',
+      zero: '通知',
     );
     return '$_temp0';
   }
@@ -741,6 +748,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsSectionPrivacySummary => '应用排除和屏幕保护。';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary => '快捷键和自动粘贴行为。';
@@ -2263,6 +2273,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pairingCancel => '取消配对';
 
   @override
+  String get pairingClose => '关闭配对';
+
+  @override
   String get pairingOrEnterCode => '或输入配对代码';
 
   @override
@@ -3027,25 +3040,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appPreparing => '正在准备 CopyPaste。';
 
   @override
-  String get appRuntimeWaiting => 'CopyPaste 正在等待受保护历史记录的访问权限。应用的其他可用部分仍可正常使用。';
+  String get appRuntimeWaiting => 'CopyPaste 正在等待受保护历史记录的访问权限。';
 
   @override
   String get appHistoryUnavailableTitle => '历史记录运行时不可用';
 
   @override
-  String get appHistoryUnavailableMessage => '请先启动应用运行时，再打开历史记录。';
-
-  @override
   String get appDevicesUnavailableTitle => '设备运行时不可用';
 
   @override
-  String get appDevicesUnavailableMessage => '请先启动应用运行时，再打开设备。';
-
-  @override
   String get appSettingsUnavailableTitle => '设置运行时不可用';
-
-  @override
-  String get appSettingsUnavailableMessage => '请先启动应用运行时，再打开设置。';
 
   @override
   String get appQuit => '退出 CopyPaste';
@@ -4553,8 +4557,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsFavoritesDescription => '在每个面板中优先显示。';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return '面板中按 Mod+$number';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '面板中按 $shortcut';
   }
 
   @override
@@ -4877,6 +4881,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesUntitled => '未命名规则';
 
   @override
+  String get rulesBuiltinCredentials => '检测到的凭据';
+
+  @override
+  String get rulesBuiltinPaymentCards => '银行卡号';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => '删除检测到的凭据';
+
+  @override
   String get rulesPrivacyDefaultsTitle => '隐私默认设置';
 
   @override
@@ -5009,7 +5022,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem 修复前，匹配的内容会受到保护。';
+    return '$problem 修复前，匹配的内容会保存为机密。';
   }
 
   @override
@@ -5420,7 +5433,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesTraceUnknownReason => '此复制内容的该项未知，因此不匹配。';
 
   @override
-  String get rulesTraceRuleError => '此规则无法运行，因此匹配内容会受到保护。';
+  String get rulesTraceRuleError => '此规则无法运行，因此匹配内容会保存为机密。';
 
   @override
   String get rulesTraceOutcomeTitle => '结果';
@@ -5754,6 +5767,7 @@ class AppLocalizationsZh extends AppLocalizations {
       'local_state': '在此设备上保存其数据',
       'prompts': '请你确认操作',
       'endpoints': '接受本地应用的连接',
+      'clipboard_read': '读取剪贴板中的文本',
       'other': '使用 CopyPaste 服务',
     });
     return '$_temp0';

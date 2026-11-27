@@ -60,7 +60,8 @@ class CopyPasteApp extends StatelessWidget {
     this.modulePrompts,
     this.appUpdateController,
     this.desktopWindow,
-    this.runtimeUnavailableMessage,
+    this.runtimeStarting = false,
+    this.runtimeFailureMessage,
     this.onRetryRuntime,
     this.onOpenAndroidCaptureSetup,
     this.onShowWelcomeTour,
@@ -86,7 +87,12 @@ class CopyPasteApp extends StatelessWidget {
   final ModulePromptController? modulePrompts;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
-  final String? runtimeUnavailableMessage;
+
+  /// Whether the runtime is coming up, so its destinations are loading.
+  final bool runtimeStarting;
+
+  /// Why the runtime did not start; null unless it failed.
+  final String? runtimeFailureMessage;
   final Future<void> Function()? onRetryRuntime;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
@@ -94,6 +100,14 @@ class CopyPasteApp extends StatelessWidget {
   final Future<void> Function()? onShowWelcomeTour;
   final GlobalKey<NavigatorState>? navigatorKey;
   final AppLanguageController? language;
+
+  Widget _withoutRuntime(BuildContext context, String title) => runtimeStarting
+      ? StateView.loading(message: context.l10n.appRuntimeWaiting)
+      : StateView.error(
+          title: title,
+          message: runtimeFailureMessage,
+          onRetry: onRetryRuntime,
+        );
 
   @override
   Widget build(BuildContext context) {
@@ -217,12 +231,9 @@ class CopyPasteApp extends StatelessWidget {
                 ],
                 destinations: {
                   AppDestination.history: historyController == null
-                      ? StateView.error(
-                          title: context.l10n.appHistoryUnavailableTitle,
-                          message:
-                              runtimeUnavailableMessage ??
-                              context.l10n.appHistoryUnavailableMessage,
-                          onRetry: onRetryRuntime,
+                      ? _withoutRuntime(
+                          context,
+                          context.l10n.appHistoryUnavailableTitle,
                         )
                       : HistoryScreen(
                           controller: historyController!,
@@ -231,12 +242,9 @@ class CopyPasteApp extends StatelessWidget {
                               navigation.handleDrawerVisibilityChanged,
                         ),
                   AppDestination.devices: devicesController == null
-                      ? StateView.error(
-                          title: context.l10n.appDevicesUnavailableTitle,
-                          message:
-                              runtimeUnavailableMessage ??
-                              context.l10n.appDevicesUnavailableMessage,
-                          onRetry: onRetryRuntime,
+                      ? _withoutRuntime(
+                          context,
+                          context.l10n.appDevicesUnavailableTitle,
                         )
                       : DevicesScreen(
                           controller: devicesController!,
@@ -247,12 +255,9 @@ class CopyPasteApp extends StatelessWidget {
                               AppDestination.devices,
                         ),
                   AppDestination.settings: settingsController == null
-                      ? StateView.error(
-                          title: context.l10n.appSettingsUnavailableTitle,
-                          message:
-                              runtimeUnavailableMessage ??
-                              context.l10n.appSettingsUnavailableMessage,
-                          onRetry: onRetryRuntime,
+                      ? _withoutRuntime(
+                          context,
+                          context.l10n.appSettingsUnavailableTitle,
                         )
                       : SettingsScreen(
                           controller: settingsController!,

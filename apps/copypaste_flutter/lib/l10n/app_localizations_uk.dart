@@ -368,6 +368,10 @@ class AppLocalizationsUk extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'Відкрити CopyPaste';
 
   @override
+  String get quickPasteToggleClipDetails =>
+      'Показати або сховати відомості про кліп';
+
+  @override
   String get quickPasteSearchPlaceholder => 'Введіть текст для пошуку…';
 
   @override
@@ -503,6 +507,9 @@ class AppLocalizationsUk extends AppLocalizations {
   String get transfersShowFile => 'Показати файл';
 
   @override
+  String get transfersHiddenFile => 'Прихований файл';
+
+  @override
   String get transfersPhaseSending => 'Надсилання';
 
   @override
@@ -566,10 +573,11 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Сповіщення · $count непрочитаного',
-      many: 'Сповіщення · $count непрочитаних',
-      few: 'Сповіщення · $count непрочитані',
-      one: 'Сповіщення · $count непрочитане',
+      other: '$count непрочитаного сповіщення',
+      many: '$count непрочитаних сповіщень',
+      few: '$count непрочитані сповіщення',
+      one: '$count непрочитане сповіщення',
+      zero: 'Сповіщення',
     );
     return '$_temp0';
   }
@@ -836,6 +844,9 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsSectionPrivacySummary =>
       'Виключення програм і захист екрана.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary =>
@@ -2517,6 +2528,9 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pairingCancel => 'Скасувати сполучення';
 
   @override
+  String get pairingClose => 'Закрити сполучення';
+
+  @override
   String get pairingOrEnterCode => 'Або введіть код сполучення';
 
   @override
@@ -3361,28 +3375,16 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get appRuntimeWaiting =>
-      'CopyPaste очікує доступу до захищеної історії. Доступними частинами програми можна користуватися.';
+      'CopyPaste очікує доступу до захищеної історії.';
 
   @override
   String get appHistoryUnavailableTitle => 'Середовище історії недоступне';
 
   @override
-  String get appHistoryUnavailableMessage =>
-      'Запустіть середовище виконання програми, перш ніж відкривати історію.';
-
-  @override
   String get appDevicesUnavailableTitle => 'Середовище пристроїв недоступне';
 
   @override
-  String get appDevicesUnavailableMessage =>
-      'Запустіть середовище виконання програми, перш ніж відкривати пристрої.';
-
-  @override
   String get appSettingsUnavailableTitle => 'Середовище налаштувань недоступне';
-
-  @override
-  String get appSettingsUnavailableMessage =>
-      'Запустіть середовище виконання програми, перш ніж відкривати налаштування.';
 
   @override
   String get appQuit => 'Вийти з CopyPaste';
@@ -5028,8 +5030,8 @@ class AppLocalizationsUk extends AppLocalizations {
       'Показуються першими в кожній палітрі.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'Mod+$number у палітрі';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '$shortcut у палітрі';
   }
 
   @override
@@ -5394,6 +5396,15 @@ class AppLocalizationsUk extends AppLocalizations {
   String get rulesUntitled => 'Правило без назви';
 
   @override
+  String get rulesBuiltinCredentials => 'Виявлені облікові дані';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'Номери карток';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => 'Видаляти виявлені облікові дані';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'Типові налаштування приватності';
 
   @override
@@ -5537,7 +5548,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Доки не виправлено, збіги захищено.';
+    return '$problem Доки не виправлено, збіги зберігаються як секретні.';
   }
 
   @override
@@ -5977,7 +5988,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get rulesTraceRuleError =>
-      'Це правило не вдалося виконати, тож збіги захищено.';
+      'Це правило не вдалося виконати, тож збіги зберігаються як секретні.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Результат';
@@ -6356,6 +6367,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'local_state': 'Зберігати свої дані на цьому пристрої',
       'prompts': 'Просити вас підтвердити дії',
       'endpoints': 'Приймати підключення від локальних програм',
+      'clipboard_read': 'Читати текст із буфера обміну',
       'other': 'Використовувати сервіс CopyPaste',
     });
     return '$_temp0';

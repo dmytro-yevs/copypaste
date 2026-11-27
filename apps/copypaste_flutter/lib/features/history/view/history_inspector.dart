@@ -270,11 +270,17 @@ class _HistoryInspectorState extends State<HistoryInspector> {
         children: [
           Align(
             alignment: Alignment.centerRight,
-            child: Button.ghost(
-              key: const ValueKey<String>('history-detail-drawer-close'),
-              style: AppTheme.actionButtonStyle(const ButtonStyle.ghostIcon()),
-              onPressed: () => closeDrawer(context),
-              child: const AppIconFrame(child: Icon(LucideIcons.x)),
+            child: Semantics(
+              label: context.l10n.historyCloseClipDetails,
+              button: true,
+              child: Button.ghost(
+                key: const ValueKey<String>('history-detail-drawer-close'),
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.ghostIcon(),
+                ),
+                onPressed: () => closeDrawer(context),
+                child: const AppIconFrame(child: Icon(LucideIcons.x)),
+              ),
             ),
           ),
           const Gap(AppSpacing.xs),

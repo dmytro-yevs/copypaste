@@ -108,7 +108,7 @@ class LinuxSetupStep extends StatelessWidget {
               const Divider(),
               SetupSettingRow(
                 icon: LucideIcons.clipboard,
-                title: 'Quick Paste',
+                title: l10n.settingsSectionQuickPaste,
                 description: status.quickPaste
                     ? l10n.onboardingLinuxQuickPasteReady
                     : l10n.onboardingLinuxQuickPastePending,

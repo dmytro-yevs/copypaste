@@ -6,6 +6,16 @@ import '../models/content_rule_models.dart';
 /// Rule summaries and labels. Wire names arrive in snake_case and select
 /// messages on the same names.
 extension RuleMessages on AppLocalizations {
+  /// The name to show for a rule. Shipped rules are stored and synced under
+  /// their English names, so one that was not renamed is translated here.
+  String ruleName(String name) => switch (name) {
+    '' => rulesUntitled,
+    'Detected credentials' => rulesBuiltinCredentials,
+    'Payment card numbers' => rulesBuiltinPaymentCards,
+    'Delete detected credentials' => rulesBuiltinCredentialsExpiry,
+    _ => name,
+  };
+
   String ruleDuration(Duration duration) {
     if (duration.inMinutes < 60 || duration.inMinutes % 60 != 0) {
       return rulesMinutes(duration.inMinutes);

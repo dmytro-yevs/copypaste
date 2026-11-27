@@ -131,12 +131,16 @@ class _ShortcutRecorderState extends State<ShortcutRecorder> {
               tooltip: (context) => TooltipContainer(
                 child: Text(context.l10n.settingsShortcutReset),
               ),
-              child: Button.ghost(
-                style: AppTheme.controlButtonStyle(
-                  const ButtonStyle.ghostIcon(),
+              child: Semantics(
+                label: context.l10n.settingsShortcutReset,
+                button: true,
+                child: Button.ghost(
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.ghostIcon(),
+                  ),
+                  onPressed: !widget.enabled || _recording ? null : reset,
+                  child: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
                 ),
-                onPressed: !widget.enabled || _recording ? null : reset,
-                child: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
               ),
             ),
           ],

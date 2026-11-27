@@ -38,6 +38,10 @@ class FileOperation {
   /// A stopped receive whose kept bytes [FileOperationsController.retry]
   /// continues from.
   final bool resumable;
+
+  /// What the runtime stores in place of a secret clip's file name.
+  static const hiddenName = 'Hidden file';
+  bool get nameHidden => name == hiddenName;
   bool get active => phase == 'running';
   bool get failed => phase == 'failed' || phase == 'interrupted';
   double? get progress => total > 0 ? (written / total).clamp(0, 1) : null;

@@ -24,6 +24,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a starting runtime loads instead of reporting a failure', (
+    tester,
+  ) async {
+    final navigation = AppNavigationController();
+    addTearDown(navigation.dispose);
+    await tester.pumpWidget(
+      CopyPasteApp(navigation: navigation, runtimeStarting: true),
+    );
+    await tester.pump();
+
+    expect(find.text('Loading'), findsOneWidget);
+    expect(
+      find.text('CopyPaste is waiting for protected history access.'),
+      findsOneWidget,
+    );
+    expect(find.text('History runtime is unavailable'), findsNothing);
+    expect(find.text('Try again'), findsNothing);
+  });
+
   testWidgets('runtime failure keeps the shell usable and retryable', (
     tester,
   ) async {
@@ -34,7 +53,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteApp(
         navigation: navigation,
-        runtimeUnavailableMessage: 'Protected history is unavailable.',
+        runtimeFailureMessage: 'Protected history is unavailable.',
         onRetryRuntime: () async {
           retries += 1;
         },

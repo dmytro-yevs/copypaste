@@ -367,6 +367,10 @@ class AppLocalizationsTr extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'CopyPaste\'i aç';
 
   @override
+  String get quickPasteToggleClipDetails =>
+      'Öğe ayrıntılarını göster veya gizle';
+
+  @override
   String get quickPasteSearchPlaceholder => 'Aramak için yazın…';
 
   @override
@@ -498,6 +502,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get transfersShowFile => 'Dosyayı göster';
 
   @override
+  String get transfersHiddenFile => 'Gizli dosya';
+
+  @override
   String get transfersPhaseSending => 'Gönderiliyor';
 
   @override
@@ -557,8 +564,9 @@ class AppLocalizationsTr extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Bildirimler · $count okunmamış',
-      one: 'Bildirimler · $count okunmamış',
+      other: '$count okunmamış bildirim',
+      one: '$count okunmamış bildirim',
+      zero: 'Bildirimler',
     );
     return '$_temp0';
   }
@@ -823,6 +831,9 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get settingsSectionPrivacySummary =>
       'Uygulama hariç tutmaları ve ekran koruması.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary =>
@@ -2481,6 +2492,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get pairingCancel => 'Eşlemeyi iptal et';
 
   @override
+  String get pairingClose => 'Eşlemeyi kapat';
+
+  @override
   String get pairingOrEnterCode => 'Veya eşleme kodu girin';
 
   @override
@@ -3287,31 +3301,19 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get appRuntimeWaiting =>
-      'CopyPaste korumalı geçmiş erişimini bekliyor. Uygulamanın kullanılabilir bölümleri kullanılmaya devam edebilir.';
+      'CopyPaste korumalı geçmiş erişimini bekliyor.';
 
   @override
   String get appHistoryUnavailableTitle =>
       'Geçmiş çalışma ortamı kullanılamıyor';
 
   @override
-  String get appHistoryUnavailableMessage =>
-      'Geçmişi açmadan önce uygulama çalışma ortamını başlatın.';
-
-  @override
   String get appDevicesUnavailableTitle =>
       'Cihazlar çalışma ortamı kullanılamıyor';
 
   @override
-  String get appDevicesUnavailableMessage =>
-      'Cihazları açmadan önce uygulama çalışma ortamını başlatın.';
-
-  @override
   String get appSettingsUnavailableTitle =>
       'Ayarlar çalışma ortamı kullanılamıyor';
-
-  @override
-  String get appSettingsUnavailableMessage =>
-      'Ayarları açmadan önce uygulama çalışma ortamını başlatın.';
 
   @override
   String get appQuit => 'CopyPaste\'ten çık';
@@ -4930,8 +4932,8 @@ class AppLocalizationsTr extends AppLocalizations {
       'Her palette ilk sırada gösterilir.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'Palette Mod+$number';
+  String transformsFavoriteShortcut(String shortcut) {
+    return 'Palette $shortcut';
   }
 
   @override
@@ -5287,6 +5289,16 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesUntitled => 'Adsız kural';
 
   @override
+  String get rulesBuiltinCredentials => 'Algılanan kimlik bilgileri';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'Kart numaraları';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry =>
+      'Algılanan kimlik bilgilerini sil';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'Gizlilik varsayılanları';
 
   @override
@@ -5429,7 +5441,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Düzeltilene kadar eşleşmeler korunur.';
+    return '$problem Düzeltilene kadar eşleşmeler gizli olarak kaydedilir.';
   }
 
   @override
@@ -5857,7 +5869,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesTraceRuleError =>
-      'Bu kural çalışamadı, bu yüzden eşleşmeler korunur.';
+      'Bu kural çalışamadı, bu yüzden eşleşmeler gizli olarak kaydedilir.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Sonuç';
@@ -6202,6 +6214,7 @@ class AppLocalizationsTr extends AppLocalizations {
       'local_state': 'Verilerini bu cihazda saklama',
       'prompts': 'İşlemleri onaylamanızı isteme',
       'endpoints': 'Yerel uygulamalardan bağlantı kabul etme',
+      'clipboard_read': 'Panonuzdaki metni okuma',
       'other': 'Bir CopyPaste hizmetini kullanma',
     });
     return '$_temp0';

@@ -955,12 +955,9 @@ class _PaletteItemState extends State<_PaletteItem> {
       TransformEntryKind.recent => LucideIcons.history,
     };
     final name = controller.entryName(entry);
-    final shortcut =
-        widget.favoriteIndex >= 0 &&
-            widget.favoriteIndex < TransformController.maxFavoriteShortcuts
-        ? '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+'}'
-              '${widget.favoriteIndex + 1}'
-        : null;
+    final shortcut = TransformController.favoriteShortcutLabel(
+      widget.favoriteIndex,
+    );
     return Actions(
       actions: {
         ActivateIntent: CallbackAction<Intent>(

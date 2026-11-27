@@ -335,6 +335,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'CopyPaste 열기';
 
   @override
+  String get quickPasteToggleClipDetails => '클립 세부 정보 표시 또는 숨기기';
+
+  @override
   String get quickPasteSearchPlaceholder => '입력하여 검색…';
 
   @override
@@ -462,6 +465,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transfersShowFile => '파일 보기';
 
   @override
+  String get transfersHiddenFile => '숨겨진 파일';
+
+  @override
   String get transfersPhaseSending => '보내는 중';
 
   @override
@@ -519,7 +525,8 @@ class AppLocalizationsKo extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '알림 · 읽지 않음 $count개',
+      other: '읽지 않은 알림 $count개',
+      zero: '알림',
     );
     return '$_temp0';
   }
@@ -771,6 +778,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsSectionPrivacySummary => '앱 제외 및 화면 보호.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary => '단축키 및 자동 붙여넣기 동작.';
@@ -2324,6 +2334,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingCancel => '페어링 취소';
 
   @override
+  String get pairingClose => '페어링 닫기';
+
+  @override
   String get pairingOrEnterCode => '또는 페어링 코드 입력';
 
   @override
@@ -3097,26 +3110,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get appPreparing => 'CopyPaste를 준비하는 중입니다.';
 
   @override
-  String get appRuntimeWaiting =>
-      'CopyPaste가 보호된 기록에 대한 접근을 기다리는 중입니다. 앱에서 사용 가능한 부분은 계속 사용할 수 있습니다.';
+  String get appRuntimeWaiting => 'CopyPaste가 보호된 기록에 대한 접근을 기다리는 중입니다.';
 
   @override
   String get appHistoryUnavailableTitle => '기록 런타임을 사용할 수 없음';
 
   @override
-  String get appHistoryUnavailableMessage => '기록을 열기 전에 앱 런타임을 시작하십시오.';
-
-  @override
   String get appDevicesUnavailableTitle => '기기 런타임을 사용할 수 없음';
 
   @override
-  String get appDevicesUnavailableMessage => '기기를 열기 전에 앱 런타임을 시작하십시오.';
-
-  @override
   String get appSettingsUnavailableTitle => '설정 런타임을 사용할 수 없음';
-
-  @override
-  String get appSettingsUnavailableMessage => '설정을 열기 전에 앱 런타임을 시작하십시오.';
 
   @override
   String get appQuit => 'CopyPaste 종료';
@@ -4657,8 +4660,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsFavoritesDescription => '모든 팔레트에서 먼저 표시됩니다.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return '팔레트에서 Mod+$number';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '팔레트에서 $shortcut';
   }
 
   @override
@@ -4992,6 +4995,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get rulesUntitled => '이름 없는 규칙';
 
   @override
+  String get rulesBuiltinCredentials => '감지된 자격 증명';
+
+  @override
+  String get rulesBuiltinPaymentCards => '카드 번호';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => '감지된 자격 증명 삭제';
+
+  @override
   String get rulesPrivacyDefaultsTitle => '개인정보 보호 기본값';
 
   @override
@@ -5128,7 +5140,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem 수정될 때까지 일치 항목은 보호됩니다.';
+    return '$problem 수정될 때까지 일치 항목은 비밀로 저장됩니다.';
   }
 
   @override
@@ -5544,7 +5556,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get rulesTraceUnknownReason => '이 복사 항목에서는 알 수 없으므로 일치하지 않습니다.';
 
   @override
-  String get rulesTraceRuleError => '이 규칙을 실행하지 못해 일치 항목이 보호됩니다.';
+  String get rulesTraceRuleError => '이 규칙을 실행하지 못해 일치 항목이 비밀로 저장됩니다.';
 
   @override
   String get rulesTraceOutcomeTitle => '결과';
@@ -5879,6 +5891,7 @@ class AppLocalizationsKo extends AppLocalizations {
       'local_state': '이 기기에 데이터 보관',
       'prompts': '작업 확인 요청',
       'endpoints': '로컬 앱의 연결 수락',
+      'clipboard_read': '클립보드의 텍스트 읽기',
       'other': 'CopyPaste 서비스 사용',
     });
     return '$_temp0';

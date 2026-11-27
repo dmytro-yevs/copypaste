@@ -18,6 +18,16 @@ extension TransformMessages on AppLocalizations {
     TransformCategory.other => transformsCategoryOther,
   };
 
+  /// The display name of the platform a per-app default was made for.
+  String transformPlatform(String platform) => switch (platform) {
+    'macos' => 'macOS',
+    'windows' => 'Windows',
+    'android' => 'Android',
+    'linux' => 'Linux',
+    'ios' => 'iOS',
+    _ => platform,
+  };
+
   String transformIssue(TransformIssue issue) {
     final message = _issueText(issue.code);
     final line = issue.line;

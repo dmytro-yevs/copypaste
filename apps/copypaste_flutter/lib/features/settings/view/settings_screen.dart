@@ -2211,20 +2211,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                             ),
-                            child: Button.ghost(
-                              style: AppTheme.controlButtonStyle(
-                                const ButtonStyle.ghostIcon(),
+                            child: Semantics(
+                              label: context.l10n.settingsExcludedAppsRemove(
+                                app.name,
                               ),
-                              onPressed:
-                                  widget.controller.canStart(
-                                    SettingsOperation.excludedApps,
-                                  )
-                                  ? () => widget.controller.removeExcludedApp(
-                                      appId,
+                              button: true,
+                              child: Button.ghost(
+                                style: AppTheme.controlButtonStyle(
+                                  const ButtonStyle.ghostIcon(),
+                                ),
+                                onPressed:
+                                    widget.controller.canStart(
+                                      SettingsOperation.excludedApps,
                                     )
-                                  : null,
-                              child: const AppIconFrame(
-                                child: Icon(LucideIcons.x),
+                                    ? () => widget.controller.removeExcludedApp(
+                                        appId,
+                                      )
+                                    : null,
+                                child: const AppIconFrame(
+                                  child: Icon(LucideIcons.x),
+                                ),
                               ),
                             ),
                           ),
@@ -2371,7 +2377,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         if (widget.appUpdate case final controller?) ...[
-          const Gap(AppSpacing.md),
           AnimatedBuilder(
             animation: controller,
             builder: (context, _) => SettingRow(
@@ -2874,7 +2879,7 @@ class _QuickPasteSection extends StatelessWidget {
           return SettingsSection(
             showHeading: showHeading,
             icon: SettingsSectionId.quickPaste.icon,
-            title: 'Quick Paste',
+            title: context.l10n.settingsSectionQuickPaste,
             description: context.l10n.settingsQuickPasteDescription,
             children: [
               if (controller.linuxIntegration case final integration?)

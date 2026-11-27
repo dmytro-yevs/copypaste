@@ -706,6 +706,12 @@ abstract class AppLocalizations {
   /// **'Open CopyPaste'**
   String get quickPasteOpenAppSemantics;
 
+  /// Screen reader label of the Quick Paste header button that shows or hides the clip details panel beside the list.
+  ///
+  /// In en, this message translates to:
+  /// **'Show or hide clip details'**
+  String get quickPasteToggleClipDetails;
+
   /// Placeholder of the search field at the top of the Quick Paste popup.
   ///
   /// In en, this message translates to:
@@ -910,6 +916,12 @@ abstract class AppLocalizations {
   /// **'Show file'**
   String get transfersShowFile;
 
+  /// Shown in the transfers list in place of the file name when the file belongs to a secret clip.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden file'**
+  String get transfersHiddenFile;
+
   /// Status of a file currently being sent to another device.
   ///
   /// In en, this message translates to:
@@ -1012,10 +1024,10 @@ abstract class AppLocalizations {
   /// **'The saved file is unavailable. It may have been moved or deleted.'**
   String get transfersSavedFileUnavailable;
 
-  /// Tooltip of the notifications header button: the number of unread notifications.
+  /// Tooltip and screen reader label of the notifications header button: how many notifications are unread, or only the name when none are.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, other{Notifications · {count} unread}}'**
+  /// **'{count, plural, =0{Notifications} one{{count} unread notification} other{{count} unread notifications}}'**
   String notificationsTooltip(int count);
 
   /// Title of the notifications drawer.
@@ -1491,6 +1503,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Application exclusions and screen protection.'**
   String get settingsSectionPrivacySummary;
+
+  /// Name of the Quick Paste feature: its settings section in navigation and as the section heading, and its row in the Linux setup step. It is a feature name, kept in English in every language.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Paste'**
+  String get settingsSectionQuickPaste;
 
   /// Short summary of the Quick Paste settings section, used when searching settings.
   ///
@@ -4294,6 +4312,12 @@ abstract class AppLocalizations {
   /// **'Cancel pairing'**
   String get pairingCancel;
 
+  /// Screen reader label of the button that closes the pairing panel on the Devices screen; closing also stops a pairing in progress.
+  ///
+  /// In en, this message translates to:
+  /// **'Close pairing'**
+  String get pairingClose;
+
   /// Heading in the protected pairing window above the field for typing a pairing code instead of scanning.
   ///
   /// In en, this message translates to:
@@ -5601,10 +5625,10 @@ abstract class AppLocalizations {
   /// **'Preparing CopyPaste.'**
   String get appPreparing;
 
-  /// Message shown in History, Devices, and Settings while the app waits for the operating system to unlock its encrypted history. CopyPaste is the product name.
+  /// Message under the loading indicator in History, Devices, and Settings while the app waits for the operating system to unlock its encrypted history. CopyPaste is the product name.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste is waiting for protected history access. The available parts of the app remain usable.'**
+  /// **'CopyPaste is waiting for protected history access.'**
   String get appRuntimeWaiting;
 
   /// Error title shown in place of the History screen when the clipboard history service is not running.
@@ -5613,35 +5637,17 @@ abstract class AppLocalizations {
   /// **'History runtime is unavailable'**
   String get appHistoryUnavailableTitle;
 
-  /// Error message shown in place of the History screen when the clipboard history service is not running.
-  ///
-  /// In en, this message translates to:
-  /// **'Start the application runtime before opening history.'**
-  String get appHistoryUnavailableMessage;
-
   /// Error title shown in place of the Devices screen when the sync service is not running.
   ///
   /// In en, this message translates to:
   /// **'Devices runtime is unavailable'**
   String get appDevicesUnavailableTitle;
 
-  /// Error message shown in place of the Devices screen when the sync service is not running.
-  ///
-  /// In en, this message translates to:
-  /// **'Start the application runtime before opening devices.'**
-  String get appDevicesUnavailableMessage;
-
   /// Error title shown in place of the Settings screen when the app service is not running.
   ///
   /// In en, this message translates to:
   /// **'Settings runtime is unavailable'**
   String get appSettingsUnavailableTitle;
-
-  /// Error message shown in place of the Settings screen when the app service is not running.
-  ///
-  /// In en, this message translates to:
-  /// **'Start the application runtime before opening settings.'**
-  String get appSettingsUnavailableMessage;
 
   /// Button that exits the application. CopyPaste is the product name.
   ///
@@ -8295,11 +8301,11 @@ abstract class AppLocalizations {
   /// **'Shown first in every palette.'**
   String get transformsFavoritesDescription;
 
-  /// Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.
+  /// Shortcut of a favorite in the palette.
   ///
   /// In en, this message translates to:
-  /// **'Mod+{number} in the palette'**
-  String transformsFavoriteShortcut(int number);
+  /// **'{shortcut} in the palette'**
+  String transformsFavoriteShortcut(String shortcut);
 
   /// Placeholder of the selector that adds a favorite.
   ///
@@ -8907,6 +8913,24 @@ abstract class AppLocalizations {
   /// **'Untitled rule'**
   String get rulesUntitled;
 
+  /// Name of the shipped rule that saves detected passwords and secrets as secret. Shown wherever the rule is named, unless the user renamed it.
+  ///
+  /// In en, this message translates to:
+  /// **'Detected credentials'**
+  String get rulesBuiltinCredentials;
+
+  /// Name of the shipped rule that saves detected payment card numbers as secret. Shown wherever the rule is named, unless the user renamed it.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment card numbers'**
+  String get rulesBuiltinPaymentCards;
+
+  /// Name of the shipped rule, off by default, that deletes detected passwords and secrets after a short time. Shown wherever the rule is named, unless the user renamed it.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete detected credentials'**
+  String get rulesBuiltinCredentialsExpiry;
+
   /// Heading of the device Privacy settings that guard capture before any content rule.
   ///
   /// In en, this message translates to:
@@ -9126,7 +9150,7 @@ abstract class AppLocalizations {
   /// Explains the error badge. problem is the reason, a full sentence.
   ///
   /// In en, this message translates to:
-  /// **'{problem} Until fixed, matches are protected.'**
+  /// **'{problem} Until fixed, matches are saved as secret.'**
   String rulesErrorHint(String problem);
 
   /// Drag handle of a rule row.
@@ -9552,7 +9576,7 @@ abstract class AppLocalizations {
   /// Trace note under a rule that could not run on this device.
   ///
   /// In en, this message translates to:
-  /// **'This rule couldn\'t run, so matches are protected.'**
+  /// **'This rule couldn\'t run, so matches are saved as secret.'**
   String get rulesTraceRuleError;
 
   /// Heading of the combined result in a trace.
@@ -9966,7 +9990,7 @@ abstract class AppLocalizations {
   /// One line naming a host service a module asks for; {capability} is its identifier.
   ///
   /// In en, this message translates to:
-  /// **'{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}'**
+  /// **'{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} clipboard_read{Read the text on your clipboard} other{Use a CopyPaste service}}'**
   String modulesCapability(String capability);
 
   /// Line naming the module that asks a question; {module} is the module name.
