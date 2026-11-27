@@ -5,7 +5,7 @@
   "title": "AI Tools",
   "description": "Connect AI assistants and control what they can see.",
   "version": "0.1.0",
-  "app_versions": ">=0.1.3, <2.0.0",
+  "app_versions": ">=0.1.4, <2.0.0",
   "supported_platforms": [
     "macos",
     "windows",
