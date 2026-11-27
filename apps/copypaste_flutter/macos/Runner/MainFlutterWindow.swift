@@ -299,6 +299,10 @@ class MainFlutterWindow: NSWindow {
       onClose: { [weak self] inspectorVisible in
         self?.quickPasteInspectorVisible = inspectorVisible
         self?.quickPastePresentation = nil
+      },
+      // The main engine returns the heap pages the stopped one left cached.
+      onEngineStopped: { [weak self] in
+        self?.quickPasteHostMethodChannel?.invokeMethod("engineStopped", arguments: nil)
       }
     ) else {
       return false
@@ -694,6 +698,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let onOpenSettings: () -> Void
   private let onOpenMain: () -> Void
   private let onClose: (Bool) -> Void
+  private let onEngineStopped: () -> Void
   private let window: QuickPastePanel
   private let engine: FlutterEngine
   private let controller: FlutterViewController
@@ -718,7 +723,8 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     inspectorVisible: Bool,
     onOpenSettings: @escaping () -> Void,
     onOpenMain: @escaping () -> Void,
-    onClose: @escaping (Bool) -> Void
+    onClose: @escaping (Bool) -> Void,
+    onEngineStopped: @escaping () -> Void
   ) {
     self.mainWindow = mainWindow
     self.inspectorVisible = inspectorVisible
@@ -726,6 +732,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     self.onOpenSettings = onOpenSettings
     self.onOpenMain = onOpenMain
     self.onClose = onClose
+    self.onEngineStopped = onEngineStopped
     let project = FlutterDartProject()
     let engine = FlutterEngine(
       name: "quick-paste",
@@ -773,7 +780,11 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     configureContextChannel()
   }
 
-  deinit { pasteSession.invalidate() }
+  deinit {
+    pasteSession.invalidate()
+    // The panel goes with this presentation once the pool that holds it empties.
+    MacosMemoryPressure.shared.releaseAutoreleasedObjects()
+  }
 
   func show(
     frontmost: NSRunningApplication?, trayAnchor: NSRect? = nil
@@ -856,6 +867,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     engine.viewController = nil
     engine.shutDownEngine()
     MacosMemoryPressure.shared.releaseFreedMemory()
+    onEngineStopped()
   }
 
   private func close() {

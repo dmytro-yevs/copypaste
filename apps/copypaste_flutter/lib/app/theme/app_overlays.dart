@@ -11,6 +11,7 @@ import 'app_motion.dart';
 import 'app_toast.dart';
 import 'app_theme.dart';
 import 'app_tokens.dart';
+import 'app_tooltip.dart';
 
 /// Shared presentation and behavior for application-owned overlays.
 ///
@@ -194,7 +195,7 @@ abstract final class AppOverlays {
                   PositionedDirectional(
                     top: AppSpacing.lg,
                     end: AppSpacing.lg,
-                    child: Tooltip(
+                    child: AppTooltip(
                       tooltip: (context) => TooltipContainer(
                         child: Text(context.l10n.commonClose),
                       ),

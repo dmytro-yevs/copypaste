@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import FlutterMacOS
 
@@ -62,6 +63,18 @@ final class MacosMemoryPressure {
     for client in clients {
       client.engine?.binaryMessenger.send(onChannel: "flutter/system", message: message)
     }
+  }
+
+  // AppKit empties the main thread's autorelease pool once per event, and a
+  // hidden application receives none: a window released meanwhile stays alive,
+  // with its last frame, until the user next interacts. An empty event ends
+  // that wait.
+  func releaseAutoreleasedObjects() {
+    guard let event = NSEvent.otherEvent(
+      with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0,
+      windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
+    ) else { return }
+    NSApp.postEvent(event, atStart: false)
   }
 
   // Returns dirty free pages kept by the tiny and small allocators. It does not

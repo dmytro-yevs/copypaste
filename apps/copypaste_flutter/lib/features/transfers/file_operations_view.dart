@@ -10,6 +10,7 @@ import '../../app/shell/header_fit.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import '../../shared/format_bytes.dart';
 import '../../shared/failure_toasts.dart';
 import '../../shared/state_view.dart';
@@ -107,7 +108,7 @@ class _FileOperationsHeaderActionState
           ),
         ),
       );
-      return Tooltip(
+      return AppTooltip(
         tooltip: (_) => TooltipContainer(
           child: Text(
             active.isEmpty

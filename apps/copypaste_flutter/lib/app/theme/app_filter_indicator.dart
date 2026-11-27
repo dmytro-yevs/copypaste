@@ -3,6 +3,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../l10n/l10n.dart';
 import 'app_theme.dart';
 import 'app_tokens.dart';
+import 'app_tooltip.dart';
 
 /// Marks active filter controls without changing their dimensions or lifecycle.
 class AppFilterIndicator extends StatelessWidget {
@@ -68,7 +69,7 @@ class AppFilterIndicator extends StatelessWidget {
     );
     return tooltip == null
         ? control
-        : Tooltip(
+        : AppTooltip(
             tooltip: (_) => TooltipContainer(child: Text(tooltip!)),
             child: control,
           );

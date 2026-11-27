@@ -9,6 +9,7 @@ import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../platform/security/owner_access.dart';
 import '../../../shared/error_text.dart';
@@ -336,7 +337,7 @@ class ModuleViewDrawer extends StatelessWidget {
           AppBar(
             title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
             trailing: [
-              Tooltip(
+              AppTooltip(
                 tooltip: (context) =>
                     TooltipContainer(child: Text(context.l10n.commonClose)),
                 child: Semantics(

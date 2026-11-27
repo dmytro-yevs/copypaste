@@ -3,6 +3,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/format_bytes.dart';
 
@@ -79,7 +80,7 @@ class _StorageUsageBarState extends State<StorageUsageBar> {
                           child: MouseRegion(
                             onEnter: (_) => _hover(index),
                             onExit: (_) => _hover(null),
-                            child: Tooltip(
+                            child: AppTooltip(
                               tooltip: (context) => TooltipContainer(
                                 child: Text(_detail(context, part)),
                               ),

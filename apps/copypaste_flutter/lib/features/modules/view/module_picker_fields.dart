@@ -3,6 +3,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/forms/dynamic_form_draft.dart';
 import '../../applications/controller/application_directory.dart';
@@ -142,7 +143,7 @@ class _ApplicationSetField extends StatelessWidget {
             builder: (context, app, label) => Row(
               children: [
                 Expanded(child: label.small()),
-                Tooltip(
+                AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.modulesRemoveApp(app.name)),
                   ),

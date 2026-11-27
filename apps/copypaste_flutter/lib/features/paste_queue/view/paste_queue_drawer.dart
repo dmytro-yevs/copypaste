@@ -10,6 +10,7 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/failure_toasts.dart';
 import '../../../shared/state_view.dart';
@@ -783,7 +784,7 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
               ),
               const Gap(AppSpacing.md),
               Expanded(
-                child: Tooltip(
+                child: AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(
                       block == null
@@ -909,7 +910,7 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
     required String label,
     required IconData icon,
     required VoidCallback? onPressed,
-  }) => Tooltip(
+  }) => AppTooltip(
     tooltip: (context) => TooltipContainer(child: Text(label)),
     child: Semantics(
       label: label,

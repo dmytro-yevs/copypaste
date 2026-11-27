@@ -116,6 +116,17 @@ void main() {
     await suspendAndSettle();
     expect(frames, AppResourcePolicy.settlingFrames);
 
+    // An engine that stops later leaves pages only further frames return.
+    frames = 0;
+    unawaited(AppResourcePolicy.releaseRetiredEngine());
+    const tick = AppResourcePolicy.collectionInterval;
+    final settling =
+        AppResourcePolicy.settlingInterval * AppResourcePolicy.settlingFrames;
+    for (var waited = Duration.zero; waited <= settling; waited += tick) {
+      await tester.pump(tick);
+    }
+    expect(frames, AppResourcePolicy.settlingFrames);
+
     // A presentation shown again owes the hidden window nothing further.
     await suspendAndSettle(resumed: true);
     expect(frames, 0);

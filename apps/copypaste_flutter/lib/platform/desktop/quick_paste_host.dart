@@ -152,9 +152,14 @@ class MethodChannelQuickPasteWindowHost
   VoidCallback? _openSettings;
   VoidCallback? _openMain;
   VoidCallback? _findInHistory;
+  VoidCallback? _engineStopped;
 
   void setFindInHistoryHandler(VoidCallback? handler) =>
       _findInHistory = handler;
+
+  /// Called once the host has shut down the engine of a retired presentation.
+  void setEngineStoppedHandler(VoidCallback? handler) =>
+      _engineStopped = handler;
 
   void setOpenMainHandler(VoidCallback? handler) => _openMain = handler;
 
@@ -210,6 +215,10 @@ class MethodChannelQuickPasteWindowHost
       _openSettings?.call();
       return true;
     }
+    if (call.method == 'engineStopped') {
+      _engineStopped?.call();
+      return true;
+    }
     throw MissingPluginException(
       'Unsupported quick paste method: ${call.method}',
     );
@@ -220,6 +229,7 @@ class MethodChannelQuickPasteWindowHost
     _openSettings = null;
     _openMain = null;
     _findInHistory = null;
+    _engineStopped = null;
     try {
       await _channel.invokeMethod<void>('dispose');
     } on MissingPluginException {

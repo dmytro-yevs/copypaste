@@ -6,9 +6,9 @@ import '../../../app/shell/header_action_content.dart';
 import '../../../app/shell/header_fit.dart';
 import '../../../app/theme/app_filter_indicator.dart';
 import '../../../app/theme/app_icon_frame.dart';
-import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../controller/paste_queue_controller.dart';
 import '../controller/paste_queue_shortcuts_controller.dart';
@@ -79,8 +79,7 @@ class PasteQueueHeaderActionState extends State<PasteQueueHeaderAction> {
       final summary = collecting
           ? l10n.pasteQueueSummaryCollecting(count)
           : l10n.pasteQueueSummary(count);
-      return Tooltip(
-        showDuration: AppMotion.resolve(context, AppMotion.standard),
+      return AppTooltip(
         tooltip: (context) => TooltipContainer(
           child: Text('${l10n.pasteQueueSettingsTitle} · $summary'),
         ),

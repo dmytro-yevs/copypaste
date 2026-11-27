@@ -4,8 +4,8 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/shell/header_fit.dart';
 import '../../../app/theme/app_theme.dart';
 
-import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../platform/capture/capture_control_state.dart';
 import '../controller/settings_controller.dart';
 import '../models/settings_models.dart';
@@ -34,8 +34,7 @@ class CaptureHeaderAction extends StatelessWidget {
             capture == null || !controller.canStart(SettingsOperation.capture)
             ? null
             : controller.toggleCapture;
-        return Tooltip(
-          showDuration: AppMotion.resolve(context, AppMotion.standard),
+        return AppTooltip(
           tooltip: (context) => TooltipContainer(
             child: Text('${state.actionLabel} · ${state.label}'),
           ),

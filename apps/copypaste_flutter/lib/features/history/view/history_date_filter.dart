@@ -8,6 +8,7 @@ import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../controller/history_controller.dart';
 import '../../../shared/system_date_time.dart';
 
@@ -31,7 +32,7 @@ class HistoryDateFilter extends StatelessWidget {
       active: query.hasDateFilter,
       child: OverlayAnchor(
         anchor: ('history-date-filter', controller),
-        child: Tooltip(
+        child: AppTooltip(
           tooltip: (_) => TooltipContainer(child: Text(label)),
           child: Semantics(
             label: label,

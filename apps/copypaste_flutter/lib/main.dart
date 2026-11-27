@@ -850,6 +850,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     host.setOpenSettingsHandler(() {
       _navigation.selectDestination(AppDestination.settings);
     });
+    host.setEngineStoppedHandler(() {
+      unawaited(AppResourcePolicy.releaseRetiredEngine());
+    });
     // One registrar binds every Linux portal shortcut in one session.
     final registrar = _shortcutRegistrar = Platform.isLinux
         ? LinuxPortalDesktopShortcutRegistrar()

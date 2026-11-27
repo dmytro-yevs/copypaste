@@ -9,10 +9,10 @@ import 'package:flutter/services.dart';
 
 import '../../../app/shell/header_action_content.dart';
 import '../../../app/shell/header_fit.dart';
-import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../shared/inspector_table.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
@@ -79,8 +79,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
             ),
           ),
         );
-        return Tooltip(
-          showDuration: AppMotion.resolve(context, AppMotion.standard),
+        return AppTooltip(
           tooltip: (context) => TooltipContainer(
             child: Text(worded ? context.l10n.syncDetailsTitle : status.label),
           ),
@@ -177,7 +176,7 @@ class _SyncDetails extends StatelessWidget {
           style: AppTheme.deviceMetadataTextStyle(context),
         ),
         trailing: [
-          Tooltip(
+          AppTooltip(
             tooltip: (context) =>
                 TooltipContainer(child: Text(context.l10n.syncDetailsClose)),
             child: Semantics(
@@ -433,7 +432,7 @@ class _SyncPeerRow extends StatelessWidget {
                         ),
                       ),
                       const Gap(AppSpacing.sm),
-                      Tooltip(
+                      AppTooltip(
                         tooltip: (context) => TooltipContainer(
                           child: Text(l10n.syncPeerConnectionDetails),
                         ),

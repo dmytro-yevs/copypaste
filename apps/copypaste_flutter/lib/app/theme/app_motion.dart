@@ -20,6 +20,9 @@ abstract final class AppMotion {
   static const Duration spoilerReveal = Duration(milliseconds: 350);
   static const Curve spoilerRevealCurve = Curves.easeOut;
   static const Duration settingsHighlightHold = Duration(milliseconds: 1200);
+
+  /// How long a pointer rests on a control before its tooltip opens.
+  static const Duration tooltipDelay = Duration(milliseconds: 500);
   static const Duration toastHold = Duration(seconds: 5);
   static const Duration toastActionHoldAccessible = Duration(seconds: 10);
   static const Duration navigation = Duration(milliseconds: 320);
@@ -239,9 +242,12 @@ class AppSpoilerMotion {
       );
   final AnimationController dust;
   final AnimationController reveal;
-  void conceal({required bool reducedMotion}) {
+
+  /// Dust drifts only while [drifting]. Each of its frames redraws the whole
+  /// window, so dust that nobody can see must not keep the application drawing.
+  void conceal({required bool drifting}) {
     reveal.reset();
-    if (reducedMotion) {
+    if (!drifting) {
       dust.stop();
     } else if (!dust.isAnimating) {
       dust.repeat();

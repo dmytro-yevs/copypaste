@@ -211,6 +211,7 @@ void main() {
     await mouse.moveTo(
       tester.getCenter(find.byIcon(LucideIcons.monitorSmartphone)),
     );
+    await tester.pump(AppMotion.tooltipDelay);
     await tester.pumpAndSettle();
     expect(find.text('All devices'), findsOneWidget);
     expect(

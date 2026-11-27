@@ -8,6 +8,7 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../shared/failure_toasts.dart';
 import '../../../shared/state_view.dart';
 import '../controller/history_controller.dart';
@@ -232,7 +233,7 @@ class _TagsEditorState extends State<_TagsEditor> {
                                           ),
                                         ),
                                       ),
-                                      child: Tooltip(
+                                      child: AppTooltip(
                                         tooltip: (_) => TooltipContainer(
                                           child: Text(
                                             strings.historyTagActions,

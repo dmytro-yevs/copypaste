@@ -5,9 +5,9 @@ import '../../../app/shell/app_header.dart';
 import '../../../app/shell/header_action_content.dart';
 import '../../../app/shell/header_fit.dart';
 import '../../../app/theme/app_icon_frame.dart';
-import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../models/settings_models.dart';
 import '../models/storage_usage_text.dart';
@@ -73,8 +73,7 @@ class StorageHeaderAction extends StatelessWidget
         ),
       ),
     );
-    return Tooltip(
-      showDuration: AppMotion.resolve(context, AppMotion.standard),
+    return AppTooltip(
       tooltip: (context) => TooltipContainer(child: Text(summary)),
       child: Button.ghost(
         key: const ValueKey<String>('storage-header-open'),

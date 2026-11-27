@@ -26,6 +26,13 @@ final class MacosScreenshotProtection {
     func resume() { protection?.resume() }
   }
 
+  /// Runs its closure when the object it is associated with is deallocated.
+  private final class WindowLifetime {
+    private let ended: () -> Void
+    init(ended: @escaping () -> Void) { self.ended = ended }
+    deinit { ended() }
+  }
+
   private var clients: [Client] = []
   private var closeObserver: NSObjectProtocol?
   private(set) var blocked = UserDefaults.standard.bool(forKey: preferenceKey)
@@ -52,6 +59,13 @@ final class MacosScreenshotProtection {
     guard let layer = view.layer else { return false }
     let client = Client(window: window, layer: layer)
     clients.append(client)
+    // A client keeps its layer, and with it the window's last frame, so it
+    // goes as soon as the window is deallocated, not at the next registration.
+    objc_setAssociatedObject(
+      window, Unmanaged.passUnretained(self).toOpaque(),
+      WindowLifetime { [weak self] in DispatchQueue.main.async { self?.pruneClients() } },
+      .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    )
     return client.apply(blocked)
   }
 

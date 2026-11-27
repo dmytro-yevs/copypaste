@@ -28,15 +28,26 @@ class SecretSpoiler extends StatefulWidget {
 
 class _SecretSpoilerState extends State<SecretSpoiler>
     with TickerProviderStateMixin, WidgetsBindingObserver {
+  /// Animation ticks the dust may go unpainted before it stops drifting.
+  static const _unseenTickLimit = 2;
+
   late final _motion = AppSpoilerMotion(vsync: this);
   bool _revealed = false;
   Offset? _origin;
+
+  // Flutter paints the dust only while it is on screen, yet a running
+  // animation makes the whole window redraw on every frame. Dust that goes
+  // unpainted therefore stops drifting until it is painted again.
+  bool _dustSeen = true;
+  bool _dustPainted = true;
+  int _unseenTicks = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
+    _motion.dust.addListener(_dustTicked);
   }
 
   @override
@@ -63,13 +74,40 @@ class _SecretSpoilerState extends State<SecretSpoiler>
   void _updateMotion() {
     final revealed = widget.controller.isRevealed(widget.clipId);
     if (revealed) {
+      // A mask shown again starts drifting and is checked afresh.
+      _dustSeen = true;
+      _dustPainted = true;
+      _unseenTicks = 0;
       if (!_revealed) {
         _motion.open(reducedMotion: AppMotion.reducedMotionOf(context));
       }
     } else {
-      _motion.conceal(reducedMotion: AppMotion.reducedMotionOf(context));
+      _motion.conceal(
+        drifting: _dustSeen && !AppMotion.reducedMotionOf(context),
+      );
     }
     _revealed = revealed;
+  }
+
+  void _dustTicked() {
+    if (_dustPainted) {
+      _dustPainted = false;
+      _unseenTicks = 0;
+    } else if (++_unseenTicks >= _unseenTickLimit) {
+      _unseenTicks = 0;
+      _dustSeen = false;
+      _updateMotion();
+    }
+  }
+
+  void _dustWasPainted() {
+    _dustPainted = true;
+    if (_dustSeen) return;
+    _dustSeen = true;
+    // Painting cannot start an animation; the end of this frame can.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateMotion();
+    });
   }
 
   @override
@@ -86,6 +124,7 @@ class _SecretSpoilerState extends State<SecretSpoiler>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
+    _motion.dust.removeListener(_dustTicked);
     _motion.dispose();
     super.dispose();
   }
@@ -127,7 +166,11 @@ class _SecretSpoilerState extends State<SecretSpoiler>
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(AppRadius.sm),
                         child: CustomPaint(
-                          painter: _DustPainter(_motion.dust, color),
+                          painter: _DustPainter(
+                            _motion.dust,
+                            color,
+                            _dustWasPainted,
+                          ),
                         ),
                       ),
                     ),
@@ -162,11 +205,15 @@ class _RevealClipper extends CustomClipper<Path> {
 }
 
 class _DustPainter extends CustomPainter {
-  _DustPainter(this.time, this.color) : super(repaint: time);
+  _DustPainter(this.time, this.color, this.onPaint) : super(repaint: time);
   final Animation<double> time;
   final Color color;
+
+  /// Reports that the dust reached the screen in this frame.
+  final VoidCallback onPaint;
   @override
   void paint(Canvas canvas, Size size) {
+    onPaint();
     final paint = Paint()..color = color.withValues(alpha: 0.12);
     canvas.drawRect(Offset.zero & size, paint);
     // Dust geometry is content-specific; its density is bounded independently of text length.

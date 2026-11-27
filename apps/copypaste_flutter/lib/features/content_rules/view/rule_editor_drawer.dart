@@ -11,6 +11,7 @@ import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/adaptive_breakpoints.dart';
 import '../../../shared/dialogs/unsaved_changes_dialog.dart';
@@ -216,7 +217,7 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
       ),
       leading: const [AppIconFrame(child: Icon(LucideIcons.listFilter))],
       trailing: [
-        Tooltip(
+        AppTooltip(
           tooltip: (context) => TooltipContainer(child: Text(l10n.commonClose)),
           child: Button.ghost(
             key: const ValueKey('rule-editor-close'),
@@ -584,7 +585,7 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
   );
 
   Widget _removeButton(String label, Key key, VoidCallback onPressed) =>
-      Tooltip(
+      AppTooltip(
         tooltip: (context) => TooltipContainer(child: Text(label)),
         child: Button.ghost(
           key: key,
@@ -878,7 +879,7 @@ class _ConditionRow extends StatelessWidget {
                       ),
               ),
               const Gap(AppSpacing.sm),
-              Tooltip(
+              AppTooltip(
                 tooltip: (context) =>
                     TooltipContainer(child: Text(l10n.rulesRemoveCondition)),
                 child: Button.ghost(

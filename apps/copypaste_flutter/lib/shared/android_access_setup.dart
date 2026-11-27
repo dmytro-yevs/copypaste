@@ -3,6 +3,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_tokens.dart';
+import '../app/theme/app_tooltip.dart';
 import '../l10n/l10n.dart';
 import '../platform/android/android_shizuku_state.dart';
 import 'setup_setting_row.dart';
@@ -189,7 +190,7 @@ class _AdbSetupState extends State<_AdbSetup> {
           children: [
             Expanded(child: Text(context.l10n.sharedRunOnComputer)),
             const Gap(AppSpacing.sm),
-            Tooltip(
+            AppTooltip(
               tooltip: (context) => Text(context.l10n.sharedCopyAllCommands),
               child: Button.ghost(
                 style: AppTheme.controlButtonStyle(

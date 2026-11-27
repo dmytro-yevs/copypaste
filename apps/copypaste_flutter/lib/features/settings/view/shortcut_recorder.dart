@@ -2,9 +2,9 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
-import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../platform/desktop/global_shortcut.dart';
 
@@ -126,8 +126,7 @@ class _ShortcutRecorderState extends State<ShortcutRecorder> {
           ),
           if (widget.onReset case final reset?) ...[
             const Gap(AppSpacing.sm),
-            Tooltip(
-              showDuration: AppMotion.resolve(context, AppMotion.standard),
+            AppTooltip(
               tooltip: (context) => TooltipContainer(
                 child: Text(context.l10n.settingsShortcutReset),
               ),
