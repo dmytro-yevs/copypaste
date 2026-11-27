@@ -84,7 +84,7 @@ enum SettingsSectionId {
       SettingsSectionId.clipboard => strings.settingsSectionClipboard,
       SettingsSectionId.privacy => strings.settingsSectionPrivacy,
       SettingsSectionId.rules => strings.settingsSectionRules,
-      SettingsSectionId.quickPaste => 'Quick Paste',
+      SettingsSectionId.quickPaste => strings.settingsSectionQuickPaste,
       SettingsSectionId.shortcuts => strings.settingsSectionShortcuts,
       SettingsSectionId.quickAccess => strings.settingsSectionQuickAccess,
       SettingsSectionId.module => strings.settingsSectionModules,

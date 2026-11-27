@@ -375,6 +375,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'CopyPaste öffnen';
 
   @override
+  String get quickPasteToggleClipDetails =>
+      'Eintragsdetails ein- oder ausblenden';
+
+  @override
   String get quickPasteSearchPlaceholder => 'Suchen …';
 
   @override
@@ -508,6 +512,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get transfersShowFile => 'Datei anzeigen';
 
   @override
+  String get transfersHiddenFile => 'Verborgene Datei';
+
+  @override
   String get transfersPhaseSending => 'Wird gesendet';
 
   @override
@@ -571,8 +578,9 @@ class AppLocalizationsDe extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Benachrichtigungen · $count ungelesen',
-      one: 'Benachrichtigungen · $count ungelesen',
+      other: '$count ungelesene Benachrichtigungen',
+      one: '$count ungelesene Benachrichtigung',
+      zero: 'Benachrichtigungen',
     );
     return '$_temp0';
   }
@@ -843,6 +851,9 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get settingsSectionPrivacySummary =>
       'App-Ausschlüsse und Bildschirmschutz.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary =>
@@ -2518,6 +2529,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get pairingCancel => 'Kopplung abbrechen';
 
   @override
+  String get pairingClose => 'Kopplung schließen';
+
+  @override
   String get pairingOrEnterCode => 'Oder Kopplungscode eingeben';
 
   @override
@@ -3350,29 +3364,17 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get appRuntimeWaiting =>
-      'CopyPaste wartet auf Zugriff auf den geschützten Verlauf. Die verfügbaren Teile der App bleiben nutzbar.';
+      'CopyPaste wartet auf Zugriff auf den geschützten Verlauf.';
 
   @override
   String get appHistoryUnavailableTitle => 'Verlaufsdienst nicht verfügbar';
 
   @override
-  String get appHistoryUnavailableMessage =>
-      'Vor dem Öffnen des Verlaufs die App-Laufzeitumgebung starten.';
-
-  @override
   String get appDevicesUnavailableTitle => 'Gerätedienst nicht verfügbar';
-
-  @override
-  String get appDevicesUnavailableMessage =>
-      'Vor dem Öffnen der Geräte die App-Laufzeitumgebung starten.';
 
   @override
   String get appSettingsUnavailableTitle =>
       'Einstellungsdienst nicht verfügbar';
-
-  @override
-  String get appSettingsUnavailableMessage =>
-      'Vor dem Öffnen der Einstellungen die App-Laufzeitumgebung starten.';
 
   @override
   String get appQuit => 'CopyPaste beenden';
@@ -5028,8 +5030,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Erscheinen in jeder Palette zuerst.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'Mod+$number in der Palette';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '$shortcut in der Palette';
   }
 
   @override
@@ -5394,6 +5396,15 @@ class AppLocalizationsDe extends AppLocalizations {
   String get rulesUntitled => 'Unbenannte Regel';
 
   @override
+  String get rulesBuiltinCredentials => 'Erkannte Zugangsdaten';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'Kartennummern';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => 'Erkannte Zugangsdaten löschen';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'Datenschutz-Standards';
 
   @override
@@ -5539,7 +5550,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Bis zur Behebung werden Treffer geschützt.';
+    return '$problem Bis zur Behebung werden Treffer als geheim gespeichert.';
   }
 
   @override
@@ -5977,7 +5988,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get rulesTraceRuleError =>
-      'Diese Regel konnte nicht laufen, daher werden Treffer geschützt.';
+      'Diese Regel konnte nicht laufen, daher werden Treffer als geheim gespeichert.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Ergebnis';
@@ -6333,6 +6344,7 @@ class AppLocalizationsDe extends AppLocalizations {
       'local_state': 'Seine Daten auf diesem Gerät speichern',
       'prompts': 'Dich um Bestätigung bitten',
       'endpoints': 'Verbindungen lokaler Apps annehmen',
+      'clipboard_read': 'Den Text in deiner Zwischenablage lesen',
       'other': 'Einen CopyPaste-Dienst nutzen',
     });
     return '$_temp0';

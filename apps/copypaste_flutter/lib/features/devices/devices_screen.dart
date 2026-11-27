@@ -1403,15 +1403,19 @@ class _PairingInspectorState extends State<PairingInspector> {
                     overflow: TextOverflow.ellipsis,
                   ).h3(),
                 ),
-                Button.ghost(
-                  key: const ValueKey<String>('close-pairing-inspector'),
-                  style: AppTheme.controlButtonStyle(
-                    const ButtonStyle.ghostIcon(),
+                Semantics(
+                  label: context.l10n.pairingClose,
+                  button: true,
+                  child: Button.ghost(
+                    key: const ValueKey<String>('close-pairing-inspector'),
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.ghostIcon(),
+                    ),
+                    onPressed: widget.controller.canClosePairing
+                        ? widget.onClose
+                        : null,
+                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
-                  onPressed: widget.controller.canClosePairing
-                      ? widget.onClose
-                      : null,
-                  child: const AppIconFrame(child: Icon(LucideIcons.x)),
                 ),
               ],
             ),

@@ -16,8 +16,10 @@ import '../../applications/view/application_picker.dart';
 import '../../settings/controller/settings_navigation_state.dart';
 import '../../settings/view/settings_search_target.dart';
 import '../../settings/view/settings_section.dart';
+import '../controller/transform_controller.dart';
 import '../controller/transforms_settings_controller.dart';
 import '../models/transform_models.dart';
+import '../presentation/transform_messages.dart';
 import 'pipeline_editor_drawer.dart';
 
 /// Settings → Transforms as a settings screen contribution.
@@ -312,7 +314,9 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
                   else
                     l10n.transformsNoDefault,
                   if (entry.platform != _controller.platform)
-                    l10n.transformsOtherPlatform(entry.platform),
+                    l10n.transformsOtherPlatform(
+                      l10n.transformPlatform(entry.platform),
+                    ),
                 ].join(' · '),
                 actions: [
                   _iconButton(
@@ -394,9 +398,12 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
               title:
                   _controller.favoriteName(favorite) ??
                   l10n.transformsRemovedPipeline,
-              subtitle: index < 9
-                  ? l10n.transformsFavoriteShortcut(index + 1)
-                  : null,
+              subtitle: switch (TransformController.favoriteShortcutLabel(
+                index,
+              )) {
+                final shortcut? => l10n.transformsFavoriteShortcut(shortcut),
+                null => null,
+              },
               actions: [
                 _iconButton(
                   l10n.transformsMoveEarlier,

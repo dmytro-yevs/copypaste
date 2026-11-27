@@ -4,6 +4,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart' show LucideIcons;
 
 import '../../../l10n/app_localizations.dart';
 import '../../../platform/capture/capture_control_state.dart';
+import '../../content_rules/presentation/rule_messages.dart';
 import '../../devices/devices_gateway.dart' show DeviceSyncPolicy;
 
 /// A tray or menu-bar command that carries no data.
@@ -583,7 +584,11 @@ List<TrayMenuEntry> buildTrayMenu(TrayMenuState state, AppLocalizations l10n) {
               in state.skipped.take(trayMaxSkipEntries).indexed)
             TrayMenuItem(
               TrayMenuKeys.skippedSlot(index),
-              label: _joined([time(entry.at), entry.sourceApp, entry.ruleName]),
+              label: _joined([
+                time(entry.at),
+                entry.sourceApp,
+                l10n.ruleName(entry.ruleName),
+              ]),
               enabled: false,
             ),
           const TrayMenuSeparator('separator-skipped'),

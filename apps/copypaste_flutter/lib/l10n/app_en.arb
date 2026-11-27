@@ -402,6 +402,10 @@
   "@quickPasteOpenAppSemantics": {
     "description": "Screen reader label of the logo button in the Quick Paste popup that opens the main CopyPaste window. CopyPaste is the product name."
   },
+  "quickPasteToggleClipDetails": "Show or hide clip details",
+  "@quickPasteToggleClipDetails": {
+    "description": "Screen reader label of the Quick Paste header button that shows or hides the clip details panel beside the list."
+  },
   "quickPasteSearchPlaceholder": "Type to search…",
   "@quickPasteSearchPlaceholder": {
     "description": "Placeholder of the search field at the top of the Quick Paste popup."
@@ -602,6 +606,10 @@
   "@transfersShowFile": {
     "description": "Button on a completed transfer that reveals the saved file in the file manager."
   },
+  "transfersHiddenFile": "Hidden file",
+  "@transfersHiddenFile": {
+    "description": "Shown in the transfers list in place of the file name when the file belongs to a secret clip."
+  },
   "transfersPhaseSending": "Sending",
   "@transfersPhaseSending": {
     "description": "Status of a file currently being sent to another device."
@@ -670,9 +678,9 @@
   "@transfersSavedFileUnavailable": {
     "description": "Error when the downloaded file cannot be shown because it no longer exists."
   },
-  "notificationsTooltip": "{count, plural, other{Notifications · {count} unread}}",
+  "notificationsTooltip": "{count, plural, =0{Notifications} one{{count} unread notification} other{{count} unread notifications}}",
   "@notificationsTooltip": {
-    "description": "Tooltip of the notifications header button: the number of unread notifications.",
+    "description": "Tooltip and screen reader label of the notifications header button: how many notifications are unread, or only the name when none are.",
     "placeholders": {
       "count": {
         "type": "int"
@@ -1000,6 +1008,10 @@
   "settingsSectionPrivacySummary": "Application exclusions and screen protection.",
   "@settingsSectionPrivacySummary": {
     "description": "Short summary of the Privacy settings section, used when searching settings."
+  },
+  "settingsSectionQuickPaste": "Quick Paste",
+  "@settingsSectionQuickPaste": {
+    "description": "Name of the Quick Paste feature: its settings section in navigation and as the section heading, and its row in the Linux setup step. It is a feature name, kept in English in every language."
   },
   "settingsSectionQuickPasteSummary": "Shortcut and automatic paste behavior.",
   "@settingsSectionQuickPasteSummary": {
@@ -3024,6 +3036,10 @@
   "@pairingCancel": {
     "description": "Button in the protected pairing window that stops the pairing."
   },
+  "pairingClose": "Close pairing",
+  "@pairingClose": {
+    "description": "Screen reader label of the button that closes the pairing panel on the Devices screen; closing also stops a pairing in progress."
+  },
   "pairingOrEnterCode": "Or enter a pairing code",
   "@pairingOrEnterCode": {
     "description": "Heading in the protected pairing window above the field for typing a pairing code instead of scanning."
@@ -4022,33 +4038,21 @@
   "@appPreparing": {
     "description": "Loading message shown while the app window prepares its first screen. CopyPaste is the product name."
   },
-  "appRuntimeWaiting": "CopyPaste is waiting for protected history access. The available parts of the app remain usable.",
+  "appRuntimeWaiting": "CopyPaste is waiting for protected history access.",
   "@appRuntimeWaiting": {
-    "description": "Message shown in History, Devices, and Settings while the app waits for the operating system to unlock its encrypted history. CopyPaste is the product name."
+    "description": "Message under the loading indicator in History, Devices, and Settings while the app waits for the operating system to unlock its encrypted history. CopyPaste is the product name."
   },
   "appHistoryUnavailableTitle": "History runtime is unavailable",
   "@appHistoryUnavailableTitle": {
     "description": "Error title shown in place of the History screen when the clipboard history service is not running."
   },
-  "appHistoryUnavailableMessage": "Start the application runtime before opening history.",
-  "@appHistoryUnavailableMessage": {
-    "description": "Error message shown in place of the History screen when the clipboard history service is not running."
-  },
   "appDevicesUnavailableTitle": "Devices runtime is unavailable",
   "@appDevicesUnavailableTitle": {
     "description": "Error title shown in place of the Devices screen when the sync service is not running."
   },
-  "appDevicesUnavailableMessage": "Start the application runtime before opening devices.",
-  "@appDevicesUnavailableMessage": {
-    "description": "Error message shown in place of the Devices screen when the sync service is not running."
-  },
   "appSettingsUnavailableTitle": "Settings runtime is unavailable",
   "@appSettingsUnavailableTitle": {
     "description": "Error title shown in place of the Settings screen when the app service is not running."
-  },
-  "appSettingsUnavailableMessage": "Start the application runtime before opening settings.",
-  "@appSettingsUnavailableMessage": {
-    "description": "Error message shown in place of the Settings screen when the app service is not running."
   },
   "appQuit": "Quit CopyPaste",
   "@appQuit": {
@@ -6203,13 +6207,14 @@
   "@transformsFavoritesDescription": {
     "description": "Settings row description; Mod is Command on macOS and Ctrl elsewhere."
   },
-  "transformsFavoriteShortcut": "Mod+{number} in the palette",
+  "transformsFavoriteShortcut": "{shortcut} in the palette",
   "@transformsFavoriteShortcut": {
-    "description": "Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.",
+    "description": "Shortcut of a favorite in the palette.",
     "placeholders": {
-      "number": {
-        "type": "int",
-        "description": "1 to 9."
+      "shortcut": {
+        "type": "String",
+        "example": "⌘1",
+        "description": "The key combination, such as ⌘1 on macOS or Ctrl+1 elsewhere."
       }
     }
   },
@@ -6646,6 +6651,18 @@
   "@rulesUntitled": {
     "description": "Shown for a rule without a name."
   },
+  "rulesBuiltinCredentials": "Detected credentials",
+  "@rulesBuiltinCredentials": {
+    "description": "Name of the shipped rule that saves detected passwords and secrets as secret. Shown wherever the rule is named, unless the user renamed it."
+  },
+  "rulesBuiltinPaymentCards": "Payment card numbers",
+  "@rulesBuiltinPaymentCards": {
+    "description": "Name of the shipped rule that saves detected payment card numbers as secret. Shown wherever the rule is named, unless the user renamed it."
+  },
+  "rulesBuiltinCredentialsExpiry": "Delete detected credentials",
+  "@rulesBuiltinCredentialsExpiry": {
+    "description": "Name of the shipped rule, off by default, that deletes detected passwords and secrets after a short time. Shown wherever the rule is named, unless the user renamed it."
+  },
   "rulesPrivacyDefaultsTitle": "Privacy defaults",
   "@rulesPrivacyDefaultsTitle": {
     "description": "Heading of the device Privacy settings that guard capture before any content rule."
@@ -6850,7 +6867,7 @@
   "@rulesErrorBadge": {
     "description": "Badge on a rule that cannot run on this device."
   },
-  "rulesErrorHint": "{problem} Until fixed, matches are protected.",
+  "rulesErrorHint": "{problem} Until fixed, matches are saved as secret.",
   "@rulesErrorHint": {
     "description": "Explains the error badge. problem is the reason, a full sentence.",
     "placeholders": {
@@ -7260,7 +7277,7 @@
   "@rulesTraceUnknownReason": {
     "description": "Trace note under a condition whose attribute is unknown for the copy."
   },
-  "rulesTraceRuleError": "This rule couldn't run, so matches are protected.",
+  "rulesTraceRuleError": "This rule couldn't run, so matches are saved as secret.",
   "@rulesTraceRuleError": {
     "description": "Trace note under a rule that could not run on this device."
   },
@@ -7669,7 +7686,7 @@
   "@modulesEnableAccess": {
     "description": "Lead-in above the list of what a module may access."
   },
-  "modulesCapability": "{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}",
+  "modulesCapability": "{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} clipboard_read{Read the text on your clipboard} other{Use a CopyPaste service}}",
   "@modulesCapability": {
     "description": "One line naming a host service a module asks for; {capability} is its identifier.",
     "placeholders": {

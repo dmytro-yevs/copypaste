@@ -34,19 +34,23 @@ class HistoryBulkToolbar extends StatelessWidget {
         Tooltip(
           tooltip: (context) =>
               TooltipContainer(child: Text(context.l10n.historyBulkTagTooltip)),
-          child: Button.secondary(
-            key: const ValueKey('history-bulk-tags'),
-            style: AppTheme.historyToolbarIconStyle,
-            onPressed: canApply && controller.bulk.canTagBulkSelection
-                ? () => showHistoryTagsDialog(
-                    context,
-                    controller: controller,
-                    clipIds: controller.bulk.bulkSelectedIds.toList(),
-                  )
-                : null,
-            child: const AppIconFrame(
-              size: AppIconSize.md,
-              child: Icon(LucideIcons.tags, size: AppIconSize.md),
+          child: Semantics(
+            label: context.l10n.historyBulkTagTooltip,
+            button: true,
+            child: Button.secondary(
+              key: const ValueKey('history-bulk-tags'),
+              style: AppTheme.historyToolbarIconStyle,
+              onPressed: canApply && controller.bulk.canTagBulkSelection
+                  ? () => showHistoryTagsDialog(
+                      context,
+                      controller: controller,
+                      clipIds: controller.bulk.bulkSelectedIds.toList(),
+                    )
+                  : null,
+              child: const AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(LucideIcons.tags, size: AppIconSize.md),
+              ),
             ),
           ),
         ),

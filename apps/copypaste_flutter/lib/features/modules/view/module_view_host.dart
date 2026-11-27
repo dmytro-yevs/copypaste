@@ -276,7 +276,7 @@ Future<void> presentModuleResult(
         AppToast.show(
           context,
           title: title,
-          message: context.l10n.commonCopy,
+          message: context.l10n.historyCopiedTitle,
           tone: AppToastTone.success,
         );
       }

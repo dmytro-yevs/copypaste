@@ -54,6 +54,13 @@ class TransformController extends ChangeNotifier {
 
   static const maxRecents = 8;
   static const maxFavoriteShortcuts = 9;
+
+  /// The palette shortcut of the favorite at [index]; null when it has none.
+  static String? favoriteShortcutLabel(int index) =>
+      index >= 0 && index < maxFavoriteShortcuts
+      ? '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+'}'
+            '${index + 1}'
+      : null;
   static const maxPipelineName = 80;
 
   final TransformSource source;

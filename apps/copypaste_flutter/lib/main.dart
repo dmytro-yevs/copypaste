@@ -698,6 +698,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   }
 
   Future<void> _stopRuntime() async {
+    // A stop is always followed by a start, so the shell keeps loading.
+    if (mounted) setState(() => _runtimeState = _RuntimeState.idle);
     final connections = _releaseFeatureState();
     await connections.history?.dispose();
     await connections.devices?.dispose();
@@ -1045,11 +1047,12 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       modulePrompts: _modulePrompts,
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
-      runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting => AppStrings.current.appRuntimeWaiting,
-        _RuntimeState.failed => _runtimeFailureMessage,
-        _RuntimeState.idle || _RuntimeState.ready => null,
-      },
+      runtimeStarting:
+          _runtimeState == _RuntimeState.starting ||
+          _runtimeState == _RuntimeState.idle,
+      runtimeFailureMessage: _runtimeState == _RuntimeState.failed
+          ? _runtimeFailureMessage
+          : null,
       onRetryRuntime: _runtimeState == _RuntimeState.failed
           ? _retryRuntime
           : null,

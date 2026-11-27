@@ -337,6 +337,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'CopyPaste を開く';
 
   @override
+  String get quickPasteToggleClipDetails => 'クリップの詳細を表示または非表示';
+
+  @override
   String get quickPasteSearchPlaceholder => '入力して検索…';
 
   @override
@@ -464,6 +467,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transfersShowFile => 'ファイルを表示';
 
   @override
+  String get transfersHiddenFile => '非表示のファイル';
+
+  @override
   String get transfersPhaseSending => '送信中';
 
   @override
@@ -520,7 +526,8 @@ class AppLocalizationsJa extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '通知 · 未読 $count 件',
+      other: '未読の通知 $count 件',
+      zero: '通知',
     );
     return '$_temp0';
   }
@@ -771,6 +778,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get settingsSectionPrivacySummary => 'アプリの除外と画面の保護。';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary => 'ショートカットと自動ペーストの動作。';
@@ -2337,6 +2347,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pairingCancel => 'ペアリングをキャンセル';
 
   @override
+  String get pairingClose => 'ペアリングを閉じる';
+
+  @override
   String get pairingOrEnterCode => 'またはペアリングコードを入力';
 
   @override
@@ -3112,26 +3125,16 @@ class AppLocalizationsJa extends AppLocalizations {
   String get appPreparing => 'CopyPaste を準備しています。';
 
   @override
-  String get appRuntimeWaiting =>
-      'CopyPaste は保護された履歴へのアクセスを待っています。アプリの利用可能な部分は引き続き使用できます。';
+  String get appRuntimeWaiting => 'CopyPaste は保護された履歴へのアクセスを待っています。';
 
   @override
   String get appHistoryUnavailableTitle => '履歴のランタイムを利用できません';
 
   @override
-  String get appHistoryUnavailableMessage => '履歴を開く前に、アプリのランタイムを起動してください。';
-
-  @override
   String get appDevicesUnavailableTitle => 'デバイスのランタイムを利用できません';
 
   @override
-  String get appDevicesUnavailableMessage => 'デバイスを開く前に、アプリのランタイムを起動してください。';
-
-  @override
   String get appSettingsUnavailableTitle => '設定のランタイムを利用できません';
-
-  @override
-  String get appSettingsUnavailableMessage => '設定を開く前に、アプリのランタイムを起動してください。';
 
   @override
   String get appQuit => 'CopyPaste を終了';
@@ -4682,8 +4685,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsFavoritesDescription => 'すべてのパレットで先頭に表示されます。';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'パレットで Mod+$number';
+  String transformsFavoriteShortcut(String shortcut) {
+    return 'パレットで $shortcut';
   }
 
   @override
@@ -5017,6 +5020,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get rulesUntitled => '名前のないルール';
 
   @override
+  String get rulesBuiltinCredentials => '検出された認証情報';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'カード番号';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => '検出された認証情報を削除';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'プライバシーの既定値';
 
   @override
@@ -5153,7 +5165,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem 修正されるまで、一致したコピーは保護されます。';
+    return '$problem 修正されるまで、一致したコピーはシークレットとして保存されます。';
   }
 
   @override
@@ -5571,7 +5583,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get rulesTraceUnknownReason => 'このコピーでは不明なため、一致しません。';
 
   @override
-  String get rulesTraceRuleError => 'このルールを実行できなかったため、一致したコピーは保護されます。';
+  String get rulesTraceRuleError => 'このルールを実行できなかったため、一致したコピーはシークレットとして保存されます。';
 
   @override
   String get rulesTraceOutcomeTitle => '結果';
@@ -5906,6 +5918,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'local_state': 'このデバイスにデータを保存する',
       'prompts': '操作の確認を求める',
       'endpoints': 'ローカルアプリからの接続を受け付ける',
+      'clipboard_read': 'クリップボードのテキストを読む',
       'other': 'CopyPaste のサービスを使う',
     });
     return '$_temp0';

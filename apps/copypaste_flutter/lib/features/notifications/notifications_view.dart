@@ -41,24 +41,28 @@ class _NotificationsHeaderActionState extends State<NotificationsHeaderAction> {
           context.l10n.notificationsTooltip(widget.controller.unread),
         ),
       ),
-      child: Button.secondary(
-        key: const ValueKey('notifications-open'),
-        style: AppTheme.headerActionButtonStyle(
-          const ButtonStyle.secondaryIcon(),
-        ),
-        onPressed: _open,
-        child: HeaderActionContent(
-          icon: AppIconFrame(
-            child: Icon(
-              widget.controller.unread > 0
-                  ? LucideIcons.bellDot
-                  : LucideIcons.bell,
-            ),
+      child: Semantics(
+        label: context.l10n.notificationsTooltip(widget.controller.unread),
+        button: true,
+        child: Button.secondary(
+          key: const ValueKey('notifications-open'),
+          style: AppTheme.headerActionButtonStyle(
+            const ButtonStyle.secondaryIcon(),
           ),
-          label: widget.controller.unread > 0
-              ? '${widget.controller.unread}'
-              : null,
-          labelUntil: HeaderStage.bottomNavigation,
+          onPressed: _open,
+          child: HeaderActionContent(
+            icon: AppIconFrame(
+              child: Icon(
+                widget.controller.unread > 0
+                    ? LucideIcons.bellDot
+                    : LucideIcons.bell,
+              ),
+            ),
+            label: widget.controller.unread > 0
+                ? '${widget.controller.unread}'
+                : null,
+            labelUntil: HeaderStage.bottomNavigation,
+          ),
         ),
       ),
     ),
@@ -95,10 +99,16 @@ class _NotificationsDrawer extends StatelessWidget {
         AppBar(
           title: Text(context.l10n.notificationsTitle),
           trailing: [
-            Button.ghost(
-              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
-              onPressed: () => closeDrawer(context),
-              child: const AppIconFrame(child: Icon(LucideIcons.x)),
+            Semantics(
+              label: context.l10n.commonClose,
+              button: true,
+              child: Button.ghost(
+                style: AppTheme.controlButtonStyle(
+                  const ButtonStyle.ghostIcon(),
+                ),
+                onPressed: () => closeDrawer(context),
+                child: const AppIconFrame(child: Icon(LucideIcons.x)),
+              ),
             ),
           ],
         ),

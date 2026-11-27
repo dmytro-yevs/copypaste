@@ -95,7 +95,7 @@ class RuleTracePanel extends StatelessWidget {
 
   Widget _step(BuildContext context, RuleTraceStep step) {
     final l10n = context.l10n;
-    final name = step.ruleName.isEmpty ? l10n.rulesUntitled : step.ruleName;
+    final name = l10n.ruleName(step.ruleName);
     return Card(
       theme: AppTheme.settingsGroupCardTheme,
       padding: const EdgeInsets.all(AppSpacing.md),

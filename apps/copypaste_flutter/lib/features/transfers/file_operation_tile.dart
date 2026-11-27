@@ -103,12 +103,18 @@ class _ErroredFileOperation extends StatelessWidget {
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.transfersRemoveFromHistory),
                   ),
-                  child: Button.ghost(
-                    style: AppTheme.controlButtonStyle(
-                      const ButtonStyle.ghostIcon(),
+                  child: Semantics(
+                    label: context.l10n.transfersRemoveFromHistory,
+                    button: true,
+                    child: Button.ghost(
+                      style: AppTheme.controlButtonStyle(
+                        const ButtonStyle.ghostIcon(),
+                      ),
+                      onPressed: onRemove,
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.trash2),
+                      ),
                     ),
-                    onPressed: onRemove,
-                    child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
                   ),
                 ),
               ],
@@ -263,12 +269,16 @@ class _ActiveFileOperation extends StatelessWidget {
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.transfersCancelDownload),
                   ),
-                  child: Button.ghost(
-                    style: AppTheme.controlButtonStyle(
-                      const ButtonStyle.ghostIcon(),
+                  child: Semantics(
+                    label: context.l10n.transfersCancelDownload,
+                    button: true,
+                    child: Button.ghost(
+                      style: AppTheme.controlButtonStyle(
+                        const ButtonStyle.ghostIcon(),
+                      ),
+                      onPressed: onCancel,
+                      child: const AppIconFrame(child: Icon(LucideIcons.x)),
                     ),
-                    onPressed: onCancel,
-                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
                 ),
               ),
@@ -354,13 +364,17 @@ class _CompletedFileOperation extends StatelessWidget {
                     tooltip: (context) => TooltipContainer(
                       child: Text(context.l10n.transfersRemoveFromHistory),
                     ),
-                    child: Button.ghost(
-                      style: AppTheme.controlButtonStyle(
-                        const ButtonStyle.ghostIcon(),
-                      ),
-                      onPressed: onRemove,
-                      child: const AppIconFrame(
-                        child: Icon(LucideIcons.trash2),
+                    child: Semantics(
+                      label: context.l10n.transfersRemoveFromHistory,
+                      button: true,
+                      child: Button.ghost(
+                        style: AppTheme.controlButtonStyle(
+                          const ButtonStyle.ghostIcon(),
+                        ),
+                        onPressed: onRemove,
+                        child: const AppIconFrame(
+                          child: Icon(LucideIcons.trash2),
+                        ),
                       ),
                     ),
                   ),
@@ -435,12 +449,16 @@ class _TerminalFileOperation extends StatelessWidget {
               tooltip: (context) => TooltipContainer(
                 child: Text(context.l10n.transfersRemoveFromHistory),
               ),
-              child: Button.ghost(
-                style: AppTheme.controlButtonStyle(
-                  const ButtonStyle.ghostIcon(),
+              child: Semantics(
+                label: context.l10n.transfersRemoveFromHistory,
+                button: true,
+                child: Button.ghost(
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.ghostIcon(),
+                  ),
+                  onPressed: onRemove,
+                  child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
                 ),
-                onPressed: onRemove,
-                child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
               ),
             ),
           ],
@@ -456,11 +474,14 @@ class _OperationName extends StatelessWidget {
   final FileOperation operation;
   final int lines;
 
+  String _name(BuildContext context) =>
+      operation.nameHidden ? context.l10n.transfersHiddenFile : operation.name;
+
   @override
   Widget build(BuildContext context) => Text(
     operation.fileCount > 1
-        ? '${context.l10n.fileSetCount(operation.fileCount)} · ${operation.name}'
-        : operation.name,
+        ? '${context.l10n.fileSetCount(operation.fileCount)} · ${_name(context)}'
+        : _name(context),
     maxLines: lines,
     overflow: TextOverflow.ellipsis,
     style: Theme.of(

@@ -378,6 +378,10 @@ class AppLocalizationsIt extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'Apri CopyPaste';
 
   @override
+  String get quickPasteToggleClipDetails =>
+      'Mostra o nascondi dettagli elemento';
+
+  @override
   String get quickPasteSearchPlaceholder => 'Digita per cercare…';
 
   @override
@@ -514,6 +518,9 @@ class AppLocalizationsIt extends AppLocalizations {
   String get transfersShowFile => 'Mostra file';
 
   @override
+  String get transfersHiddenFile => 'File nascosto';
+
+  @override
   String get transfersPhaseSending => 'Invio in corso';
 
   @override
@@ -577,9 +584,10 @@ class AppLocalizationsIt extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Notifiche · $count non lette',
-      many: 'Notifiche · $count non lette',
-      one: 'Notifiche · $count non letta',
+      other: '$count notifiche non lette',
+      many: '$count notifiche non lette',
+      one: '$count notifica non letta',
+      zero: 'Notifiche',
     );
     return '$_temp0';
   }
@@ -849,6 +857,9 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get settingsSectionPrivacySummary =>
       'Esclusione delle app e protezione dello schermo.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary =>
@@ -2527,6 +2538,9 @@ class AppLocalizationsIt extends AppLocalizations {
   String get pairingCancel => 'Annulla abbinamento';
 
   @override
+  String get pairingClose => 'Chiudi abbinamento';
+
+  @override
   String get pairingOrEnterCode => 'Oppure inserisci un codice di abbinamento';
 
   @override
@@ -3366,31 +3380,19 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get appRuntimeWaiting =>
-      'CopyPaste è in attesa dell\'accesso alla cronologia protetta. Le parti disponibili dell\'app restano utilizzabili.';
+      'CopyPaste è in attesa dell\'accesso alla cronologia protetta.';
 
   @override
   String get appHistoryUnavailableTitle =>
       'Il runtime della cronologia non è disponibile';
 
   @override
-  String get appHistoryUnavailableMessage =>
-      'Avvia il runtime dell\'app prima di aprire la cronologia.';
-
-  @override
   String get appDevicesUnavailableTitle =>
       'Il runtime dei dispositivi non è disponibile';
 
   @override
-  String get appDevicesUnavailableMessage =>
-      'Avvia il runtime dell\'app prima di aprire i dispositivi.';
-
-  @override
   String get appSettingsUnavailableTitle =>
       'Il runtime delle impostazioni non è disponibile';
-
-  @override
-  String get appSettingsUnavailableMessage =>
-      'Avvia il runtime dell\'app prima di aprire le impostazioni.';
 
   @override
   String get appQuit => 'Esci da CopyPaste';
@@ -5055,8 +5057,8 @@ class AppLocalizationsIt extends AppLocalizations {
       'Compaiono per prime in ogni palette.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'Mod+$number nella palette';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '$shortcut nella palette';
   }
 
   @override
@@ -5422,6 +5424,15 @@ class AppLocalizationsIt extends AppLocalizations {
   String get rulesUntitled => 'Regola senza nome';
 
   @override
+  String get rulesBuiltinCredentials => 'Credenziali rilevate';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'Numeri di carta';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => 'Elimina le credenziali rilevate';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'Impostazioni privacy predefinite';
 
   @override
@@ -5561,7 +5572,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Finché non è corretta, le corrispondenze sono protette.';
+    return '$problem Finché non è corretta, le corrispondenze sono salvate come segrete.';
   }
 
   @override
@@ -6000,7 +6011,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesTraceRuleError =>
-      'Questa regola non è stata eseguita, quindi le corrispondenze sono protette.';
+      'Questa regola non è stata eseguita, quindi le corrispondenze sono salvate come segrete.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Risultato';
@@ -6355,6 +6366,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'local_state': 'Conservare i suoi dati su questo dispositivo',
       'prompts': 'Chiederti di confermare azioni',
       'endpoints': 'Accettare connessioni da app locali',
+      'clipboard_read': 'Leggere il testo negli appunti',
       'other': 'Usare un servizio di CopyPaste',
     });
     return '$_temp0';

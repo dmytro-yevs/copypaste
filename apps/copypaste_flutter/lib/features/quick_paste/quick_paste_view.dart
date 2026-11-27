@@ -518,12 +518,16 @@ class _QuickPasteViewState extends State<QuickPasteView>
             FileOperationsHeaderAction(controller: transfers),
             const Gap(AppSpacing.xs),
           ],
-          Button.ghost(
-            style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
-            key: const ValueKey('quick-paste-inspector-toggle'),
-            onPressed: controller.toggleInspector,
-            child: const AppIconFrame(
-              child: Icon(LucideIcons.panelsLeftBottom),
+          Semantics(
+            label: context.l10n.quickPasteToggleClipDetails,
+            button: true,
+            child: Button.ghost(
+              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
+              key: const ValueKey('quick-paste-inspector-toggle'),
+              onPressed: controller.toggleInspector,
+              child: const AppIconFrame(
+                child: Icon(LucideIcons.panelsLeftBottom),
+              ),
             ),
           ),
         ],

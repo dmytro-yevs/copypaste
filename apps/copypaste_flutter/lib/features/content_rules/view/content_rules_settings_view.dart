@@ -189,7 +189,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
 
   Widget _conflict(BuildContext context, RuleConflict conflict) {
     final l10n = context.l10n;
-    final name = _controller.rule(conflict.ruleId)?.name ?? l10n.rulesUntitled;
+    final name = l10n.ruleName(_controller.rule(conflict.ruleId)?.name ?? '');
     return Alert(
       key: ValueKey('rule-conflict-${conflict.id}'),
       leading: const AppIconFrame(child: Icon(LucideIcons.gitMerge)),
@@ -353,7 +353,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
-                        rule.name.isEmpty ? l10n.rulesUntitled : rule.name,
+                        l10n.ruleName(rule.name),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ).medium(),
@@ -394,7 +394,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
           ),
           const Gap(AppSpacing.sm),
           SettingSwitch(
-            label: rule.name,
+            label: l10n.ruleName(rule.name),
             showState: false,
             toggle: Switch(
               key: ValueKey('rule-enabled-${rule.id}'),
@@ -555,7 +555,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        rule.name.isEmpty ? l10n.rulesUntitled : rule.name,
+                        l10n.ruleName(rule.name),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -634,7 +634,7 @@ class _SkipLogDialog extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(event.ruleName).small(),
+                          Text(l10n.ruleName(event.ruleName)).small(),
                           Text(
                             [
                               event.sourceAppName ?? l10n.rulesUnknownApp,

@@ -366,6 +366,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickPasteOpenAppSemantics => 'Open CopyPaste';
 
   @override
+  String get quickPasteToggleClipDetails => 'Show or hide clip details';
+
+  @override
   String get quickPasteSearchPlaceholder => 'Type to search…';
 
   @override
@@ -496,6 +499,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get transfersShowFile => 'Show file';
 
   @override
+  String get transfersHiddenFile => 'Hidden file';
+
+  @override
   String get transfersPhaseSending => 'Sending';
 
   @override
@@ -557,7 +563,9 @@ class AppLocalizationsEn extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Notifications · $count unread',
+      other: '$count unread notifications',
+      one: '$count unread notification',
+      zero: 'Notifications',
     );
     return '$_temp0';
   }
@@ -825,6 +833,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsSectionPrivacySummary =>
       'Application exclusions and screen protection.';
+
+  @override
+  String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
   String get settingsSectionQuickPasteSummary =>
@@ -2463,6 +2474,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pairingCancel => 'Cancel pairing';
 
   @override
+  String get pairingClose => 'Close pairing';
+
+  @override
   String get pairingOrEnterCode => 'Or enter a pairing code';
 
   @override
@@ -3271,28 +3285,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get appRuntimeWaiting =>
-      'CopyPaste is waiting for protected history access. The available parts of the app remain usable.';
+      'CopyPaste is waiting for protected history access.';
 
   @override
   String get appHistoryUnavailableTitle => 'History runtime is unavailable';
 
   @override
-  String get appHistoryUnavailableMessage =>
-      'Start the application runtime before opening history.';
-
-  @override
   String get appDevicesUnavailableTitle => 'Devices runtime is unavailable';
 
   @override
-  String get appDevicesUnavailableMessage =>
-      'Start the application runtime before opening devices.';
-
-  @override
   String get appSettingsUnavailableTitle => 'Settings runtime is unavailable';
-
-  @override
-  String get appSettingsUnavailableMessage =>
-      'Start the application runtime before opening settings.';
 
   @override
   String get appQuit => 'Quit CopyPaste';
@@ -4914,8 +4916,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get transformsFavoritesDescription => 'Shown first in every palette.';
 
   @override
-  String transformsFavoriteShortcut(int number) {
-    return 'Mod+$number in the palette';
+  String transformsFavoriteShortcut(String shortcut) {
+    return '$shortcut in the palette';
   }
 
   @override
@@ -5271,6 +5273,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get rulesUntitled => 'Untitled rule';
 
   @override
+  String get rulesBuiltinCredentials => 'Detected credentials';
+
+  @override
+  String get rulesBuiltinPaymentCards => 'Payment card numbers';
+
+  @override
+  String get rulesBuiltinCredentialsExpiry => 'Delete detected credentials';
+
+  @override
   String get rulesPrivacyDefaultsTitle => 'Privacy defaults';
 
   @override
@@ -5411,7 +5422,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Until fixed, matches are protected.';
+    return '$problem Until fixed, matches are saved as secret.';
   }
 
   @override
@@ -5845,7 +5856,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get rulesTraceRuleError =>
-      'This rule couldn\'t run, so matches are protected.';
+      'This rule couldn\'t run, so matches are saved as secret.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Result';
@@ -6197,6 +6208,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'local_state': 'Keep its data on this device',
       'prompts': 'Ask you to confirm actions',
       'endpoints': 'Accept connections from local apps',
+      'clipboard_read': 'Read the text on your clipboard',
       'other': 'Use a CopyPaste service',
     });
     return '$_temp0';

@@ -85,16 +85,26 @@ class _FileOperationsHeaderActionState
       final active = widget.controller.active.toList(growable: false);
       final total = active.fold<int>(0, (sum, item) => sum + item.total);
       final written = active.fold<int>(0, (sum, item) => sum + item.written);
-      final button = Button.secondary(
-        key: const ValueKey('file-operations-open'),
-        style: AppTheme.headerActionButtonStyle(
-          const ButtonStyle.secondaryIcon(),
-        ),
-        onPressed: _open,
-        child: HeaderActionContent(
-          icon: const AppIconFrame(child: Icon(LucideIcons.download)),
-          label: active.isEmpty ? null : '${active.length}',
-          labelUntil: HeaderStage.bottomNavigation,
+      final button = Semantics(
+        label: active.isEmpty
+            ? context.l10n.transfersTitle
+            : context.l10n.transfersActiveTooltip(
+                active.length,
+                formatBytes(written),
+                formatBytes(total),
+              ),
+        button: true,
+        child: Button.secondary(
+          key: const ValueKey('file-operations-open'),
+          style: AppTheme.headerActionButtonStyle(
+            const ButtonStyle.secondaryIcon(),
+          ),
+          onPressed: _open,
+          child: HeaderActionContent(
+            icon: const AppIconFrame(child: Icon(LucideIcons.download)),
+            label: active.isEmpty ? null : '${active.length}',
+            labelUntil: HeaderStage.bottomNavigation,
+          ),
         ),
       );
       return Tooltip(
@@ -163,12 +173,16 @@ class _FileOperationsDrawer extends StatelessWidget {
               context.l10n.transfersActiveCount(controller.active.length),
             ),
             trailing: [
-              Button.ghost(
-                style: AppTheme.controlButtonStyle(
-                  const ButtonStyle.ghostIcon(),
+              Semantics(
+                label: context.l10n.commonClose,
+                button: true,
+                child: Button.ghost(
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.ghostIcon(),
+                  ),
+                  onPressed: () => closeDrawer(context),
+                  child: const AppIconFrame(child: Icon(LucideIcons.x)),
                 ),
-                onPressed: () => closeDrawer(context),
-                child: const AppIconFrame(child: Icon(LucideIcons.x)),
               ),
             ],
           ),
