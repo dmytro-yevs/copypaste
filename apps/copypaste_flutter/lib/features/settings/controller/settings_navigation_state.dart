@@ -98,28 +98,28 @@ enum SettingsSectionId {
     };
   }
 
-  String get description {
+  /// The line under the heading of a section that takes it from here; the
+  /// other sections have none or pass their own.
+  String? get description {
     final strings = AppStrings.current;
     return switch (this) {
-      SettingsSectionId.general => strings.settingsSectionGeneralSummary,
-      SettingsSectionId.appearance => strings.settingsSectionAppearanceSummary,
-      SettingsSectionId.clipboard => strings.settingsSectionClipboardSummary,
-      SettingsSectionId.privacy => strings.settingsSectionPrivacySummary,
       SettingsSectionId.rules => strings.settingsSectionRulesSummary,
-      SettingsSectionId.quickPaste => strings.settingsSectionQuickPasteSummary,
       SettingsSectionId.shortcuts => strings.settingsSectionShortcutsSummary,
-      SettingsSectionId.quickAccess =>
-        strings.settingsSectionQuickAccessSummary,
-      SettingsSectionId.module => strings.settingsSectionModulesSummary,
-      SettingsSectionId.transforms => strings.settingsSectionTransformsSummary,
-      SettingsSectionId.sync => strings.settingsSectionSyncSummary,
-      SettingsSectionId.notifications =>
-        strings.settingsSectionNotificationsSummary,
-      SettingsSectionId.data => strings.settingsSectionDataSummary,
-      SettingsSectionId.modules => strings.settingsSectionModulesSummary,
       SettingsSectionId.diagnostics =>
         strings.settingsSectionDiagnosticsSummary,
-      SettingsSectionId.about => strings.settingsSectionAboutSummary,
+      SettingsSectionId.general ||
+      SettingsSectionId.appearance ||
+      SettingsSectionId.clipboard ||
+      SettingsSectionId.privacy ||
+      SettingsSectionId.quickPaste ||
+      SettingsSectionId.quickAccess ||
+      SettingsSectionId.module ||
+      SettingsSectionId.transforms ||
+      SettingsSectionId.sync ||
+      SettingsSectionId.notifications ||
+      SettingsSectionId.data ||
+      SettingsSectionId.modules ||
+      SettingsSectionId.about => null,
     };
   }
 }

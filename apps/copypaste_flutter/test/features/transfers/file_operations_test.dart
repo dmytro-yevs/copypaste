@@ -366,13 +366,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('file-operations-open')));
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      expect(find.text('Downloads and transfers'), findsOneWidget);
+      expect(find.text('Transfers'), findsOneWidget);
       expect(find.text('256.0 KiB / 1.0 MiB'), findsOneWidget);
       expect(find.text('Android phone'), findsNWidgets(3));
       expect(find.text('MacBook Air'), findsNWidgets(3));
       expect(find.text('Show file'), findsOneWidget);
       expect(find.textContaining('Bring it online'), findsOneWidget);
-      expect(find.text('Clear completed history'), findsOneWidget);
+      expect(find.text('Clear history'), findsOneWidget);
       await tester.ensureVisible(find.text('Try again'));
       await tester.pump();
       await tester.tap(find.text('Try again'));

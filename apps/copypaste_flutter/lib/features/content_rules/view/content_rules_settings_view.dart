@@ -267,7 +267,6 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
               compact: true,
               icon: LucideIcons.listFilter,
               title: l10n.rulesEmptyTitle,
-              message: l10n.rulesEmptyMessage,
             )
           else
             for (final (index, rule) in rules.indexed)
@@ -307,6 +306,11 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
     );
   }
 
+  /// Where the row button's text starts inside the button. A built-in row
+  /// has no drag handle and gives this inset back, so the rule name starts
+  /// on the group title's text line.
+  static const _rowButtonInset = AppSpacing.md;
+
   /// [index] is the position among user rules; null for a built-in.
   Widget _row(BuildContext context, ContentRule rule, int? index) {
     final l10n = context.l10n;
@@ -326,8 +330,16 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
     final summary = definition == null
         ? l10n.rulesUpdateRequired
         : l10n.ruleSummary(definition, options);
+    const inset = AppTheme.settingsRowPadding;
     final row = Padding(
-      padding: AppTheme.settingsRowPadding,
+      padding: user
+          ? inset
+          : EdgeInsetsDirectional.fromSTEB(
+              inset.left - _rowButtonInset,
+              inset.top,
+              inset.right,
+              inset.bottom,
+            ),
       child: Row(
         children: [
           if (user)

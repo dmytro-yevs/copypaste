@@ -50,7 +50,9 @@ extension TransformMessages on AppLocalizations {
         return transformsErrorInvalidParam;
       case 'cancelled':
         return transformsErrorCancelled;
-      case 'budget_exceeded' || 'regex.too_expensive':
+      case 'budget_exceeded':
+        return transformsErrorTimeLimit;
+      case 'regex.too_expensive':
         return transformsErrorTooExpensive;
       case 'regex.invalid_pattern' || 'find.empty_pattern':
         return transformsErrorPattern;

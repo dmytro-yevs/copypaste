@@ -115,7 +115,7 @@ class _ModuleSettingsSectionState extends State<ModuleSettingsSection> {
           if (_views.busy) return const StateView.loading();
           return StateView.error(
             title: context.l10n.modulesOperationFailed,
-            message: _views.errorMessage,
+            message: _views.errorReason,
             onRetry: () => unawaited(_views.open(_command)),
           );
         },

@@ -114,7 +114,6 @@ class TraySettingsView extends StatelessWidget {
               TraySettingsContribution.previewTargetId,
             ),
             title: l10n.trayRecentPreviewTitle,
-            description: l10n.trayRecentPreviewDescription,
             trailing: Select<TrayPreviewLevel>(
               key: const ValueKey('tray-recent-preview'),
               value: preferences.previewLevel,

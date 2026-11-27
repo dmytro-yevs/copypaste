@@ -88,7 +88,6 @@ class _StorageMaintenanceGroupState extends State<StorageMaintenanceGroup> {
               key: widget.keys.usage,
               highlighted: _isHighlighted('result-storage-usage'),
               title: l10n.settingsStorageUsageTitle,
-              description: l10n.settingsStorageUsageDescription,
               footer: _breakdown(context, _controller.breakdown),
             ),
             SettingRow(
@@ -122,7 +121,6 @@ class _StorageMaintenanceGroupState extends State<StorageMaintenanceGroup> {
               ),
               SettingRow(
                 title: l10n.settingsLogsFolderTitle,
-                description: l10n.settingsLogsFolderDescription,
                 trailing: _openButton(
                   const ValueKey<String>('settings-open-logs-folder'),
                   _controller.openLogsFolder,
@@ -327,7 +325,6 @@ class _StorageMaintenanceGroupState extends State<StorageMaintenanceGroup> {
     AppToast.show(
       context,
       title: l10n.settingsRestoreDoneTitle,
-      message: l10n.settingsRestoreDoneMessage,
       tone: AppToastTone.success,
     );
   }

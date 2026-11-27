@@ -200,3 +200,9 @@ class ModulesException implements UserFacingException {
   @override
   String toString() => message;
 }
+
+/// The marketplace server answered with an error. A surface whose title
+/// already says the marketplace is unavailable shows no [message] under it.
+class ModuleMarketplaceUnavailableException extends ModulesException {
+  const ModuleMarketplaceUnavailableException(super.message);
+}

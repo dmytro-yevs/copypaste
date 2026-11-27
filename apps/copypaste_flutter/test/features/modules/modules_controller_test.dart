@@ -51,6 +51,28 @@ void main() {
     expect(controller.errorMessage, isNull);
   });
 
+  test('a failure gives a reason only when its cause is known', () async {
+    final repository = MemoryModulesRepository()..modules = [testModule];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace()
+        ..failure = const ModuleMarketplaceUnavailableException('Down.'),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.loadMarketplace();
+    expect(controller.catalogState, ModulesLoadState.error);
+    expect(controller.catalogError, isNull);
+
+    repository.failure = StateError('unexpected');
+    expect(await controller.remove(testModule.id), isFalse);
+    expect(controller.errorMessage, isNotNull);
+    expect(controller.errorReason, isNull);
+    repository.failure = const ModulesException('Removal failed.');
+    expect(await controller.remove(testModule.id), isFalse);
+    expect(controller.errorReason, 'Removal failed.');
+  });
+
   test(
     'offers newer versions and rejects equal versions or downgrades',
     () async {

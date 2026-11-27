@@ -70,7 +70,7 @@ void main() {
           skippedUndecryptable: 0,
         ),
       ),
-      'Exported 214 text clips',
+      '214 text clips',
     );
     expect(
       SettingsOutcomes.exported(
@@ -81,14 +81,7 @@ void main() {
           skippedUndecryptable: 3,
         ),
       ),
-      'Exported 214 text clips · 3 could not be read',
-    );
-    expect(
-      SettingsOutcomes.backedUp(
-        en,
-        BackupResult(sizeBytes: (12.4 * mib).round()),
-      ),
-      'Encrypted backup saved · 12.4 MiB',
+      '214 text clips · 3 could not be read',
     );
   });
 

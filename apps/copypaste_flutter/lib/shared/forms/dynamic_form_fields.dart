@@ -88,7 +88,7 @@ class DynamicFormFields extends StatelessWidget {
                     key: ValueKey('module-choices-${field.id}'),
                     enabled: enabled,
                     value: (draft.values[field.id] as List).cast<String>(),
-                    placeholder: Text(context.l10n.modulesChooseLanguages),
+                    placeholder: Text(context.l10n.commonChoose),
                     onChanged: (values) => draft.setValue(
                       field.id,
                       (values ?? const <String>[]).toList(),

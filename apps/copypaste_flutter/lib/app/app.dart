@@ -328,7 +328,7 @@ class CopyPasteApp extends StatelessWidget {
                   },
                   title: (context) => context.l10n.appWindowSetupTitle,
                   showInitial: true,
-                  actionLabel: (context) => context.l10n.commonRetry,
+                  actionLabel: (context) => context.l10n.commonTryAgain,
                   onAction: () => unawaited(desktopWindow!.retry()),
                   child: shell,
                 ),

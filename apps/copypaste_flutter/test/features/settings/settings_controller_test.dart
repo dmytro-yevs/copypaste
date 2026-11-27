@@ -56,10 +56,7 @@ void main() {
         ),
       );
       expect(controller.capture!.controlState, CaptureControlState.stopped);
-      expect(
-        find.bySemanticsLabel('Resume capture (not running)'),
-        findsOneWidget,
-      );
+      expect(find.bySemanticsLabel('Resume capture'), findsOneWidget);
       expect(find.byIcon(LucideIcons.circleAlert), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('capture-header-toggle')));
       await tester.pumpAndSettle();
@@ -897,7 +894,7 @@ void main() {
       expect(await controller.addExcludedApp('a' * 257), isFalse);
       expect(
         controller.errorMessage,
-        'Application identifiers must be non-empty and 256 bytes or fewer.',
+        'App identifiers must be non-empty and 256 bytes or fewer.',
       );
       expect(
         controller.errorMessage,
@@ -916,10 +913,10 @@ void main() {
     TargetPlatform.android:
         'Automatic capture pauses while any app is excluded.',
     TargetPlatform.iOS:
-        'Application exclusions are supported on macOS, Windows, Android, and Linux.',
+        'App exclusions are supported on macOS, Windows, Android, and Linux.',
     TargetPlatform.linux: 'Skip automatic capture from these apps.',
     TargetPlatform.fuchsia:
-        'Application exclusions are supported on macOS, Windows, Android, and Linux.',
+        'App exclusions are supported on macOS, Windows, Android, and Linux.',
   }.entries) {
     testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
       final controller = SettingsController(
@@ -1011,7 +1008,7 @@ void main() {
       );
     }
     expect(find.text('Storage quota'), findsOneWidget);
-    expect(find.text('Excluded applications'), findsNothing);
+    expect(find.text('Excluded apps'), findsNothing);
     expect(find.byType(Card), findsOneWidget);
 
     await tester.tap(
@@ -1280,7 +1277,7 @@ void main() {
       );
       expect(find.text('Storage quota'), findsOneWidget);
       expect(find.text('Clipboard capture'), findsOneWidget);
-      expect(find.text('Excluded applications'), findsNothing);
+      expect(find.text('Excluded apps'), findsNothing);
       await tester.tap(find.byKey(const ValueKey<String>('settings-back')));
       await tester.pumpAndSettle();
       expect(
@@ -1394,7 +1391,7 @@ void main() {
       await tester.pump();
       // No total yet: the label stays and the control reads as busy.
       expect(button('Export').onPressed, isNull);
-      expect(button('Backup').onPressed, isNull);
+      expect(button('Back up').onPressed, isNull);
       final indicator = find.byType(FileOperationsButtonProgress);
       expect(
         tester.getSemantics(indicator),
@@ -1419,7 +1416,7 @@ void main() {
       expect(find.text('25%'), findsNothing);
       expect(indicator, findsNothing);
       expect(button('Export').onPressed, isNotNull);
-      expect(find.text('Exported 4 text clips'), findsOneWidget);
+      expect(find.text('4 text clips'), findsOneWidget);
       await tester.pump(const Duration(seconds: 6));
       await tester.pump(const Duration(seconds: 1));
       semantics.dispose();
@@ -1449,7 +1446,7 @@ void main() {
         ),
       );
       await tester.pump();
-      for (final label in ['Export', 'Backup']) {
+      for (final label in ['Export', 'Back up']) {
         final button = find.widgetWithText(Button, label);
         final clickable = tester.widget<Clickable>(
           find.descendant(of: button, matching: find.byType(Clickable)).first,
@@ -1466,11 +1463,12 @@ void main() {
       await tester.pump();
       expect(repository.exportCalls, 1);
       // Skipped non-text clips are expected and not mentioned.
-      expect(find.text('Exported 4 text clips'), findsOneWidget);
-      await tester.tap(find.text('Backup'));
+      expect(find.text('4 text clips'), findsOneWidget);
+      await tester.tap(find.text('Back up'));
       await tester.pump();
       expect(repository.backupCalls, 1);
-      expect(find.text('Encrypted backup saved · 2.0 KiB'), findsOneWidget);
+      expect(find.text('Backup created'), findsOneWidget);
+      expect(find.text('2.0 KiB'), findsOneWidget);
       // The toasts close on their own before Restore is used.
       await tester.pump(const Duration(seconds: 6));
       await tester.pump(const Duration(seconds: 1));
@@ -1529,10 +1527,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Text history exported'), findsOneWidget);
-    expect(
-      find.text('Exported 4 text clips · 2 could not be read'),
-      findsOneWidget,
-    );
+    expect(find.text('4 text clips · 2 could not be read'), findsOneWidget);
     await tester.pump(kDefaultDuration);
     await tester.pump();
     expect(find.text('Text history exported').hitTestable(), findsOneWidget);
@@ -1721,7 +1716,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('No updates available'), findsOneWidget);
-    expect(find.text('CopyPaste 1.0.0 is the latest version.'), findsOneWidget);
+    expect(find.text('Version 1.0.0'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pump(const Duration(seconds: 5));

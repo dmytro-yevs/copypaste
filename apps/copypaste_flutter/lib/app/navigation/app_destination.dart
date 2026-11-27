@@ -26,10 +26,6 @@ class AppNavigationDestination {
     AppDestination.devices => AppStrings.current.appDestinationDevices,
     AppDestination.settings => AppStrings.current.appDestinationSettings,
   };
-
-  String semanticsLabel({required bool selected}) {
-    return selected ? AppStrings.current.appDestinationSelected(label) : label;
-  }
 }
 
 const List<AppNavigationDestination> appNavigationDestinations =

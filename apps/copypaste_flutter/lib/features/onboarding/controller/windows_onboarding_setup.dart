@@ -33,6 +33,9 @@ class WindowsOnboardingSetup extends OnboardingSetup {
       _startupStatus == LaunchAtLoginStatus.requiresApproval;
   @override
   String? get noticeMessage => _noticeMessage;
+  @override
+  String? get stepNoticeMessage =>
+      _noticeMessage == _disabledInTaskManager ? null : _noticeMessage;
   bool get _registered =>
       _startupStatus == LaunchAtLoginStatus.enabled ||
       _startupStatus == LaunchAtLoginStatus.requiresApproval;

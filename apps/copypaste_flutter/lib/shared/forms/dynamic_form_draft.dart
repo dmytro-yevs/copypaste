@@ -102,6 +102,8 @@ class DynamicFormDraft extends ChangeNotifier {
   String? _error;
   Map<String, Object> get values => Map.unmodifiable(_values);
   bool get busy => _busy;
+
+  /// Why the last file choice failed, or what failed when no reason is known.
   String? get errorMessage => _error;
   String? fileName(String id) => _files[id]?.name;
   bool get valid =>
@@ -163,7 +165,7 @@ class DynamicFormDraft extends ChangeNotifier {
       if (!_closed) {
         _error =
             ErrorText.reason(error) ??
-            AppStrings.current.modulesFileSelectFailed;
+            AppStrings.current.modulesFileSelectionFailed;
       }
     } finally {
       if (!_closed) {

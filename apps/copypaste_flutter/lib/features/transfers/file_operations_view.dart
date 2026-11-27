@@ -170,9 +170,11 @@ class _FileOperationsDrawer extends StatelessWidget {
         headers: [
           AppBar(
             title: Text(context.l10n.transfersTitle),
-            subtitle: Text(
-              context.l10n.transfersActiveCount(controller.active.length),
-            ),
+            subtitle: controller.active.isEmpty
+                ? null
+                : Text(
+                    context.l10n.transfersActiveCount(controller.active.length),
+                  ),
             trailing: [
               Semantics(
                 label: context.l10n.commonClose,

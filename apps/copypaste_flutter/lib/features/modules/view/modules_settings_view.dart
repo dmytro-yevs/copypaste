@@ -99,10 +99,17 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     AppToast.show(
       context,
       title: context.l10n.modulesOperationFailed,
-      message: message,
+      message: controller.errorReason,
       tone: AppToastTone.error,
     );
   }
+
+  /// What a dialog reports when its operation fails: the text [_reportError]
+  /// shows for it, so the two toasts appear as one, or [fallback] when the
+  /// operation did not run.
+  String _dialogFailure(String fallback) => controller.errorMessage == null
+      ? fallback
+      : controller.errorReason ?? AppStrings.current.modulesOperationFailed;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -171,9 +178,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         ),
         const Gap(AppSpacing.lg),
         switch (controller.state) {
-          ModulesLoadState.loading => StateView.loading(
-            message: context.l10n.modulesLoading,
-          ),
+          ModulesLoadState.loading => const StateView.loading(),
           ModulesLoadState.error => StateView.error(
             title: context.l10n.modulesUnavailableTitle,
             message: controller.errorMessage,
@@ -206,9 +211,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
 
   Widget _marketplace(BuildContext context) =>
       switch (controller.catalogState) {
-        ModulesLoadState.loading => StateView.loading(
-          message: context.l10n.modulesMarketplaceLoading,
-        ),
+        ModulesLoadState.loading => const StateView.loading(),
         ModulesLoadState.error => StateView.error(
           title: context.l10n.modulesMarketplaceUnavailableTitle,
           message: controller.catalogError,
@@ -583,8 +586,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         confirmed: module.capabilities,
       ),
       failureMessage: () =>
-          controller.errorMessage ??
-          AppStrings.current.modulesOperationIncomplete,
+          _dialogFailure(AppStrings.current.modulesOperationIncomplete),
     );
   }
 
@@ -599,7 +601,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       canConfirm: () => !controller.busy,
       onConfirm: () => controller.remove(module.id),
       failureMessage: () =>
-          controller.errorMessage ?? AppStrings.current.modulesRemoveFailed,
+          _dialogFailure(AppStrings.current.modulesRemoveFailed),
     );
   }
 }

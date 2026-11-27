@@ -89,6 +89,9 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
     final terminal = ceremony.state.isTerminal;
     final awaitingConfirmation =
         ceremony.state == PairingState.awaitingConfirmation;
+    final detail =
+        ceremony.peerName ??
+        DevicePresentation.pairingStateDescription(ceremony.state);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -107,11 +110,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
               SecondaryBadge(child: Text(_expiryLabel(ceremony.expiresIn!))),
           ],
         ),
-        const Gap(AppSpacing.sm),
-        Text(
-          ceremony.peerName ??
-              DevicePresentation.pairingStateDescription(ceremony.state),
-        ).muted(),
+        if (detail != null) ...[const Gap(AppSpacing.sm), Text(detail).muted()],
         if (controller.artifact != null) ...[
           const Gap(AppSpacing.lg),
           controller.artifact!.buildProtectedContent(context),

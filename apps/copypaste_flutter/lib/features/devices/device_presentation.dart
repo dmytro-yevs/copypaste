@@ -30,11 +30,11 @@ abstract final class DevicePresentation {
         DeviceConnectionState.unknown => AppStatusTone.muted,
       };
 
-  static IconData pairingEntryIcon(PairingEntryMode? mode) => switch (mode) {
+  static IconData pairingEntryIcon(PairingEntryMode mode) => switch (mode) {
     PairingEntryMode.invite => LucideIcons.qrCode,
     PairingEntryMode.scanQr => LucideIcons.scanLine,
     PairingEntryMode.enterCode => LucideIcons.keyboard,
-    PairingEntryMode.nearby || null => LucideIcons.link,
+    PairingEntryMode.nearby => LucideIcons.link,
   };
 
   static IconData pairingStateIcon(PairingState state) => switch (state) {
@@ -63,13 +63,13 @@ abstract final class DevicePresentation {
     };
   }
 
-  static String pairingStateDescription(PairingState state) {
+  /// The line under a state title, or null where the title says it all.
+  static String? pairingStateDescription(PairingState state) {
     final strings = AppStrings.current;
     return switch (state) {
       PairingState.waitingForPeer => strings.pairingProtectedWaitingDescription,
       PairingState.handshaking => strings.pairingHandshakingDescription,
-      PairingState.awaitingConfirmation =>
-        strings.pairingAwaitingConfirmationDescription,
+      PairingState.awaitingConfirmation => null,
       PairingState.confirmed => strings.pairingConfirmedDescription,
       PairingState.rejected ||
       PairingState.cancelled ||

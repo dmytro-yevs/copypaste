@@ -153,6 +153,39 @@ void main() {
     expect(find.widgetWithText(Button, 'Get started'), findsOneWidget);
   });
 
+  testWidgets('Setup shows pending Login Item approval once', (tester) async {
+    final setup = _ScreenMacosSetupGateway(
+      accessibility: true,
+      statusAfterUpdate: MacosLoginItemStatus.requiresApproval,
+    );
+    final controller = macosOnboarding(
+      store: MemoryOnboardingStore(),
+      setup: setup,
+      offersSpace: true,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showSetup();
+
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
+      ),
+    );
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(controller.step, OnboardingStep.space);
+    expect(find.text('Optional setup needs attention'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Back'));
+    await tester.pumpAndSettle();
+
+    expect(controller.step, OnboardingStep.setup);
+    expect(find.byType(Alert), findsOneWidget);
+    expect(find.text('Login Item approval is required'), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Open Settings'), findsOneWidget);
+  });
+
   testWidgets('uses the unified header when macOS owns the title bar', (
     tester,
   ) async {

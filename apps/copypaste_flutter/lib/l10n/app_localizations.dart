@@ -214,6 +214,12 @@ abstract class AppLocalizations {
   /// **'Enable'**
   String get commonEnable;
 
+  /// Placeholder of an empty multi-choice field, whatever it lists (languages, content kinds, time windows).
+  ///
+  /// In en, this message translates to:
+  /// **'Choose'**
+  String get commonChoose;
+
   /// Settings row title for choosing the interface language.
   ///
   /// In en, this message translates to:
@@ -256,16 +262,10 @@ abstract class AppLocalizations {
   /// **'Settings could not be refreshed. Try again.'**
   String get settingsRuntimeRefreshFailed;
 
-  /// Error message shown when the Settings screen cannot load its values.
-  ///
-  /// In en, this message translates to:
-  /// **'Settings could not be loaded.'**
-  String get settingsRuntimeLoadFailed;
-
   /// Settings error message shown when the user adds an application that is already in the list of applications excluded from clipboard capture.
   ///
   /// In en, this message translates to:
-  /// **'That application is already excluded.'**
+  /// **'That app is already excluded.'**
   String get settingsRuntimeAppAlreadyExcluded;
 
   /// Generic settings error message shown when saving a setting or running a settings action fails.
@@ -307,13 +307,13 @@ abstract class AppLocalizations {
   /// Settings error message shown when an application identifier added to the exclusion list is empty or too long.
   ///
   /// In en, this message translates to:
-  /// **'Application identifiers must be non-empty and 256 bytes or fewer.'**
+  /// **'App identifiers must be non-empty and 256 bytes or fewer.'**
   String get settingsRuntimeExcludedAppIdInvalid;
 
   /// Settings error message shown when the exclusion list already holds the maximum number of applications.
   ///
   /// In en, this message translates to:
-  /// **'You can exclude up to 256 applications.'**
+  /// **'You can exclude up to 256 apps.'**
   String get settingsRuntimeExcludedAppsLimit;
 
   /// Settings error message shown when turning automatic pasting after selection on or off fails.
@@ -718,12 +718,6 @@ abstract class AppLocalizations {
   /// **'Type to search…'**
   String get quickPasteSearchPlaceholder;
 
-  /// Message shown in the Quick Paste popup while the clipboard history is loading.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading clipboard history.'**
-  String get quickPasteLoadingHistory;
-
   /// Error title shown in the Quick Paste popup when the clipboard history cannot be loaded.
   ///
   /// In en, this message translates to:
@@ -814,10 +808,10 @@ abstract class AppLocalizations {
   /// **'Private clipboard history across macOS, Android, Windows, and Linux.'**
   String get quickPasteAboutDescription;
 
-  /// Title of the downloads and transfers drawer, and tooltip of the header button that opens it.
+  /// Title of the transfers drawer, and tooltip and accessibility label of the icon-only header button that opens it. Covers file imports, downloads and outgoing transfers.
   ///
   /// In en, this message translates to:
-  /// **'Downloads and transfers'**
+  /// **'Transfers'**
   String get transfersTitle;
 
   /// Tooltip of the transfers header button while files transfer: number of active transfers, then bytes transferred out of total (already formatted sizes such as 2.1 MB).
@@ -844,17 +838,11 @@ abstract class AppLocalizations {
   /// **'Earlier'**
   String get transfersShowEarlier;
 
-  /// Button in the transfers drawer footer that removes finished transfer records.
+  /// Button in the transfers drawer footer that removes every transfer record that is no longer active: completed, failed, cancelled and interrupted.
   ///
   /// In en, this message translates to:
-  /// **'Clear completed history'**
+  /// **'Clear history'**
   String get transfersClearCompletedHistory;
-
-  /// Error title in the transfers drawer when transfer records cannot be shown. Noun.
-  ///
-  /// In en, this message translates to:
-  /// **'Transfers'**
-  String get transfersErrorTitle;
 
   /// Empty-state title of the transfers drawer.
   ///
@@ -981,12 +969,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Transfer updates are unavailable. Reopen to refresh.'**
   String get transfersUpdatesUnavailable;
-
-  /// Error in the transfers drawer when the transfer list cannot be loaded.
-  ///
-  /// In en, this message translates to:
-  /// **'Transfers could not be loaded. Try again.'**
-  String get transfersLoadFailed;
 
   /// Error in the transfers drawer when the latest state of a transfer cannot be loaded.
   ///
@@ -1174,12 +1156,6 @@ abstract class AppLocalizations {
   /// **'Resume capture (not running)'**
   String get platformCaptureActionResumeStopped;
 
-  /// System tray menu item that opens the main application window. Verb.
-  ///
-  /// In en, this message translates to:
-  /// **'Open'**
-  String get platformTrayOpen;
-
   /// System tray menu item that opens the application settings.
   ///
   /// In en, this message translates to:
@@ -1207,13 +1183,13 @@ abstract class AppLocalizations {
   /// Desktop error shown when quitting the application fails. CopyPaste is the product name.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste could not quit. Please try again.'**
+  /// **'CopyPaste could not quit.'**
   String get platformQuitFailed;
 
   /// Settings error when showing or hiding the app in the Dock, taskbar, or system tray fails.
   ///
   /// In en, this message translates to:
-  /// **'Application visibility could not be changed. Please try again.'**
+  /// **'App visibility could not be changed. Please try again.'**
   String get platformVisibilityChangeFailed;
 
   /// Operating system notification title shown after a new clipboard item is saved.
@@ -1291,7 +1267,7 @@ abstract class AppLocalizations {
   /// Update error on an operating system without application update support.
   ///
   /// In en, this message translates to:
-  /// **'Application updates are unavailable here.'**
+  /// **'App updates are unavailable here.'**
   String get platformUpdatesUnavailableHere;
 
   /// Update error when the installed application version cannot be read.
@@ -1303,7 +1279,7 @@ abstract class AppLocalizations {
   /// Update message when this copy of the application cannot update itself.
   ///
   /// In en, this message translates to:
-  /// **'Application updates are unavailable on this installation.'**
+  /// **'App updates are unavailable on this installation.'**
   String get platformUpdatesUnavailableInstallation;
 
   /// Update message when the Linux package type does not support automatic updates.
@@ -1342,29 +1318,11 @@ abstract class AppLocalizations {
   /// **'General'**
   String get settingsSectionGeneral;
 
-  /// Short summary of the General settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Language and application visibility.'**
-  String get settingsSectionGeneralSummary;
-
   /// Settings section name in navigation and as the section heading. Noun: how the application looks.
   ///
   /// In en, this message translates to:
   /// **'Appearance'**
   String get settingsSectionAppearance;
-
-  /// Short summary of the Appearance settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Theme and window material.'**
-  String get settingsSectionAppearanceSummary;
-
-  /// Description under the Appearance settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Theme and how windows look.'**
-  String get settingsAppearanceDescription;
 
   /// Settings row title for choosing the application theme. Noun.
   ///
@@ -1486,23 +1444,11 @@ abstract class AppLocalizations {
   /// **'Clipboard'**
   String get settingsSectionClipboard;
 
-  /// Short summary of the Clipboard settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Capture and history limits.'**
-  String get settingsSectionClipboardSummary;
-
   /// Settings section name in navigation and as the section heading. Noun.
   ///
   /// In en, this message translates to:
   /// **'Privacy'**
   String get settingsSectionPrivacy;
-
-  /// Short summary of the Privacy settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Application exclusions and screen protection.'**
-  String get settingsSectionPrivacySummary;
 
   /// Name of the Quick Paste feature: its settings section in navigation and as the section heading, and its row in the Linux setup step. It is a feature name, kept in English in every language.
   ///
@@ -1510,23 +1456,11 @@ abstract class AppLocalizations {
   /// **'Quick Paste'**
   String get settingsSectionQuickPaste;
 
-  /// Short summary of the Quick Paste settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Shortcut and automatic paste behavior.'**
-  String get settingsSectionQuickPasteSummary;
-
   /// Settings section name in navigation and as the section heading. Noun, short for synchronization.
   ///
   /// In en, this message translates to:
   /// **'Sync'**
   String get settingsSectionSync;
-
-  /// Short summary of the Sync settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Synchronization and nearby-device discovery.'**
-  String get settingsSectionSyncSummary;
 
   /// Settings section name in navigation and as the section heading. Noun.
   ///
@@ -1534,35 +1468,17 @@ abstract class AppLocalizations {
   /// **'Notifications'**
   String get settingsSectionNotifications;
 
-  /// Short summary of the Notifications settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Capture notifications and sounds.'**
-  String get settingsSectionNotificationsSummary;
-
   /// Settings section name in navigation and as the section heading. Noun.
   ///
   /// In en, this message translates to:
   /// **'Data'**
   String get settingsSectionData;
 
-  /// Short summary of the Data settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Export, backup, and restore.'**
-  String get settingsSectionDataSummary;
-
   /// Settings section name in navigation and as the section heading. Noun: optional add-on features.
   ///
   /// In en, this message translates to:
   /// **'Modules'**
   String get settingsSectionModules;
-
-  /// Short summary of the Modules settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Install and manage optional modules.'**
-  String get settingsSectionModulesSummary;
 
   /// Settings section name in navigation and as the section heading. Rules that act on copied content automatically.
   ///
@@ -1582,23 +1498,11 @@ abstract class AppLocalizations {
   /// **'Quick access'**
   String get settingsSectionQuickAccess;
 
-  /// Short summary of the Quick access settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Keyboard, tiles, and home-screen widget.'**
-  String get settingsSectionQuickAccessSummary;
-
   /// Settings section name in navigation and as the section heading. Text conversions such as case changes or JSON formatting.
   ///
   /// In en, this message translates to:
   /// **'Text transforms'**
   String get settingsSectionTransforms;
-
-  /// Short summary of the Text transforms settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Favorites, pipelines, and default paste transforms.'**
-  String get settingsSectionTransformsSummary;
 
   /// Heading of the Paste Queue settings group. Paste Queue is the product feature name.
   ///
@@ -1774,12 +1678,6 @@ abstract class AppLocalizations {
   /// **'Copy items to add them'**
   String get pasteQueueCollectingEmptyTitle;
 
-  /// Empty state message while collecting.
-  ///
-  /// In en, this message translates to:
-  /// **'Each copy joins the queue until you stop collecting.'**
-  String get pasteQueueCollectingEmptyMessage;
-
   /// Button that starts collecting copies into the queue.
   ///
   /// In en, this message translates to:
@@ -1791,12 +1689,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stop collecting'**
   String get pasteQueueStopCollecting;
-
-  /// Loading message of the queue drawer.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading the queue…'**
-  String get pasteQueueLoading;
 
   /// Error state title when the queue could not be read.
   ///
@@ -2050,7 +1942,7 @@ abstract class AppLocalizations {
   /// **'Paste next as plain text'**
   String get pasteQueueShortcutPasteNextPlain;
 
-  /// Description of each queue shortcut row.
+  /// Settings search text for the queue shortcut rows; not shown in the rows themselves.
   ///
   /// In en, this message translates to:
   /// **'A global shortcut that works in any app.'**
@@ -2110,12 +2002,6 @@ abstract class AppLocalizations {
   /// **'Paste next does'**
   String get pasteQueuePasteNextStyleTitle;
 
-  /// Description of the Paste next delivery style.
-  ///
-  /// In en, this message translates to:
-  /// **'Paste automatically or only copy to the clipboard.'**
-  String get pasteQueuePasteNextStyleDescription;
-
   /// Delivery style: paste into the front app.
   ///
   /// In en, this message translates to:
@@ -2134,12 +2020,6 @@ abstract class AppLocalizations {
   /// **'New items go to'**
   String get pasteQueueInsertTitle;
 
-  /// Description of the insertion position setting.
-  ///
-  /// In en, this message translates to:
-  /// **'Where collected and added items join the queue.'**
-  String get pasteQueueInsertDescription;
-
   /// Insertion position: at the end (first in, first out).
   ///
   /// In en, this message translates to:
@@ -2157,12 +2037,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'After the last item'**
   String get pasteQueueEndBehaviorTitle;
-
-  /// Description of the end behavior setting.
-  ///
-  /// In en, this message translates to:
-  /// **'What Paste next does once every item was pasted.'**
-  String get pasteQueueEndBehaviorDescription;
 
   /// End behavior: stop and finish the queue.
   ///
@@ -2254,12 +2128,6 @@ abstract class AppLocalizations {
   /// **'Always paste as plain text'**
   String get pasteQueuePlainTextTitle;
 
-  /// Description of the plain-text setting.
-  ///
-  /// In en, this message translates to:
-  /// **'Drops formatting from queued items.'**
-  String get pasteQueuePlainTextDescription;
-
   /// Setting: stop collecting after a period without copies.
   ///
   /// In en, this message translates to:
@@ -2269,7 +2137,7 @@ abstract class AppLocalizations {
   /// Description of the idle stop setting.
   ///
   /// In en, this message translates to:
-  /// **'Stop collecting after this long without copies.'**
+  /// **'Time without a new copy.'**
   String get pasteQueueIdleStopDescription;
 
   /// Idle stop choice in minutes.
@@ -2302,12 +2170,6 @@ abstract class AppLocalizations {
   /// **'Restore the previous clipboard when finished'**
   String get pasteQueueRestoreTitle;
 
-  /// Description of the restore clipboard setting.
-  ///
-  /// In en, this message translates to:
-  /// **'Bring back what you copied before pasting.'**
-  String get pasteQueueRestoreDescription;
-
   /// Search keywords for the Paste Queue settings, space separated.
   ///
   /// In en, this message translates to:
@@ -2320,71 +2182,17 @@ abstract class AppLocalizations {
   /// **'About'**
   String get settingsSectionAbout;
 
-  /// Short summary of the About settings section, used when searching settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Version and application updates.'**
-  String get settingsSectionAboutSummary;
-
-  /// Description shown under the General settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Language, automatic startup, and application visibility.'**
-  String get settingsGeneralDescription;
-
   /// Description shown under the Modules settings section heading. CopyPaste is the product name.
   ///
   /// In en, this message translates to:
   /// **'Optional features for CopyPaste.'**
   String get settingsModulesDescription;
 
-  /// Description shown under the Clipboard settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Capture clipboard changes and manage history limits.'**
-  String get settingsClipboardDescription;
-
-  /// Description shown under the Data settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Export, back up, and restore clipboard history.'**
-  String get settingsDataDescription;
-
-  /// Description shown under the Sync settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Control synchronization with paired devices.'**
-  String get settingsSyncDescription;
-
-  /// Description shown under the Privacy settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Control which apps are captured and protect clipboard content.'**
-  String get settingsPrivacyDescription;
-
-  /// Description shown under the Notifications settings section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose notifications and sounds for captured clips.'**
-  String get settingsNotificationsDescription;
-
-  /// Description shown under the About settings section heading. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste version and application updates.'**
-  String get settingsAboutDescription;
-
   /// Description shown under the Quick Paste settings section heading.
   ///
   /// In en, this message translates to:
   /// **'Open clipboard history from anywhere without switching windows.'**
   String get settingsQuickPasteDescription;
-
-  /// Message shown while the settings screen is loading.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading settings.'**
-  String get settingsLoadingMessage;
 
   /// Error title shown when settings could not be loaded.
   ///
@@ -2470,12 +2278,6 @@ abstract class AppLocalizations {
   /// **'Resume background services after a restart.'**
   String get settingsStartupAndroidDescription;
 
-  /// Desktop startup setting description. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Open CopyPaste automatically when you sign in.'**
-  String get settingsStartupDesktopDescription;
-
   /// macOS settings row title: show the app icon in the Dock. Dock is the macOS feature name.
   ///
   /// In en, this message translates to:
@@ -2491,7 +2293,7 @@ abstract class AppLocalizations {
   /// Description of the Dock or taskbar visibility setting.
   ///
   /// In en, this message translates to:
-  /// **'Show the application icon for switching windows.'**
+  /// **'Show the app icon for switching windows.'**
   String get settingsTaskbarVisibilityDescription;
 
   /// Space-separated search keywords that find the Dock or taskbar visibility setting. Translate each word and keep the English words too.
@@ -2541,12 +2343,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'lightweight close quit background memory'**
   String get settingsLightweightModeKeywords;
-
-  /// Error alert title when the Dock, taskbar, menu bar, or tray visibility could not be changed.
-  ///
-  /// In en, this message translates to:
-  /// **'Visibility could not be changed'**
-  String get settingsVisibilityErrorTitle;
 
   /// Search result description for the Modules section.
   ///
@@ -2689,7 +2485,7 @@ abstract class AppLocalizations {
   /// Description of the history retention setting.
   ///
   /// In en, this message translates to:
-  /// **'Automatically remove old unpinned clipboard items.'**
+  /// **'Automatically remove old unpinned clips.'**
   String get settingsRetentionDescription;
 
   /// Retention option that never removes history automatically.
@@ -2857,7 +2653,7 @@ abstract class AppLocalizations {
   /// Description of the text history export row.
   ///
   /// In en, this message translates to:
-  /// **'Save text clips in a portable file.'**
+  /// **'Save text clips as a JSON file.'**
   String get settingsExportTextDescription;
 
   /// Verb. Button that exports text history to a file.
@@ -2881,7 +2677,7 @@ abstract class AppLocalizations {
   /// Button that creates an encrypted backup file.
   ///
   /// In en, this message translates to:
-  /// **'Backup'**
+  /// **'Back up'**
   String get settingsCreateBackupAction;
 
   /// Settings row title for restoring history from a backup.
@@ -3049,19 +2845,19 @@ abstract class AppLocalizations {
   /// Settings row title for apps whose clipboard changes are not captured.
   ///
   /// In en, this message translates to:
-  /// **'Excluded applications'**
+  /// **'Excluded apps'**
   String get settingsExcludedAppsTitle;
 
   /// Search result description for excluded applications.
   ///
   /// In en, this message translates to:
-  /// **'Skip automatic capture from excluded applications.'**
+  /// **'Skip automatic capture from excluded apps.'**
   String get settingsExcludedAppsSearchDescription;
 
   /// Space-separated search keywords that find the excluded applications setting. Translate each word and keep the English words too.
   ///
   /// In en, this message translates to:
-  /// **'privacy app identifiers'**
+  /// **'privacy app application identifiers'**
   String get settingsExcludedAppsKeywords;
 
   /// Windows and Linux description of excluded applications.
@@ -3079,7 +2875,7 @@ abstract class AppLocalizations {
   /// Description of excluded applications on platforms without support.
   ///
   /// In en, this message translates to:
-  /// **'Application exclusions are supported on macOS, Windows, Android, and Linux.'**
+  /// **'App exclusions are supported on macOS, Windows, Android, and Linux.'**
   String get settingsExcludedAppsUnsupportedDescription;
 
   /// Verb. Button that adds an application to the excluded applications.
@@ -3091,7 +2887,7 @@ abstract class AppLocalizations {
   /// Shown when the excluded applications list is empty.
   ///
   /// In en, this message translates to:
-  /// **'No applications are excluded.'**
+  /// **'No apps are excluded.'**
   String get settingsExcludedAppsEmpty;
 
   /// Tooltip of the button that removes an application from the excluded applications.
@@ -3103,22 +2899,22 @@ abstract class AppLocalizations {
   /// Search field placeholder of the list for choosing an application.
   ///
   /// In en, this message translates to:
-  /// **'Search applications'**
+  /// **'Search apps'**
   String get applicationPickerSearch;
 
   /// Shown when no application matches the search in the application list.
   ///
   /// In en, this message translates to:
-  /// **'No applications found'**
+  /// **'No apps found'**
   String get applicationPickerEmpty;
 
-  /// Settings row title for not capturing clipboard content that the source app marked as confidential.
+  /// Settings row title for not capturing clipboard content that the source app marked as secret.
   ///
   /// In en, this message translates to:
-  /// **'Skip confidential clipboard'**
+  /// **'Skip secret clipboard'**
   String get settingsSkipSecretTitle;
 
-  /// Description of the confidential clipboard setting. History is the clipboard history screen.
+  /// Description of the Skip secret clipboard setting. History is the clipboard history screen.
   ///
   /// In en, this message translates to:
   /// **'Don\'t save copies that apps mark as secret.'**
@@ -3220,12 +3016,6 @@ abstract class AppLocalizations {
   /// **'Version'**
   String get settingsVersionTitle;
 
-  /// Description of the version row. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Installed CopyPaste version.'**
-  String get settingsVersionDescription;
-
   /// Shown instead of the version number when it is unknown.
   ///
   /// In en, this message translates to:
@@ -3235,7 +3025,7 @@ abstract class AppLocalizations {
   /// Settings row title for checking and installing app updates.
   ///
   /// In en, this message translates to:
-  /// **'Application updates'**
+  /// **'App updates'**
   String get settingsUpdatesTitle;
 
   /// Search result description for application updates. CopyPaste is the product name.
@@ -3247,14 +3037,8 @@ abstract class AppLocalizations {
   /// Space-separated search keywords that find the application updates setting. Translate each word and keep the English words too.
   ///
   /// In en, this message translates to:
-  /// **'version github release'**
+  /// **'version github release application'**
   String get settingsUpdatesKeywords;
-
-  /// Application updates row description before any check. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Check for a newer CopyPaste version.'**
-  String get settingsUpdateIdle;
 
   /// Application updates row description while checking for updates.
   ///
@@ -3273,6 +3057,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Version {version} is up to date.'**
   String settingsUpdateVersionUpToDate(String version);
+
+  /// Toast message after a manual update check. Under the title 'No updates available' it is the installed version; under 'Update available' it is the version found. No trailing period.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String settingsUpdateVersion(String version);
 
   /// Application updates row description when a newer version exists.
   ///
@@ -3301,7 +3091,7 @@ abstract class AppLocalizations {
   /// Application updates row description when the update needs user action or failed.
   ///
   /// In en, this message translates to:
-  /// **'Application updates need attention.'**
+  /// **'App updates need attention.'**
   String get settingsUpdateNeedsAttention;
 
   /// Button that downloads and installs an available update.
@@ -3346,41 +3136,23 @@ abstract class AppLocalizations {
   /// **'Check again'**
   String get settingsUpdateCheckAgainAction;
 
+  /// Button that checks for app updates when no check has run yet. After a check it reads settingsUpdateCheckAgainAction ("Check again").
+  ///
+  /// In en, this message translates to:
+  /// **'Check now'**
+  String get settingsUpdateCheckAction;
+
   /// Toast title after an update check finds no update.
   ///
   /// In en, this message translates to:
   /// **'No updates available'**
   String get settingsUpdateNoneTitle;
 
-  /// Toast message after an update check finds no update and the version is unknown. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste is the latest version.'**
-  String get settingsUpdateLatest;
-
-  /// Toast message after an update check finds no update. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste {version} is the latest version.'**
-  String settingsUpdateVersionLatest(String version);
-
   /// Toast title after an update check finds a newer version.
   ///
   /// In en, this message translates to:
   /// **'Update available'**
   String get settingsUpdateAvailableTitle;
-
-  /// Toast message when a newer version exists and its number is unknown. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'A newer CopyPaste version is ready to install.'**
-  String get settingsUpdateReady;
-
-  /// Toast message when a newer version exists. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste {version} is ready to install.'**
-  String settingsUpdateVersionReady(String version);
 
   /// Toast title when this installation cannot update itself.
   ///
@@ -3399,12 +3171,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Update check failed'**
   String get settingsUpdateCheckFailedTitle;
-
-  /// Toast message when checking for updates failed. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste could not check for updates.'**
-  String get settingsUpdateCheckFailedMessage;
 
   /// Linux alert title asking the user to finish Quick Paste setup. Quick Paste is a feature name.
   ///
@@ -3435,12 +3201,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Check again'**
   String get settingsQuickPasteCheckAgain;
-
-  /// Message shown while Quick Paste settings load. Quick Paste is a feature name.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading Quick Paste settings.'**
-  String get settingsQuickPasteLoading;
 
   /// Alert title when the device does not support Quick Paste. Quick Paste is a feature name.
   ///
@@ -3574,12 +3334,6 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 day} other{{count} days}}'**
   String settingsRetentionDays(int count);
 
-  /// Loading message on the Devices screen while the device list is read.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading devices…'**
-  String get devicesLoading;
-
   /// Error title on the Devices screen when the device list cannot be loaded.
   ///
   /// In en, this message translates to:
@@ -3597,6 +3351,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Scan'**
   String get devicesScan;
+
+  /// Alert title on the Devices screen when the scanner worked but the scanned QR code is not a CopyPaste pairing code. The message under it is pairingInvalidQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Wrong QR code'**
+  String get devicesScanInvalidTitle;
 
   /// Label of the scan button while the local network search is running.
   ///
@@ -3898,24 +3658,6 @@ abstract class AppLocalizations {
   /// **'Unknown'**
   String get devicesConnectionUnknown;
 
-  /// Status row value in paired device details: the device is reachable now.
-  ///
-  /// In en, this message translates to:
-  /// **'Available'**
-  String get devicesPeerAvailable;
-
-  /// Status row value in paired device details: seen on the network but not yet verified.
-  ///
-  /// In en, this message translates to:
-  /// **'Visible now'**
-  String get devicesPeerVisibleNow;
-
-  /// Status row value in paired device details: the status cannot be determined.
-  ///
-  /// In en, this message translates to:
-  /// **'Status unknown'**
-  String get devicesPeerStatusUnknown;
-
   /// Ping value shown when the network round-trip time is not measured. 'ms' is the abbreviation for milliseconds.
   ///
   /// In en, this message translates to:
@@ -4054,18 +3796,6 @@ abstract class AppLocalizations {
   /// **'Sending connection request…'**
   String get pairingSendingRequest;
 
-  /// Empty state title in the pairing panel before a pairing method is chosen.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose a pairing action'**
-  String get pairingEmptyTitle;
-
-  /// Empty state message in the pairing panel before a pairing method is chosen.
-  ///
-  /// In en, this message translates to:
-  /// **'Pairing controls appear here.'**
-  String get pairingEmptyMessage;
-
   /// Loading message while a pairing code and QR code are created.
   ///
   /// In en, this message translates to:
@@ -4078,10 +3808,10 @@ abstract class AppLocalizations {
   /// **'Pairing code'**
   String get pairingCode;
 
-  /// Help text under the pairing code field.
+  /// Help text under the pairing code field: where to find the code. The panel title and the field label already ask for the pairing code.
   ///
   /// In en, this message translates to:
-  /// **'Enter the 8-character code shown on the other device.'**
+  /// **'Shown on the other device.'**
   String get pairingCodeHint;
 
   /// Label of the field for the network address of the device to pair with.
@@ -4093,7 +3823,7 @@ abstract class AppLocalizations {
   /// Help text under the device address field. Keep 'host:port' as is.
   ///
   /// In en, this message translates to:
-  /// **'Use the host:port address reported by the other device.'**
+  /// **'Use the host:port address shown on the other device.'**
   String get pairingDeviceAddressHint;
 
   /// Alert title when the entered pairing code or address is incomplete.
@@ -4114,23 +3844,11 @@ abstract class AppLocalizations {
   /// **'Connecting device…'**
   String get pairingConnectingDevice;
 
-  /// Title of the placeholder shown before the camera preview starts.
-  ///
-  /// In en, this message translates to:
-  /// **'QR scanner'**
-  String get pairingQrScannerTitle;
-
   /// Message in the placeholder shown before the camera preview starts.
   ///
   /// In en, this message translates to:
   /// **'The camera preview appears here.'**
   String get pairingCameraPreviewPlaceholder;
-
-  /// Alert title when the QR code scanner reports a problem.
-  ///
-  /// In en, this message translates to:
-  /// **'Scanner needs attention'**
-  String get pairingScannerNeedsAttention;
 
   /// Validation error when the pairing code has fewer than 8 characters.
   ///
@@ -4150,17 +3868,11 @@ abstract class AppLocalizations {
   /// **'Waiting for the other device'**
   String get pairingWaitingForOtherDevice;
 
-  /// Instructions next to a pairing code. 'Add device' and 'Enter code' are button names; translate them the same way as those buttons.
+  /// Instructions next to a pairing code. 'Enter code' and 'Scan QR' are button names; translate them exactly as devicesEnterCode and devicesScanQr.
   ///
   /// In en, this message translates to:
-  /// **'On the other device, choose Add device → Enter code, or scan the QR code.'**
+  /// **'On the other device, choose Enter code or Scan QR.'**
   String get pairingInviteInstructions;
-
-  /// Heading of the table with the pairing code and address.
-  ///
-  /// In en, this message translates to:
-  /// **'Pairing details'**
-  String get pairingDetailsTitle;
 
   /// Row label for the network address another device uses to pair.
   ///
@@ -4210,12 +3922,6 @@ abstract class AppLocalizations {
   /// **'Start scanner'**
   String get pairingStartScanner;
 
-  /// Fallback error message when pairing cannot start.
-  ///
-  /// In en, this message translates to:
-  /// **'The pairing action could not be started.'**
-  String get pairingActionNotStarted;
-
   /// Pairing status title while the two devices establish a secure connection.
   ///
   /// In en, this message translates to:
@@ -4264,16 +3970,10 @@ abstract class AppLocalizations {
   /// **'The devices are establishing a secure channel.'**
   String get pairingHandshakingDescription;
 
-  /// Pairing status description asking the user to compare codes and confirm.
+  /// Pairing status description after pairing succeeded, shown on both devices: the devices already in the space and the newly paired one reach each other without pairing again. 'Space' is the user's set of paired devices; use the same word as devicesSpaceTitle.
   ///
   /// In en, this message translates to:
-  /// **'Compare the protected verification code, then confirm on both devices.'**
-  String get pairingAwaitingConfirmationDescription;
-
-  /// Pairing status description after pairing succeeded.
-  ///
-  /// In en, this message translates to:
-  /// **'The device is connected. Your group membership will sync automatically.'**
+  /// **'Other devices in your space connect automatically.'**
   String get pairingConfirmedDescription;
 
   /// Pairing status description after pairing was rejected, cancelled or failed.
@@ -4405,13 +4105,13 @@ abstract class AppLocalizations {
   /// Synchronization status after synchronization stopped because of an error.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization interrupted'**
+  /// **'Sync interrupted'**
   String get syncStatusInterrupted;
 
   /// Synchronization status when some items could not be synchronized.
   ///
   /// In en, this message translates to:
-  /// **'Partially synchronized'**
+  /// **'Partially synced'**
   String get syncStatusPartiallySynchronized;
 
   /// Synchronization status while a failed synchronization is retried automatically.
@@ -4501,25 +4201,25 @@ abstract class AppLocalizations {
   /// Synchronization activity log entry: a synchronization problem appeared.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization problem detected.'**
+  /// **'Sync problem detected.'**
   String get syncLogProblemDetected;
 
   /// Synchronization activity log entry: a synchronization problem was resolved.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization problem resolved.'**
+  /// **'Sync problem resolved.'**
   String get syncLogProblemResolved;
 
   /// Synchronization activity log entry: synchronization failed.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization failed.'**
+  /// **'Sync failed.'**
   String get syncLogFailed;
 
   /// Synchronization activity log entry: synchronization works again after a failure.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization restored.'**
+  /// **'Sync restored.'**
   String get syncLogRecovered;
 
   /// Synchronization activity log entry with how many clipboard items (clips) were sent to and received from a device.
@@ -4531,25 +4231,25 @@ abstract class AppLocalizations {
   /// Screen reader label of the header button that opens synchronization details; {status} is the current synchronization status.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization: {status}'**
+  /// **'Sync: {status}'**
   String syncHeaderSemanticsLabel(String status);
 
   /// Title of the synchronization details panel.
   ///
   /// In en, this message translates to:
-  /// **'Synchronization'**
+  /// **'Sync'**
   String get syncDetailsTitle;
 
   /// Tooltip and screen reader label of the button that closes the synchronization details panel.
   ///
   /// In en, this message translates to:
-  /// **'Close synchronization details'**
+  /// **'Close sync details'**
   String get syncDetailsClose;
 
   /// Empty state message in synchronization details when no devices are paired.
   ///
   /// In en, this message translates to:
-  /// **'Pair a device to synchronize clipboard history.'**
+  /// **'Pair a device to sync clipboard history.'**
   String get syncNoPairedDevicesMessage;
 
   /// Alert title in synchronization details when the sync activity log cannot be read or saved.
@@ -4579,7 +4279,7 @@ abstract class AppLocalizations {
   /// Shown in synchronization details when the activity log is empty.
   ///
   /// In en, this message translates to:
-  /// **'No recent synchronization problems'**
+  /// **'No recent sync problems'**
   String get syncDetailsNoRecentProblems;
 
   /// Name shown in the synchronization activity log when the device that caused an event is no longer known.
@@ -4603,7 +4303,7 @@ abstract class AppLocalizations {
   /// Row label in synchronization details for the number of clipboard items too large to synchronize.
   ///
   /// In en, this message translates to:
-  /// **'Items over the size limit'**
+  /// **'Clips over the size limit'**
   String get syncPeerItemsOverSizeLimit;
 
   /// Shown next to an offline device's status; {time} is a relative or short time such as '5 min ago' or '14:20'.
@@ -4744,12 +4444,6 @@ abstract class AppLocalizations {
   /// **'History could not be refreshed. Try again.'**
   String get historyErrorRefresh;
 
-  /// Error message shown when the History list fails to load.
-  ///
-  /// In en, this message translates to:
-  /// **'History could not be loaded. Try again.'**
-  String get historyErrorLoad;
-
   /// Error shown when the next page of older clips fails to load while scrolling down.
   ///
   /// In en, this message translates to:
@@ -4824,7 +4518,7 @@ abstract class AppLocalizations {
   /// Error shown when adding or removing the spoiler (hidden content) state of a clip fails.
   ///
   /// In en, this message translates to:
-  /// **'The clip secrecy could not be updated.'**
+  /// **'The spoiler could not be updated.'**
   String get historyErrorSecrecyUpdate;
 
   /// Error shown when pinning or unpinning a clip fails.
@@ -4872,13 +4566,13 @@ abstract class AppLocalizations {
   /// Error shown when the text recognition (OCR) module fails to start.
   ///
   /// In en, this message translates to:
-  /// **'OCR could not be started. Try again.'**
+  /// **'OCR could not be started.'**
   String get historyOcrErrorStart;
 
   /// Error shown when text recognition (OCR) on an image clip fails.
   ///
   /// In en, this message translates to:
-  /// **'Image text could not be recognized. Try again.'**
+  /// **'Image text could not be recognized.'**
   String get historyOcrErrorRecognize;
 
   /// Loading message in the image text dialog while text recognition (OCR) runs.
@@ -4904,12 +4598,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Image text'**
   String get historyOcrTitle;
-
-  /// Toast message after the recognized image text is copied to the clipboard.
-  ///
-  /// In en, this message translates to:
-  /// **'Recognized text copied.'**
-  String get historyOcrTextCopied;
 
   /// Toast message when copying the recognized image text fails.
   ///
@@ -5043,12 +4731,6 @@ abstract class AppLocalizations {
   /// **'Action failed'**
   String get historyActionFailedTitle;
 
-  /// Loading message while the History list loads.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading clipboard history.'**
-  String get historyLoadingMessage;
-
   /// Error title shown instead of the History list when it cannot be loaded.
   ///
   /// In en, this message translates to:
@@ -5100,13 +4782,13 @@ abstract class AppLocalizations {
   /// Warning title in History when some stored clips could not be decrypted and are hidden.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =1{1 clipboard row was skipped} other{{count} clipboard rows were skipped}}'**
+  /// **'{count, plural, =1{1 clip was skipped} other{{count} clips were skipped}}'**
   String historySkippedRowsTitle(int count);
 
   /// Warning message in History when some stored clips could not be decrypted and are hidden.
   ///
   /// In en, this message translates to:
-  /// **'Some retained clips could not be read and are not shown in this list.'**
+  /// **'Some clips could not be read and are not shown in this list.'**
   String get historySkippedRowsMessage;
 
   /// Placeholder of the History search field and tooltip of the button that opens it.
@@ -5271,12 +4953,6 @@ abstract class AppLocalizations {
   /// **'Copy plain text'**
   String get historyCopyPlainText;
 
-  /// Tooltip of the clip details button that opens the tags dialog for the clip.
-  ///
-  /// In en, this message translates to:
-  /// **'Manage clip tags'**
-  String get historyManageClipTags;
-
   /// Label of the clip details pin button when the clip is already pinned. Describes the current state of one clip; pressing it unpins the clip.
   ///
   /// In en, this message translates to:
@@ -5319,29 +4995,17 @@ abstract class AppLocalizations {
   /// **'Copy failed'**
   String get historyCopyFailedTitle;
 
-  /// Toast message after a clip is copied as plain text.
+  /// Toast message under the title "Copied" after a clip is copied as plain text; it continues the title.
   ///
   /// In en, this message translates to:
-  /// **'Plain text copied.'**
+  /// **'As plain text.'**
   String get historyPlainTextCopied;
-
-  /// Toast message after a clip is copied to the clipboard.
-  ///
-  /// In en, this message translates to:
-  /// **'Clip copied.'**
-  String get historyClipCopied;
 
   /// Title of the success toast after a file clip is saved to this device.
   ///
   /// In en, this message translates to:
   /// **'Downloaded'**
   String get historyDownloadedTitle;
-
-  /// Toast message after a file clip is saved to this device.
-  ///
-  /// In en, this message translates to:
-  /// **'File saved.'**
-  String get historyFileSaved;
 
   /// Verb. Button, tooltip and menu item that opens the system share sheet for a clip.
   ///
@@ -5439,29 +5103,11 @@ abstract class AppLocalizations {
   /// **'Retry download'**
   String get historyRetryDownload;
 
-  /// Error title in clip details when a file clip download failed.
-  ///
-  /// In en, this message translates to:
-  /// **'Download failed'**
-  String get historyDownloadFailedTitle;
-
   /// Button in clip details that opens a downloaded file.
   ///
   /// In en, this message translates to:
   /// **'Show file'**
   String get historyShowFile;
-
-  /// Clip details row label shown instead of all metadata while a confidential clip is hidden.
-  ///
-  /// In en, this message translates to:
-  /// **'Privacy'**
-  String get historyMetadataPrivacy;
-
-  /// Clip details value of the Privacy row while a confidential clip is hidden. Adjective.
-  ///
-  /// In en, this message translates to:
-  /// **'Confidential'**
-  String get historyMetadataConfidential;
 
   /// Clip details row label for the date and time the clip was copied.
   ///
@@ -5480,12 +5126,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Device'**
   String get historyMetadataDevice;
-
-  /// Clip details row label for the clip type, such as Text or Image.
-  ///
-  /// In en, this message translates to:
-  /// **'Clip type'**
-  String get historyMetadataClipType;
 
   /// Clip details row label for the technical content type (MIME type), such as text/plain.
   ///
@@ -5532,7 +5172,7 @@ abstract class AppLocalizations {
   /// Clip details value of the Sync row when the clip exceeds the sync size limit.
   ///
   /// In en, this message translates to:
-  /// **'Too large to sync'**
+  /// **'Too large'**
   String get historyMetadataTooLargeToSync;
 
   /// Title of the confirmation dialog for deleting the selected clips.
@@ -5613,17 +5253,11 @@ abstract class AppLocalizations {
   /// **'All time'**
   String get historyDatePresetAllTime;
 
-  /// Error message shown in History, Devices, and Settings when the app's background runtime fails to start. CopyPaste is the product name.
+  /// Error message shown in History, Devices, and Settings when the app's background service fails to start; a Try again button follows. Use the same term as the Diagnostics log source "Background service". CopyPaste is the product name.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste could not start its runtime.'**
+  /// **'CopyPaste couldn\'t start its background service.'**
   String get appRuntimeStartFailed;
-
-  /// Loading message shown while the app window prepares its first screen. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Preparing CopyPaste.'**
-  String get appPreparing;
 
   /// Message under the loading indicator in History, Devices, and Settings while the app waits for the operating system to unlock its encrypted history. CopyPaste is the product name.
   ///
@@ -5634,19 +5268,19 @@ abstract class AppLocalizations {
   /// Error title shown in place of the History screen when the clipboard history service is not running.
   ///
   /// In en, this message translates to:
-  /// **'History runtime is unavailable'**
+  /// **'History is unavailable'**
   String get appHistoryUnavailableTitle;
 
   /// Error title shown in place of the Devices screen when the sync service is not running.
   ///
   /// In en, this message translates to:
-  /// **'Devices runtime is unavailable'**
+  /// **'Devices are unavailable'**
   String get appDevicesUnavailableTitle;
 
   /// Error title shown in place of the Settings screen when the app service is not running.
   ///
   /// In en, this message translates to:
-  /// **'Settings runtime is unavailable'**
+  /// **'Settings are unavailable'**
   String get appSettingsUnavailableTitle;
 
   /// Button that exits the application. CopyPaste is the product name.
@@ -5684,12 +5318,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Settings'**
   String get appDestinationSettings;
-
-  /// Screen reader label of the currently selected navigation item; {destination} is the screen name, such as History.
-  ///
-  /// In en, this message translates to:
-  /// **'{destination}, selected'**
-  String appDestinationSelected(String destination);
 
   /// Screen reader label of the dot badge that marks a filter button whose filter is applied.
   ///
@@ -5733,7 +5361,7 @@ abstract class AppLocalizations {
   /// **'Pair and start Shizuku'**
   String get sharedPairAndStartShizuku;
 
-  /// Title and button of the Shizuku setup card asking to grant CopyPaste permission inside Shizuku. CopyPaste is the product name.
+  /// Title of the Shizuku setup card asking to grant CopyPaste permission inside Shizuku; the button under it reads "Allow" (sharedAllow). CopyPaste is the product name.
   ///
   /// In en, this message translates to:
   /// **'Allow CopyPaste'**
@@ -5748,7 +5376,7 @@ abstract class AppLocalizations {
   /// Description of the Shizuku setup card when Shizuku is not installed. Shizuku is an Android app name.
   ///
   /// In en, this message translates to:
-  /// **'Get Shizuku to apply one-time access.'**
+  /// **'Shizuku applies the one-time access.'**
   String get sharedGetShizukuDescription;
 
   /// Description telling the user to start Shizuku with Android's Wireless debugging and come back. Wireless debugging is an Android developer setting name.
@@ -5793,11 +5421,17 @@ abstract class AppLocalizations {
   /// **'Enable USB debugging and connect this phone.'**
   String get sharedEnableUsbDebugging;
 
-  /// Button that asks Android for a permission, such as notifications.
+  /// Button that grants a permission: it asks Android for one, such as notifications, or allows CopyPaste in Shizuku under the card title "Allow CopyPaste".
   ///
   /// In en, this message translates to:
   /// **'Allow'**
   String get sharedAllow;
+
+  /// Button on the Shizuku setup card titled "Apply capture access" (onboardingAndroidApplyAccess) or "Apply SMS access" (modulesSmsApplyAccess). Use the verb of those two titles, alone.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get sharedApply;
 
   /// Error shown when copying the ADB setup commands to the clipboard fails.
   ///
@@ -5874,7 +5508,7 @@ abstract class AppLocalizations {
   /// Error shown when the setup flow could not store which step the user reached.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste could not save onboarding progress.'**
+  /// **'CopyPaste could not save setup progress.'**
   String get onboardingSaveProgressFailed;
 
   /// Title of the setup row that launches the app automatically when the user signs in to the computer.
@@ -5882,12 +5516,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Start at login'**
   String get onboardingStartAtLogin;
-
-  /// Description of the Start at login row on macOS and Windows. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Open CopyPaste when you sign in'**
-  String get onboardingStartAtLoginDescription;
 
   /// Screen reader label of the Start at login switch. CopyPaste is the product name.
   ///
@@ -6093,10 +5721,10 @@ abstract class AppLocalizations {
   /// **'GNOME or KDE companion'**
   String get onboardingLinuxCompanion;
 
-  /// Status shown when the Linux desktop extension is active. Clipboard v2 is the name of the integration protocol.
+  /// Status under the Linux setup row titled "GNOME or KDE companion" when the desktop extension is active.
   ///
   /// In en, this message translates to:
-  /// **'The authenticated Clipboard v2 bridge is ready.'**
+  /// **'Ready.'**
   String get onboardingLinuxCompanionReady;
 
   /// Status shown when clipboard capture is paused because excluded-app rules need the Linux desktop extension.
@@ -6123,16 +5751,16 @@ abstract class AppLocalizations {
   /// **'Keyboard control'**
   String get onboardingLinuxKeyboardControl;
 
-  /// Status shown when the keyboard control permission is granted. Quick Paste is a feature name.
+  /// Status under the Linux setup row titled "Keyboard control" when the permission is granted; it continues the title, so do not repeat it. Quick Paste is a feature name.
   ///
   /// In en, this message translates to:
-  /// **'Keyboard control is allowed for Quick Paste.'**
+  /// **'Allowed for Quick Paste.'**
   String get onboardingLinuxKeyboardAllowed;
 
-  /// Status shown when the Linux desktop session cannot grant keyboard control.
+  /// Status under the Linux setup row titled "Keyboard control" when the desktop session cannot grant it; it continues the title, so do not repeat it.
   ///
   /// In en, this message translates to:
-  /// **'Keyboard control is unavailable in this desktop session.'**
+  /// **'Unavailable in this desktop session.'**
   String get onboardingLinuxKeyboardUnsupported;
 
   /// Button that asks the Linux desktop for the keyboard control permission.
@@ -6141,23 +5769,17 @@ abstract class AppLocalizations {
   /// **'Allow keyboard control'**
   String get onboardingLinuxAllowKeyboard;
 
-  /// Status of the Quick Paste row on Linux when the feature works. Quick Paste is a feature name.
+  /// Status under the Linux setup row titled "Quick Paste" when the feature works.
   ///
   /// In en, this message translates to:
-  /// **'Quick Paste is ready.'**
+  /// **'Ready.'**
   String get onboardingLinuxQuickPasteReady;
 
-  /// Status of the Quick Paste row on Linux when the desktop integration is missing. Quick Paste is a feature name.
+  /// Status under the Linux setup row titled "Quick Paste" when the desktop integration is missing: the feature becomes ready once it is active. It continues the title, so do not repeat it.
   ///
   /// In en, this message translates to:
-  /// **'Quick Paste will be ready after the required desktop integration is active.'**
+  /// **'Ready after the required desktop integration is active.'**
   String get onboardingLinuxQuickPastePending;
-
-  /// Description of the Start at login row on Linux. CopyPaste is the product name.
-  ///
-  /// In en, this message translates to:
-  /// **'Open CopyPaste when you sign in.'**
-  String get onboardingLinuxStartAtLoginDescription;
 
   /// Title of the Linux setup row that registers the app to open copypaste:// links used for pairing invitations.
   ///
@@ -6165,10 +5787,10 @@ abstract class AppLocalizations {
   /// **'CopyPaste links'**
   String get onboardingLinuxLinks;
 
-  /// Status shown when copypaste:// links are registered with the Linux desktop.
+  /// Status under the Linux setup row titled "CopyPaste links" when copypaste:// links are registered: the links open in this app. A statement about the links, not an instruction.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste links open in this app.'**
+  /// **'Open in this app.'**
   String get onboardingLinuxLinksRegistered;
 
   /// Description shown when copypaste:// links are not registered with the Linux desktop.
@@ -6189,10 +5811,10 @@ abstract class AppLocalizations {
   /// **'Screenshot blocking'**
   String get onboardingLinuxScreenshotBlocking;
 
-  /// Explanation that Linux cannot hide the app window from screenshots, while stored data stays encrypted.
+  /// Status under the Linux setup row titled "Screenshot blocking": Linux cannot hide the app window from screenshots, while stored data stays encrypted. The first sentence continues the title, so do not repeat it.
   ///
   /// In en, this message translates to:
-  /// **'Screenshot blocking is unavailable on Linux. Protected stored data remains encrypted.'**
+  /// **'Unavailable on Linux. Stored data remains encrypted.'**
   String get onboardingLinuxScreenshotBlockingUnavailable;
 
   /// Button that re-checks the Linux desktop integration status.
@@ -6309,16 +5931,16 @@ abstract class AppLocalizations {
   /// **'Open'**
   String get onboardingAndroidOpen;
 
-  /// Title and button that grant Android background clipboard access through Shizuku.
+  /// Title of the Shizuku setup card that grants Android background clipboard access; the button under it reads "Apply" (sharedApply).
   ///
   /// In en, this message translates to:
   /// **'Apply capture access'**
   String get onboardingAndroidApplyAccess;
 
-  /// Description of the step that grants Android background clipboard access once.
+  /// Description of the Shizuku setup card titled "Apply capture access": the access is applied once and the Shizuku app is not needed after that. Shizuku is an Android app name.
   ///
   /// In en, this message translates to:
-  /// **'Apply one-time capture access.'**
+  /// **'One-time. Shizuku is not needed afterwards.'**
   String get onboardingAndroidApplyAccessDescription;
 
   /// Hint shown when Limited capture is selected. Full capture is the capture mode name.
@@ -6378,7 +6000,7 @@ abstract class AppLocalizations {
   /// Error shown when Android clipboard capture could not be turned on.
   ///
   /// In en, this message translates to:
-  /// **'Clipboard intake could not be enabled.'**
+  /// **'Clipboard capture could not be enabled.'**
   String get onboardingAndroidIntakeFailed;
 
   /// Error shown when switching to Limited capture could not stop background capture.
@@ -6396,13 +6018,13 @@ abstract class AppLocalizations {
   /// Error shown when Shizuku permits the app but granting the Android capture permissions failed.
   ///
   /// In en, this message translates to:
-  /// **'CopyPaste is allowed in Shizuku, but Android capture grants could not be applied.'**
+  /// **'CopyPaste is allowed in Shizuku, but capture access could not be applied.'**
   String get onboardingAndroidGrantsFailed;
 
   /// Error shown when the app must first be allowed in the Shizuku app.
   ///
   /// In en, this message translates to:
-  /// **'Allow CopyPaste in Shizuku to apply capture grants.'**
+  /// **'Allow CopyPaste in Shizuku to apply capture access.'**
   String get onboardingAndroidAllowInShizuku;
 
   /// Error shown when capture is started before the background clipboard permission was granted.
@@ -6477,23 +6099,11 @@ abstract class AppLocalizations {
   /// **'Module operation failed'**
   String get modulesOperationFailed;
 
-  /// Loading message shown while installed modules are read.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading modules.'**
-  String get modulesLoading;
-
   /// Error title shown when the installed modules could not be read.
   ///
   /// In en, this message translates to:
   /// **'Modules are unavailable'**
   String get modulesUnavailableTitle;
-
-  /// Error message shown when the installed modules could not be read.
-  ///
-  /// In en, this message translates to:
-  /// **'Try loading modules again.'**
-  String get modulesUnavailableMessage;
 
   /// Empty-state title of the Installed modules tab.
   ///
@@ -6519,23 +6129,11 @@ abstract class AppLocalizations {
   /// **'Try a different search.'**
   String get modulesTryDifferentSearch;
 
-  /// Loading message shown while the module marketplace is downloaded.
-  ///
-  /// In en, this message translates to:
-  /// **'Loading marketplace.'**
-  String get modulesMarketplaceLoading;
-
   /// Error title shown when the module marketplace could not be loaded.
   ///
   /// In en, this message translates to:
   /// **'Marketplace is unavailable'**
   String get modulesMarketplaceUnavailableTitle;
-
-  /// Fallback error message shown when the module marketplace could not be loaded.
-  ///
-  /// In en, this message translates to:
-  /// **'Try loading the marketplace again.'**
-  String get modulesMarketplaceUnavailableMessage;
 
   /// Empty-state title of the module marketplace.
   ///
@@ -6639,12 +6237,6 @@ abstract class AppLocalizations {
   /// **'No additional settings'**
   String get modulesNoSettingsTitle;
 
-  /// Empty-state message in a module's settings panel when the module has no options.
-  ///
-  /// In en, this message translates to:
-  /// **'This module does not need extra configuration.'**
-  String get modulesNoSettingsMessage;
-
   /// Button in a module's settings that opens the Android SMS permission setup.
   ///
   /// In en, this message translates to:
@@ -6668,12 +6260,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Close SMS access'**
   String get modulesCloseSmsAccess;
-
-  /// Loading message shown while the SMS permission state is read.
-  ///
-  /// In en, this message translates to:
-  /// **'Checking SMS access.'**
-  String get modulesSmsChecking;
 
   /// Text shown when the SMS permission is granted. SMS Codes is the module name.
   ///
@@ -6711,7 +6297,7 @@ abstract class AppLocalizations {
   /// **'Separate app that alone reads SMS'**
   String get modulesSmsAppDescription;
 
-  /// Title and button that grant the Android SMS permission through Shizuku.
+  /// Title of the Shizuku setup card that grants the Android SMS permission; the button under it reads "Apply" (sharedApply).
   ///
   /// In en, this message translates to:
   /// **'Apply SMS access'**
@@ -6720,7 +6306,7 @@ abstract class AppLocalizations {
   /// Description of the step that grants the Android SMS permission once.
   ///
   /// In en, this message translates to:
-  /// **'Apply one-time SMS access.'**
+  /// **'Needed only once.'**
   String get modulesSmsApplyAccessDescription;
 
   /// Error title shown in the SMS access panel.
@@ -6729,17 +6315,11 @@ abstract class AppLocalizations {
   /// **'SMS setup failed'**
   String get modulesSmsSetupFailed;
 
-  /// Error title shown in a module form when choosing a file failed.
+  /// Error toast title shown in a module form when choosing a file failed; shown alone when no reason is known.
   ///
   /// In en, this message translates to:
   /// **'File selection failed'**
   String get modulesFileSelectionFailed;
-
-  /// Placeholder of the multi-select field for module languages.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose languages'**
-  String get modulesChooseLanguages;
 
   /// Button in a module form that opens a file picker.
   ///
@@ -6897,12 +6477,6 @@ abstract class AppLocalizations {
   /// **'Requires {requirement}.'**
   String modulesRequires(String requirement);
 
-  /// Error shown when loading the module marketplace failed for an unknown reason.
-  ///
-  /// In en, this message translates to:
-  /// **'The module marketplace could not be loaded.'**
-  String get modulesMarketplaceLoadFailed;
-
   /// Error shown when enabling an SMS module before the SMS permission is granted.
   ///
   /// In en, this message translates to:
@@ -6981,17 +6555,11 @@ abstract class AppLocalizations {
   /// **'The module response is invalid.'**
   String get modulesResponseInvalid;
 
-  /// Error shown when a module form asks for a file but this device has no file picker.
+  /// Message under the error toast title "File selection failed" when a module form asks for a file where no file picker is offered; it continues the title.
   ///
   /// In en, this message translates to:
-  /// **'File selection is unavailable.'**
+  /// **'Unavailable here.'**
   String get modulesFileSelectionUnavailable;
-
-  /// Error shown when choosing a file for a module failed.
-  ///
-  /// In en, this message translates to:
-  /// **'The file could not be selected.'**
-  String get modulesFileSelectFailed;
 
   /// Error shown when the chosen file has the wrong type or size; {field} is the module's field name.
   ///
@@ -7070,18 +6638,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{platform, select, macos{copy a secret item} other{Copy a secret item}}'**
   String deviceAuthReasonCopySecret(String platform);
-
-  /// Status shown for an identity-check setting when the system has no device authentication (for example Linux).
-  ///
-  /// In en, this message translates to:
-  /// **'Not available on this system'**
-  String get deviceAuthUnavailable;
-
-  /// Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up.
-  ///
-  /// In en, this message translates to:
-  /// **'Set up a device password, PIN or biometrics first'**
-  String get deviceAuthNotConfigured;
 
   /// State word shown beside a switch that is turned on. Adjective; keep it as short as possible.
   ///
@@ -7278,7 +6834,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.
   ///
   /// In en, this message translates to:
-  /// **'New limit: {limit}. Older unpinned items are deleted permanently.'**
+  /// **'New limit: {limit}. Older unpinned clips are deleted permanently.'**
   String settingsRetentionConfirmMessage(String limit);
 
   /// Title of the confirmation shown before a smaller storage quota deletes history.
@@ -7290,7 +6846,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. The oldest unpinned items over it are deleted permanently.'**
+  /// **'New quota: {size}. The oldest unpinned clips over it are deleted permanently.'**
   String settingsStorageQuotaConfirmMessage(String size);
 
   /// Button that confirms a stricter history limit which deletes history.
@@ -7344,7 +6900,7 @@ abstract class AppLocalizations {
   /// Message of the confirmation shown after the text history was exported: how many text clips the file holds.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =1{Exported 1 text clip} other{Exported {count} text clips}}'**
+  /// **'{count, plural, =1{1 text clip} other{{count} text clips}}'**
   String settingsExportedTextClips(int count);
 
   /// Short addition to the export confirmation: how many text clips could not be read and were left out of the file.
@@ -7353,23 +6909,11 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 could not be read} other{{count} could not be read}}'**
   String settingsExportUnreadableClips(int count);
 
-  /// Joins the outcome of an action with a detail about it, for example 'Exported 214 text clips · 3 could not be read'.
+  /// Joins the outcome of an action with a detail about it, for example '214 text clips · 3 could not be read'.
   ///
   /// In en, this message translates to:
   /// **'{outcome} · {detail}'**
   String settingsOutcomeDetail(String outcome, String detail);
-
-  /// Message of the confirmation shown after an encrypted backup was created. size is the file size, for example '12.4 MiB'.
-  ///
-  /// In en, this message translates to:
-  /// **'Encrypted backup saved · {size}'**
-  String settingsBackupDoneMessage(String size);
-
-  /// Message of the confirmation shown after history was restored from an encrypted backup.
-  ///
-  /// In en, this message translates to:
-  /// **'The clipboard history on this device now matches the backup.'**
-  String get settingsRestoreDoneMessage;
 
   /// A size in kibibytes (binary units of 1024); size is an already formatted number.
   ///
@@ -7434,7 +6978,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. {used} is in use, so the oldest unpinned items are deleted permanently.'**
+  /// **'New quota: {size}. {used} is in use, so the oldest unpinned clips are deleted permanently.'**
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used);
 
   /// Number of clips in a History group, shown after the group name and date, such as: Today · Wednesday, November 11 · 14 clips.
@@ -7731,12 +7275,6 @@ abstract class AppLocalizations {
   /// **'Other'**
   String get transformsCategoryOther;
 
-  /// Shown in the palette chain strip when no transform is picked.
-  ///
-  /// In en, this message translates to:
-  /// **'No steps yet'**
-  String get transformsChainEmpty;
-
   /// Label of one step in a transform chain: its position and transform name.
   ///
   /// In en, this message translates to:
@@ -7842,7 +7380,7 @@ abstract class AppLocalizations {
   /// Toast message after saving a pipeline.
   ///
   /// In en, this message translates to:
-  /// **'{name} is available in every transform palette.'**
+  /// **'{name} is now under Pipelines.'**
   String transformsPipelineSavedMessage(String name);
 
   /// Number of steps of a pipeline.
@@ -7884,7 +7422,7 @@ abstract class AppLocalizations {
   /// Explanation shown when the palette opens on a non-text item.
   ///
   /// In en, this message translates to:
-  /// **'This item is an image, a file or a color. Pick a text item or copy some text.'**
+  /// **'This clip is an image, a file or a color. Pick a text clip or copy some text.'**
   String get transformsNotTextMessage;
 
   /// Title shown when there is no source text for the palette.
@@ -7896,7 +7434,7 @@ abstract class AppLocalizations {
   /// Hint shown when there is no source text for the palette.
   ///
   /// In en, this message translates to:
-  /// **'Copy some text or pick a history item.'**
+  /// **'Copy some text or pick a clip from history.'**
   String get transformsNothingMessage;
 
   /// Shown in the preview before any transform is highlighted.
@@ -8010,7 +7548,7 @@ abstract class AppLocalizations {
   /// Toast message after copying a transform result.
   ///
   /// In en, this message translates to:
-  /// **'The result is on the clipboard and in history.'**
+  /// **'The result is also in history.'**
   String get transformsCopiedMessage;
 
   /// Toast title after saving a transform result as a new item.
@@ -8022,7 +7560,7 @@ abstract class AppLocalizations {
   /// Toast message after saving a transform result as a new item.
   ///
   /// In en, this message translates to:
-  /// **'Saved as a new history item.'**
+  /// **'The result is a new clip in history.'**
   String get transformsSavedMessage;
 
   /// Toast title when a transformed paste cannot reach the target app.
@@ -8067,7 +7605,7 @@ abstract class AppLocalizations {
   /// **'Cancelled'**
   String get transformsErrorCancelled;
 
-  /// Transform error: a pattern exceeded the time budget.
+  /// Transform error: a pattern compiles to something too large to run.
   ///
   /// In en, this message translates to:
   /// **'Pattern too expensive'**
@@ -8084,6 +7622,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Choose whether the number is in seconds or milliseconds'**
   String get transformsErrorTimestampUnit;
+
+  /// Transform error: the step did not finish within its time limit. Shown after the step name, like the other transform errors.
+  ///
+  /// In en, this message translates to:
+  /// **'Took too long'**
+  String get transformsErrorTimeLimit;
 
   /// Transform error: XML that references external entities.
   ///
@@ -8295,16 +7839,16 @@ abstract class AppLocalizations {
   /// **'Favorites'**
   String get transformsFavoritesTitle;
 
-  /// Settings row description; Mod is Command on macOS and Ctrl elsewhere.
+  /// Description of the Favorites row in Text transforms settings: where favorite transforms appear in the Transform text dialog.
   ///
   /// In en, this message translates to:
-  /// **'Shown first in every palette.'**
+  /// **'Shown near the top when you transform text.'**
   String get transformsFavoritesDescription;
 
   /// Shortcut of a favorite in the palette.
   ///
   /// In en, this message translates to:
-  /// **'{shortcut} in the palette'**
+  /// **'{shortcut} in Transform text'**
   String transformsFavoriteShortcut(String shortcut);
 
   /// Placeholder of the selector that adds a favorite.
@@ -8382,7 +7926,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Left out of palettes and suggestions.'**
+  /// **'Not listed or suggested.'**
   String get transformsHiddenDescription;
 
   /// Placeholder of the selector that hides a transform.
@@ -8487,12 +8031,6 @@ abstract class AppLocalizations {
   /// **'Quick access status unavailable'**
   String get quickAccessUnavailableTitle;
 
-  /// Error message under quickAccessUnavailableTitle; a Retry button follows.
-  ///
-  /// In en, this message translates to:
-  /// **'CopyPaste couldn\'t read the keyboard, tile, and widget status. Try again.'**
-  String get quickAccessUnavailableMessage;
-
   /// Notice title in Android Settings > Quick access when a system screen could not be opened or an option could not be saved.
   ///
   /// In en, this message translates to:
@@ -8538,7 +8076,7 @@ abstract class AppLocalizations {
   /// Settings search result description for the clips keyboard row.
   ///
   /// In en, this message translates to:
-  /// **'Turn on the CopyPaste clips keyboard panel.'**
+  /// **'Turn on the CopyPaste clips keyboard.'**
   String get quickAccessKeyboardSearchDescription;
 
   /// Space-separated search keywords for the clips keyboard row; translate and add local synonyms.
@@ -8552,12 +8090,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Switch to the clips keyboard'**
   String get quickAccessSwitchKeyboardTitle;
-
-  /// Setting row description for switching to the clips keyboard.
-  ///
-  /// In en, this message translates to:
-  /// **'Make CopyPaste clips the current keyboard.'**
-  String get quickAccessSwitchKeyboardDescription;
 
   /// Button that shows the Android keyboard picker.
   ///
@@ -8576,12 +8108,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Capture mode'**
   String get quickAccessCaptureTierTitle;
-
-  /// Setting row description explaining capture without Shizuku or ADB access.
-  ///
-  /// In en, this message translates to:
-  /// **'How copies from other apps are saved.'**
-  String get quickAccessCaptureTierDescription;
 
   /// Settings search result description for the capture mode row.
   ///
@@ -8604,13 +8130,13 @@ abstract class AppLocalizations {
   /// Capture mode status: the clips keyboard is the current keyboard and saves each copy.
   ///
   /// In en, this message translates to:
-  /// **'Panel selected: collecting'**
+  /// **'Clips keyboard: saves every copy while selected'**
   String get quickAccessTierPanelCollecting;
 
   /// Capture mode status: the clips keyboard is turned on and saves the clipboard when it opens.
   ///
   /// In en, this message translates to:
-  /// **'Panel mode: catch-up on open'**
+  /// **'Clips keyboard: saves the clipboard when opened'**
   String get quickAccessTierPanelCatchUp;
 
   /// Capture mode status: copies are saved only by an explicit action.
@@ -8646,14 +8172,8 @@ abstract class AppLocalizations {
   /// Switch title: the clips panel opens with its search field focused.
   ///
   /// In en, this message translates to:
-  /// **'Focus search when the panel opens'**
+  /// **'Focus search when the clips keyboard opens'**
   String get quickAccessFocusSearchTitle;
-
-  /// Switch description for focusing search when the clips panel opens.
-  ///
-  /// In en, this message translates to:
-  /// **'Open the panel with search ready.'**
-  String get quickAccessFocusSearchDescription;
 
   /// Setting row title for the Android Quick Settings tiles; also the search result label.
   ///
@@ -8880,14 +8400,8 @@ abstract class AppLocalizations {
   /// Toast message when Quick Paste put content on the clipboard but could not paste it.
   ///
   /// In en, this message translates to:
-  /// **'The content is on the clipboard. Paste it manually.'**
+  /// **'Paste it manually.'**
   String get quickPastePasteManually;
-
-  /// Primary button of the template fill-in form inside Quick Paste.
-  ///
-  /// In en, this message translates to:
-  /// **'Paste'**
-  String get quickPastePaste;
 
   /// Error title when the content rules cannot be read.
   ///
@@ -8978,12 +8492,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No rules yet'**
   String get rulesEmptyTitle;
-
-  /// Empty state message when the user has no rules.
-  ///
-  /// In en, this message translates to:
-  /// **'Rules tag, protect, expire or skip new copies.'**
-  String get rulesEmptyMessage;
 
   /// Heading of the rules deleted within 30 days.
   ///
@@ -9180,7 +8688,7 @@ abstract class AppLocalizations {
   /// Menu item that previews a rule against history and applies it to existing items.
   ///
   /// In en, this message translates to:
-  /// **'Apply to existing items…'**
+  /// **'Apply to existing clips…'**
   String get rulesApplyToItems;
 
   /// Menu item that resets a built-in rule to its shipped definition.
@@ -9318,7 +8826,7 @@ abstract class AppLocalizations {
   /// Hint under a pattern value.
   ///
   /// In en, this message translates to:
-  /// **'Look-around and backreferences aren\'t supported.'**
+  /// **'Look-ahead, look-behind and backreferences aren\'t supported.'**
   String get rulesPatternHint;
 
   /// Switch that makes a text condition case-sensitive.
@@ -9326,12 +8834,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Match case'**
   String get rulesCaseSensitive;
-
-  /// Placeholder of a multi-choice field.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose'**
-  String get rulesChooseValues;
 
   /// Shown on a condition from a newer version, which this version keeps unchanged.
   ///
@@ -9483,12 +8985,6 @@ abstract class AppLocalizations {
   /// **'Test'**
   String get rulesTestTitle;
 
-  /// Description of the rule test.
-  ///
-  /// In en, this message translates to:
-  /// **'Try the rule on sample text.'**
-  String get rulesTestDescription;
-
   /// Placeholder of the test sample field.
   ///
   /// In en, this message translates to:
@@ -9630,7 +9126,7 @@ abstract class AppLocalizations {
   /// Title of the dialog that previews and applies a rule to existing items.
   ///
   /// In en, this message translates to:
-  /// **'Apply to existing items'**
+  /// **'Apply to existing clips'**
   String get rulesPreviewTitle;
 
   /// Shown while the preview checks recent clips.
@@ -9696,14 +9192,8 @@ abstract class AppLocalizations {
   /// A secret clip in the preview list; its content is never shown.
   ///
   /// In en, this message translates to:
-  /// **'Secret item'**
+  /// **'Secret clip'**
   String get rulesSecretItem;
-
-  /// A secret clip from an app in the preview list.
-  ///
-  /// In en, this message translates to:
-  /// **'Secret item from {app}'**
-  String rulesSecretItemFrom(String app);
 
   /// Shown after a preview was stopped.
   ///
@@ -9813,12 +9303,6 @@ abstract class AppLocalizations {
   /// **'Sent'**
   String get historySentTitle;
 
-  /// Toast message naming the devices the clip was sent to.
-  ///
-  /// In en, this message translates to:
-  /// **'Sent to {devices}.'**
-  String historySentTo(String devices);
-
   /// Toast title when a manual send failed.
   ///
   /// In en, this message translates to:
@@ -9878,12 +9362,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The edited text is a new clip at the top of History.'**
   String get historyEditSaved;
-
-  /// Toast message after saving text typed in the new clip editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Your text was saved.'**
-  String get historyNewClipSaved;
 
   /// Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.
   ///
@@ -10143,12 +9621,6 @@ abstract class AppLocalizations {
   /// **'Diagnostics exported'**
   String get diagnosticsExported;
 
-  /// Toast message after the Diagnostics log is exported.
-  ///
-  /// In en, this message translates to:
-  /// **'The log file is ready to share with support.'**
-  String get diagnosticsExportedMessage;
-
   /// Toast title when the Diagnostics export fails.
   ///
   /// In en, this message translates to:
@@ -10182,7 +9654,7 @@ abstract class AppLocalizations {
   /// One-line description of the Diagnostics log level setting.
   ///
   /// In en, this message translates to:
-  /// **'How much detail is recorded on this device. Logs never include clipboard content.'**
+  /// **'How much detail is recorded on this device.'**
   String get diagnosticsLogLevelDescription;
 
   /// Heading above the choice of how Android background capture detects copies.
@@ -10316,12 +9788,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Show folder'**
   String get fileSetShowFolder;
-
-  /// Toast message after a multi-file clip is saved to this device.
-  ///
-  /// In en, this message translates to:
-  /// **'Files saved.'**
-  String get historyFilesSaved;
 
   /// Verb. Button on an interrupted download that continues it from the bytes already received.
   ///
@@ -10473,12 +9939,6 @@ abstract class AppLocalizations {
   /// **'Logs folder'**
   String get settingsLogsFolderTitle;
 
-  /// One-line description of Logs folder.
-  ///
-  /// In en, this message translates to:
-  /// **'Show the diagnostic logs of this device.'**
-  String get settingsLogsFolderDescription;
-
   /// Button that opens a folder in the file manager.
   ///
   /// In en, this message translates to:
@@ -10596,7 +10056,7 @@ abstract class AppLocalizations {
   /// Device space UI text.
   ///
   /// In en, this message translates to:
-  /// **'This device was removed or left. Its history stays here. Join a space to sync again.'**
+  /// **'This device was removed or left. Its history stays here.'**
   String get devicesSpaceRemovedMessage;
 
   /// Device space UI text.
@@ -10716,7 +10176,7 @@ abstract class AppLocalizations {
   /// Device space UI text.
   ///
   /// In en, this message translates to:
-  /// **'Your space is ready. Add your other devices now or later in Devices.'**
+  /// **'Add your other devices now or later in Devices.'**
   String get onboardingReadySpaceCreated;
 
   /// Device space UI text.
@@ -10728,7 +10188,7 @@ abstract class AppLocalizations {
   /// Device space UI text.
   ///
   /// In en, this message translates to:
-  /// **'Add a device'**
+  /// **'Add device'**
   String get onboardingAddDeviceNow;
 
   /// Device space UI text.
@@ -10770,19 +10230,13 @@ abstract class AppLocalizations {
   /// Device space UI text.
   ///
   /// In en, this message translates to:
-  /// **'Enter the code or scan the QR code from your other device. Then check that both devices show the same verification code.'**
-  String get onboardingPairJoinSubtitle;
-
-  /// Device space UI text.
-  ///
-  /// In en, this message translates to:
-  /// **'On your other device, open CopyPaste and join with this QR code or code. Then check that both devices show the same verification code.'**
+  /// **'On your other device, open CopyPaste and join with this code or QR code.'**
   String get onboardingPairAddDeviceSubtitle;
 
   /// Device space UI text.
   ///
   /// In en, this message translates to:
-  /// **'Skip for now'**
+  /// **'Later'**
   String get onboardingPairSkip;
 
   /// Device space UI text.
@@ -10797,17 +10251,11 @@ abstract class AppLocalizations {
   /// **'Try again, or continue and pair later in Devices.'**
   String get onboardingPairInterruptedMessage;
 
-  /// Ready-step message after pairing in the welcome tour.
+  /// Ready-step message after pairing in the welcome tour. The paired device's name is shown in the card below it.
   ///
   /// In en, this message translates to:
-  /// **'Paired with {device}. Your clipboard now syncs between them.'**
-  String onboardingReadyPaired(String device);
-
-  /// Device space UI text.
-  ///
-  /// In en, this message translates to:
-  /// **'Your devices are paired. Your clipboard now syncs between them.'**
-  String get onboardingReadyPairedUnnamed;
+  /// **'Your clipboard now syncs between your devices.'**
+  String get onboardingReadyPaired;
 
   /// Device space UI text.
   ///
@@ -10878,13 +10326,13 @@ abstract class AppLocalizations {
   /// Module details drawer: PermissionsPending
   ///
   /// In en, this message translates to:
-  /// **'Listed after install. You confirm them when you turn the module on.'**
+  /// **'Listed after install. You confirm them when you enable the module.'**
   String get modulesDetailsPermissionsPending;
 
   /// Module details drawer: NoPermissions
   ///
   /// In en, this message translates to:
-  /// **'Uses no CopyPaste services.'**
+  /// **'Needs no permissions.'**
   String get modulesDetailsNoPermissions;
 
   /// Module details drawer: Information

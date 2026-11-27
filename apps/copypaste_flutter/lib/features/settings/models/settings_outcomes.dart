@@ -1,5 +1,4 @@
 import '../../../l10n/app_localizations.dart';
-import '../../../shared/format_bytes.dart';
 import 'settings_models.dart';
 
 /// What to tell the user after a data action completed.
@@ -14,7 +13,4 @@ abstract final class SettingsOutcomes {
       l10n.settingsExportUnreadableClips(result.skippedUndecryptable),
     );
   }
-
-  static String backedUp(AppLocalizations l10n, BackupResult result) =>
-      l10n.settingsBackupDoneMessage(formatBytes(result.sizeBytes));
 }

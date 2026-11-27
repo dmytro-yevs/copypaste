@@ -37,12 +37,10 @@ class OnboardingPairingStep extends StatelessWidget {
           joining ? l10n.onboardingPairJoinTitle : l10n.onboardingAddDeviceNow,
           style: Theme.of(context).typography.h3,
         ),
-        const Gap(AppSpacing.sm),
-        Text(
-          joining
-              ? l10n.onboardingPairJoinSubtitle
-              : l10n.onboardingPairAddDeviceSubtitle,
-        ).muted(),
+        if (!joining) ...[
+          const Gap(AppSpacing.sm),
+          Text(l10n.onboardingPairAddDeviceSubtitle).muted(),
+        ],
         const Gap(AppSpacing.xxl),
         // The method is fixed once a ceremony has started.
         if (joining && devices.pairing == null) ...[

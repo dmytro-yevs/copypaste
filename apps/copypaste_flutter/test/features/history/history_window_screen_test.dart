@@ -198,7 +198,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('history-row-new-1')), findsOneWidget);
-    expect(find.text('Loading clipboard history.'), findsNothing);
+    expect(find.text('Loading'), findsNothing);
     expect(find.text('No clips found'), findsNothing);
   });
 

@@ -532,7 +532,7 @@ class _TransformPaletteState extends State<TransformPalette> {
             ),
           ),
         ],
-        const Gap(AppSpacing.sm),
+        if (_controller.chain.isNotEmpty) const Gap(AppSpacing.sm),
         Expanded(child: _previewPane(context)),
       ],
     );
@@ -948,7 +948,7 @@ class _PaletteItemState extends State<_PaletteItem> {
       TransformEntryKind.pipeline =>
         entry.pipeline!.description ??
             l10n.transformsPipelineSteps(entry.pipeline!.steps.length),
-      TransformEntryKind.recent => l10n.transformsGroupRecent,
+      TransformEntryKind.recent => '',
     };
     final icon = switch (entry.kind) {
       TransformEntryKind.transform => LucideIcons.wandSparkles,
@@ -1019,11 +1019,12 @@ class _PaletteItemState extends State<_PaletteItem> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ).small().medium(),
-                            Text(
-                              description,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ).xSmall().muted(),
+                            if (description.isNotEmpty)
+                              Text(
+                                description,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ).xSmall().muted(),
                           ],
                         ),
                       ),
@@ -1104,8 +1105,6 @@ class _ChainStrip extends StatelessWidget {
                               ),
                       ),
                     ),
-                  if (chain.isEmpty)
-                    Text(l10n.transformsChainEmpty).small().muted(),
                 ],
               ),
             ),

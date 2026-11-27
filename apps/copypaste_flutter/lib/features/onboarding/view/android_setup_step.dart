@@ -27,7 +27,7 @@ class AndroidSetupStep extends StatelessWidget {
               : l10n.onboardingAndroidBackgroundCapture,
           style: Theme.of(context).typography.h1,
         ),
-        const Gap(AppSpacing.lg),
+        const Gap(AppSpacing.xxl),
         RadioGroup<AndroidCaptureMode>(
           value: setup.selectedMode,
           onChanged: (mode) => unawaited(setup.selectMode(mode)),

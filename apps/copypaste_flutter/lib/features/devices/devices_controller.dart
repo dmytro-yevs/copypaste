@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../platform/camera/system_pairing_scanner.dart';
 import '../../shared/error_text.dart';
 
+import 'device_presentation.dart';
 import 'devices_gateway.dart';
 import 'pairing_progress.dart';
 
@@ -79,6 +80,7 @@ class DevicesController extends ChangeNotifier {
   final SystemPairingScanner? _systemScanner;
   bool _systemScanInFlight = false;
   String? _systemScanError;
+  bool _systemScanCodeInvalid = false;
   bool get usesSystemScanner => _systemScanner != null;
   bool get systemScanInFlight => _systemScanInFlight;
 
@@ -128,11 +130,18 @@ class DevicesController extends ChangeNotifier {
           .toList(growable: false) ??
       const [];
   String? get errorMessage => _systemScanError ?? _errorMessage;
-  String get errorTitle => _systemScanError != null
-      ? AppStrings.current.devicesScannerUnavailableTitle
-      : _lastErrorWasAction
-      ? AppStrings.current.devicesActionFailedTitle
-      : AppStrings.current.devicesRefreshFailedTitle;
+  String get errorTitle {
+    final strings = AppStrings.current;
+    if (_systemScanError != null) {
+      return _systemScanCodeInvalid
+          ? strings.devicesScanInvalidTitle
+          : strings.devicesScannerUnavailableTitle;
+    }
+    return _lastErrorWasAction
+        ? strings.devicesActionFailedTitle
+        : strings.devicesRefreshFailedTitle;
+  }
+
   PairingCeremony? get pairing => _pairingCeremony;
   PairingEntryMode? get pairingEntryMode => _pairingEntryMode;
   DeviceDetailsTarget? get deviceDetailsTarget => _deviceDetailsTarget;
@@ -175,16 +184,8 @@ class DevicesController extends ChangeNotifier {
   DeviceConnectionState peerConnectionState(DevicePeer peer) =>
       _connectionState(peer.details?.presence, fallbackOnline: peer.online);
 
-  String peerStateLabel(DevicePeer peer) {
-    final strings = AppStrings.current;
-    return switch (peerConnectionState(peer)) {
-      DeviceConnectionState.online => strings.devicesPeerAvailable,
-      DeviceConnectionState.offline => strings.devicesConnectionOffline,
-      DeviceConnectionState.visible => strings.devicesPeerVisibleNow,
-      DeviceConnectionState.notSeen => strings.devicesConnectionNotSeen,
-      DeviceConnectionState.unknown => strings.devicesPeerStatusUnknown,
-    };
-  }
+  String peerStateLabel(DevicePeer peer) =>
+      DevicePresentation.connectionLabel(peerConnectionState(peer));
 
   /// Display-safe RTT. A missing or expired observation is never rendered.
   String peerLatencyLabel(DevicePeer peer) => _latencyLabel(peer.details);
@@ -498,6 +499,7 @@ class DevicesController extends ChangeNotifier {
     _systemScanInFlight = true;
     _notify();
     String? scanError;
+    var codeInvalid = false;
     try {
       final uri = await scanner.scan();
       if (_disposed ||
@@ -513,7 +515,8 @@ class DevicesController extends ChangeNotifier {
       }
     } on PlatformException catch (error) {
       if (!_disposed && epoch == _pairingEpoch) {
-        scanError = error.code == 'invalid_pairing_qr'
+        codeInvalid = error.code == 'invalid_pairing_qr';
+        scanError = codeInvalid
             ? AppStrings.current.pairingInvalidQr
             : AppStrings.current.pairingGoogleScannerUnavailable;
       }
@@ -527,6 +530,7 @@ class DevicesController extends ChangeNotifier {
         await closePairing();
         if (!_disposed && _pairingEpoch == epoch + 1) {
           _systemScanError = scanError;
+          _systemScanCodeInvalid = codeInvalid;
         }
       }
       _notify();

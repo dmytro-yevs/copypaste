@@ -206,7 +206,7 @@ void main() {
       expect(
         find.textContaining(
           'New quota: 1 GiB. 2.1 GiB is in use, so the oldest unpinned '
-          'items are deleted permanently.',
+          'clips are deleted permanently.',
         ),
         findsOneWidget,
       );
@@ -449,7 +449,7 @@ void main() {
     await tester.tap(find.text('Export'));
     await tester.pump();
     expect(find.text('Text history exported'), findsOneWidget);
-    expect(find.text('Exported 4 text clips · 3 could not be read'), findsOne);
+    expect(find.text('4 text clips · 3 could not be read'), findsOne);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 10));
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));

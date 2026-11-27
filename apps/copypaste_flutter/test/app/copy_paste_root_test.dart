@@ -109,7 +109,7 @@ void main() {
       addTearDown(() => nativeEvents.setVisibilityChangedHandler(null));
       await host.requestSettings();
       await tester.pumpAndSettle();
-      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      expect(find.text('Settings are unavailable'), findsOneWidget);
       final rootSemanticsId = tester
           .getSemantics(find.byKey(const ValueKey('application-semantics')))
           .id;
@@ -155,7 +155,7 @@ void main() {
       nativeEvents.onWindowFocus();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      expect(find.text('Settings are unavailable'), findsOneWidget);
       expect(host.disposeCalls, 0);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -185,7 +185,7 @@ void main() {
     await tester.tap(find.widgetWithText(Button, 'Get started'));
     await tester.pumpAndSettle();
     expect(windows.complete, isTrue);
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
     expect(find.text('CopyPaste is ready'), findsNothing);
   });
   testWidgets(
@@ -221,7 +221,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Welcome to CopyPaste'), findsOneWidget);
-    expect(find.text('History runtime is unavailable'), findsNothing);
+    expect(find.text('History is unavailable'), findsNothing);
   });
 
   testWidgets('shows the injected Android onboarding before the app shell', (
@@ -239,7 +239,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Welcome to CopyPaste'), findsOneWidget);
-    expect(find.text('History runtime is unavailable'), findsNothing);
+    expect(find.text('History is unavailable'), findsNothing);
   });
 
   testWidgets('opens Settings from the desktop tray', (tester) async {
@@ -262,7 +262,7 @@ void main() {
     await host.requestSettings();
     await tester.pump();
 
-    expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+    expect(find.text('Settings are unavailable'), findsOneWidget);
   });
 
   testWidgets('keeps the app shell when only the tray is unavailable', (
@@ -291,7 +291,7 @@ void main() {
       desktopWindow.setupIssue.value,
       DesktopWindowSetupIssue.trayUnavailable,
     );
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
     expect(
       find.textContaining('The system tray is unavailable'),
       findsOneWidget,
@@ -331,7 +331,7 @@ void main() {
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
 
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('macos-native-controls-reserve')),
       findsOneWidget,

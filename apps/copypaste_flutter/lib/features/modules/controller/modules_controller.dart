@@ -72,6 +72,7 @@ class ModulesController extends ChangeNotifier {
   bool _busy = false;
   bool _disposed = false;
   String? _error;
+  String? _errorReason;
   ModulesSection _section = ModulesSection.marketplace;
   ModulesLoadState _catalogState = ModulesLoadState.loading;
   List<MarketplaceModule> _catalog = const [];
@@ -189,7 +190,9 @@ class ModulesController extends ChangeNotifier {
     } catch (error) {
       if (!_disposed) {
         _catalogState = ModulesLoadState.error;
-        _catalogError = ErrorText.reason(error);
+        _catalogError = error is ModuleMarketplaceUnavailableException
+            ? null
+            : ErrorText.reason(error);
       }
     } finally {
       _catalogLoading = false;
@@ -201,6 +204,10 @@ class ModulesController extends ChangeNotifier {
   List<InstalledModule> get modules => _modules;
   bool get busy => _busy;
   String? get errorMessage => _error;
+
+  /// Why the last operation failed, or null when no cause is known; the line
+  /// under a title that already says a module operation failed.
+  String? get errorReason => _errorReason;
 
   Future<void> initialize() async {
     if (_disposed || _busy) return;
@@ -567,6 +574,7 @@ class ModulesController extends ChangeNotifier {
     if (_busy || _disposed) return null;
     _busy = true;
     _error = null;
+    _errorReason = null;
     _monitoringNotice = null;
     if (_operation?.failed ?? false) _operation = null;
     notifyListeners();
@@ -586,9 +594,8 @@ class ModulesController extends ChangeNotifier {
       }
     } catch (error) {
       if (!_disposed) {
-        _error =
-            ErrorText.reason(error) ??
-            AppStrings.current.modulesOperationIncomplete;
+        _errorReason = ErrorText.reason(error);
+        _error = _errorReason ?? AppStrings.current.modulesOperationIncomplete;
       }
       if (refresh && !_disposed) {
         // A failed cleanup can still persist a removal state. Read that state

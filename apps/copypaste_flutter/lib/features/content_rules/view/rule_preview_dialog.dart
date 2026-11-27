@@ -294,9 +294,7 @@ class _RulePreviewDialogState extends State<RulePreviewDialog> {
   Widget _item(BuildContext context, RulePreviewItem item) {
     final l10n = context.l10n;
     final text = item.masked
-        ? (item.sourceAppName == null
-              ? l10n.rulesSecretItem
-              : l10n.rulesSecretItemFrom(item.sourceAppName!))
+        ? l10n.rulesSecretItem
         : item.preview.trim().split('\n').first;
     final details = [
       ?item.sourceAppName,

@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "Мінімізувати JSON",
-      "description": "Видаляє з JSON усі незначущі пробіли."
+      "description": "",
+      "keywords": [
+        "видалити пробіли"
+      ]
     },
     "structure.json_validate": {
       "name": "Перевірити JSON",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON у YAML",
-      "description": "Перетворює JSON на YAML у блоковому стилі."
+      "description": "",
+      "keywords": [
+        "перетворити"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV у JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "Мінімізувати XML",
-      "description": "Видаляє пробіли між елементами XML."
+      "description": "",
+      "keywords": [
+        "видалити пробіли"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Кодувати в Base64",
-      "description": "Кодує байти UTF-8 тексту в Base64.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Абетка",
@@ -163,7 +172,11 @@
     },
     "encode.hex_encode": {
       "name": "Кодувати в hex",
-      "description": "Записує байти UTF-8 тексту шістнадцятковими цифрами.",
+      "description": "",
+      "keywords": [
+        "шістнадцяткові цифри",
+        "байти"
+      ],
       "params": {
         "separator": {
           "label": "Роздільник",
@@ -231,7 +244,7 @@
   "case": {
     "case.upper": {
       "name": "ВЕЛИКІ ЛІТЕРИ",
-      "description": "Перетворює всі літери на великі за повними правилами Unicode.",
+      "description": "",
       "params": {
         "locale": {
           "label": "Мовні правила",
@@ -244,7 +257,7 @@
     },
     "case.lower": {
       "name": "малі літери",
-      "description": "Перетворює всі літери на малі за повними правилами Unicode.",
+      "description": "",
       "params": {
         "locale": {
           "label": "Мовні правила",
@@ -273,7 +286,10 @@
     },
     "case.sentence": {
       "name": "Регістр речення",
-      "description": "Пише перше слово кожного речення з великої літери, решту — малими.",
+      "description": "",
+      "keywords": [
+        "з великої літери"
+      ],
       "params": {
         "keep_acronyms": {
           "label": "Зберігати абревіатури"
@@ -282,7 +298,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Об’єднує слова в ідентифікатор, що починається з малої літери.",
+      "description": "",
+      "keywords": [
+        "ідентифікатор"
+      ],
       "params": {
         "per_line": {
           "label": "Кожен рядок окремо"
@@ -294,7 +313,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Об’єднує слова в ідентифікатор, де кожне слово з великої літери.",
+      "description": "",
+      "keywords": [
+        "ідентифікатор"
+      ],
       "params": {
         "per_line": {
           "label": "Кожен рядок окремо"
@@ -306,7 +328,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Об’єднує слова малими літерами через підкреслення.",
+      "description": "",
+      "keywords": [
+        "підкреслення"
+      ],
       "params": {
         "per_line": {
           "label": "Кожен рядок окремо"
@@ -315,7 +340,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Об’єднує слова малими літерами через дефіс.",
+      "description": "",
+      "keywords": [
+        "дефіс"
+      ],
       "params": {
         "per_line": {
           "label": "Кожен рядок окремо"
@@ -324,7 +352,11 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Об’єднує слова великими літерами через підкреслення.",
+      "description": "",
+      "keywords": [
+        "підкреслення",
+        "великі літери"
+      ],
       "params": {
         "per_line": {
           "label": "Кожен рядок окремо"
@@ -333,13 +365,16 @@
     },
     "case.swap": {
       "name": "Інвертувати регістр",
-      "description": "Робить великі літери малими, а малі — великими."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "Геш MD5",
-      "description": "Дайджест MD5, не для захисту. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "description": "Не для захисту. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "keywords": [
+        "дайджест"
+      ],
       "params": {
         "output": {
           "label": "Результат",
@@ -353,7 +388,10 @@
     },
     "hash.sha1": {
       "name": "Геш SHA-1",
-      "description": "Дайджест SHA-1, не для захисту. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "description": "Не для захисту. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "keywords": [
+        "дайджест"
+      ],
       "params": {
         "output": {
           "label": "Результат",
@@ -367,7 +405,10 @@
     },
     "hash.sha256": {
       "name": "Геш SHA-256",
-      "description": "Дайджест SHA-256. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "description": "Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "keywords": [
+        "дайджест"
+      ],
       "params": {
         "output": {
           "label": "Результат",
@@ -381,7 +422,10 @@
     },
     "hash.sha512": {
       "name": "Геш SHA-512",
-      "description": "Дайджест SHA-512. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "description": "Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "keywords": [
+        "дайджест"
+      ],
       "params": {
         "output": {
           "label": "Результат",
@@ -395,7 +439,7 @@
     },
     "hash.crc32": {
       "name": "Контрольна сума CRC-32",
-      "description": "CRC-32 з поліномом IEEE, який використовують ZIP і PNG. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
+      "description": "З поліномом IEEE, який використовують ZIP і PNG. Гешує текст як UTF-8 точно так, як показано, без доданого переносу рядка.",
       "params": {
         "output": {
           "label": "Результат",
@@ -437,7 +481,10 @@
     },
     "lines.remove_empty": {
       "name": "Вилучити порожні рядки",
-      "description": "Видаляє рядки, порожні або лише з пробілами.",
+      "description": "",
+      "keywords": [
+        "видалити"
+      ],
       "params": {
         "whitespace_only": {
           "label": "Рядки лише з пробілами вважаються порожніми"
@@ -481,11 +528,14 @@
     },
     "lines.reverse": {
       "name": "Обернути порядок рядків",
-      "description": "Розставляє рядки у зворотному порядку."
+      "description": ""
     },
     "lines.join": {
       "name": "Об’єднати рядки",
-      "description": "Об’єднує всі рядки в один через роздільник.",
+      "description": "",
+      "keywords": [
+        "роздільник"
+      ],
       "params": {
         "separator": {
           "label": "Роздільник",
@@ -608,7 +658,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Декодувати",
+      "name": "Декодувати JWT",
       "description": "Показує заголовок і корисне навантаження токена як JSON. Підпис не перевіряється.",
       "keywords": [
         "токен"

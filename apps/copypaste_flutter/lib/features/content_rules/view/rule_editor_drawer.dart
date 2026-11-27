@@ -404,7 +404,7 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
     key: key,
     value: value,
     enabled: !_editor.readOnly,
-    placeholder: Text(context.l10n.rulesChooseValues),
+    placeholder: Text(context.l10n.commonChoose),
     onChanged: (next) => onChanged((next ?? const <String>[]).toList()),
     itemBuilder: (context, id) => MultiSelectChip(
       value: id,
@@ -516,7 +516,8 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
         if (definition.actions.isEmpty)
           Text(l10n.rulesNoActions).small().muted(),
         for (final problem in _editor.ruleProblems)
-          if (problem.path.startsWith('actions'))
+          if (problem.path.startsWith('actions') &&
+              problem.code != 'no_actions')
             _problemText(
               l10n.ruleProblem(problem),
               const ValueKey('rule-editor-actions-problem'),
@@ -745,8 +746,6 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _heading(l10n.rulesTestTitle),
-        Text(l10n.rulesTestDescription).small().muted(),
-        const Gap(AppSpacing.sm),
         TextArea(
           key: const ValueKey('rule-editor-sample'),
           focusNode: _sampleFocus,

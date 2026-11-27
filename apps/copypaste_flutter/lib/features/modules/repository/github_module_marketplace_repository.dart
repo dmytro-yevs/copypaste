@@ -158,6 +158,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       );
     } on ArtifactDownloadException catch (error) {
       final strings = AppStrings.current;
+      if (error.failure == ArtifactDownloadFailure.unavailable &&
+          error.statusCode != HttpStatus.notFound) {
+        throw ModuleMarketplaceUnavailableException(
+          strings.modulesMarketplaceUnavailableRetry,
+        );
+      }
       throw ModulesException(switch (error.failure) {
         ArtifactDownloadFailure.untrustedUrl =>
           strings.modulesPackageUrlUntrusted,
@@ -169,9 +175,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         ArtifactDownloadFailure.integrity =>
           strings.modulesPackageIntegrityFailed,
         ArtifactDownloadFailure.unavailable =>
-          error.statusCode == HttpStatus.notFound
-              ? strings.modulesDownloadUnavailable
-              : strings.modulesMarketplaceUnavailableRetry,
+          strings.modulesDownloadUnavailable,
       });
     }
   }

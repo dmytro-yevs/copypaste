@@ -7,6 +7,7 @@ import 'package:copypaste_flutter/platform/android/android_shizuku_state.dart';
 import 'package:copypaste_flutter/features/modules/controller/sms_access_setup_controller.dart';
 import 'package:copypaste_flutter/features/modules/view/sms_access_setup_drawer.dart';
 import 'package:copypaste_flutter/shared/android_access_setup.dart';
+import 'package:copypaste_flutter/shared/setup_setting_row.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -231,11 +232,9 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Shizuku'));
         await tester.pumpAndSettle();
-        await tester.ensureVisible(
-          find.widgetWithText(Button, 'Allow CopyPaste'),
-        );
+        await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
+        await tester.tap(find.widgetWithText(Button, 'Allow'));
         await tester.pumpAndSettle();
         expect(
           find.text(
@@ -368,10 +367,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
-      await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
+      final allowNotifications = find.descendant(
+        of: find.byType(SetupSettingRow),
+        matching: find.widgetWithText(Button, 'Allow'),
+      );
+      await tester.ensureVisible(allowNotifications);
+      await tester.ensureVisible(allowNotifications);
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(Button, 'Allow'));
+      await tester.tap(allowNotifications);
       await tester.pumpAndSettle();
       expect(setup.state?.notificationGranted, isTrue);
       await tester.ensureVisible(find.text('ADB'));
@@ -398,9 +401,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.widgetWithText(Button, 'Allow CopyPaste'));
+    await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
+    await tester.tap(find.widgetWithText(Button, 'Allow'));
     await tester.pumpAndSettle();
     expect(find.text('SMS access was not granted.'), findsOneWidget);
     expect(find.text('One-time access applied'), findsNothing);

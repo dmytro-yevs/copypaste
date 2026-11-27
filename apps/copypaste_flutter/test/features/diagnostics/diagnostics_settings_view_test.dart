@@ -46,6 +46,10 @@ void main() {
 
     expect(find.text('event 0'), findsOneWidget);
     expect(find.text('Error'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('event 0')).dx,
+      tester.getTopLeft(find.text('event 1')).dx,
+    );
     expect(find.text('event 55'), findsNothing);
 
     final pagination = find.byKey(const ValueKey('diagnostics-pagination'));

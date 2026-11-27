@@ -120,7 +120,6 @@ class LinuxSetupStep extends StatelessWidget {
               SetupSettingRow(
                 icon: LucideIcons.power,
                 title: l10n.onboardingStartAtLogin,
-                description: l10n.onboardingLinuxStartAtLoginDescription,
                 action: Checkbox(
                   state: status.startAtLogin
                       ? CheckboxState.checked

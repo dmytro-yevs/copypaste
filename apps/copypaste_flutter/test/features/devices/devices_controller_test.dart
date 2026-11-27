@@ -691,18 +691,15 @@ void main() {
     await freshnessController.start();
     final peer = freshnessController.snapshot!.peers.single;
 
-    expect(freshnessController.peerStateLabel(peer), 'Available');
+    expect(freshnessController.peerStateLabel(peer), 'Online');
     expect(freshnessController.peerLatencyLabel(peer), '24 ms');
-    expect(
-      freshnessController.peerStateLabel(_mdnsPeer(deadline)),
-      'Visible now',
-    );
+    expect(freshnessController.peerStateLabel(_mdnsPeer(deadline)), 'Visible');
     expect(freshnessController.peerLatencyLabel(_mdnsPeer(deadline)), '— ms');
     expect(scheduler.timers, hasLength(1));
     expect(scheduler.timers.single.delay, const Duration(seconds: 5));
 
     clock.now = deadline.add(const Duration(milliseconds: 1));
-    expect(freshnessController.peerStateLabel(peer), 'Status unknown');
+    expect(freshnessController.peerStateLabel(peer), 'Unknown');
     expect(freshnessController.peerLatencyLabel(peer), '— ms');
 
     scheduler.timers.single.fire();
@@ -765,7 +762,7 @@ void main() {
         statusController.peerStateLabel(
           statusController.snapshot!.peers.single,
         ),
-        'Available',
+        'Online',
       );
     },
   );

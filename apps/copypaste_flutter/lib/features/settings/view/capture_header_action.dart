@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/shell/header_fit.dart';
@@ -34,16 +35,19 @@ class CaptureHeaderAction extends StatelessWidget {
             capture == null || !controller.canStart(SettingsOperation.capture)
             ? null
             : controller.toggleCapture;
+        // The state word follows the action here, so the action leaves it out.
+        final actionLabel = stopped
+            ? context.l10n.platformCaptureActionResume
+            : state.actionLabel;
         return AppTooltip(
-          tooltip: (context) => TooltipContainer(
-            child: Text('${state.actionLabel} · ${state.label}'),
-          ),
+          tooltip: (context) =>
+              TooltipContainer(child: Text('$actionLabel · ${state.label}')),
           child: Button.ghost(
             key: const ValueKey<String>('capture-header-toggle'),
             style: AppTheme.headerStatusCellStyle,
             onPressed: onPressed,
             child: Semantics(
-              label: state.actionLabel,
+              label: actionLabel,
               value: state.label,
               child: ExcludeSemantics(
                 child: SizedBox(

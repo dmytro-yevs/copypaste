@@ -131,9 +131,7 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (controller.loading)
-                        StateView.loading(
-                          message: context.l10n.modulesSmsChecking,
-                        )
+                        const StateView.loading()
                       else if (state != null) ...[
                         Text(
                           state.granted

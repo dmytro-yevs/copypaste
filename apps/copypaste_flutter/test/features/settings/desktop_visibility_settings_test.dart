@@ -129,7 +129,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.byKey(const ValueKey('settings-show-in-tray')));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('Visibility could not be changed'), findsOneWidget);
+      expect(
+        find.text('App visibility could not be changed. Please try again.'),
+        findsOneWidget,
+      );
       expect(
         tester
             .widget<Switch>(find.byKey(const ValueKey('settings-show-in-tray')))

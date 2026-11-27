@@ -69,11 +69,11 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('Середовище історії недоступне'), findsOneWidget);
+    expect(find.text('Історія недоступна'), findsOneWidget);
 
     await language.select(AppLanguage.english);
     await tester.pump();
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
     expect(AppStrings.current.appDestinationHistory, 'History');
   });
 

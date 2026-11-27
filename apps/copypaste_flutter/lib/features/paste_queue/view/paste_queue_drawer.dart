@@ -334,7 +334,7 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
       );
     } else if (_controller.status == PasteQueueLoadStatus.loading) {
       list = _controller.loadingVisible
-          ? StateView.loading(message: l10n.pasteQueueLoading)
+          ? const StateView.loading()
           : const SizedBox.shrink();
     } else if (snapshot.entries.isEmpty) {
       list = snapshot.collecting
@@ -342,7 +342,6 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
               key: const ValueKey('paste-queue-collecting-empty'),
               icon: LucideIcons.circleDot,
               title: l10n.pasteQueueCollectingEmptyTitle,
-              message: l10n.pasteQueueCollectingEmptyMessage,
               actionLabel: l10n.pasteQueueStopCollecting,
               onAction: () => unawaited(_controller.setCollecting(false)),
             )
@@ -417,7 +416,6 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
         Alert(
           key: const ValueKey('paste-queue-shortcut-prompt'),
           leading: const AppIconFrame(child: Icon(LucideIcons.keyboard)),
-          title: Text(l10n.pasteQueueShortcutPromptTitle),
           content: _withActions(l10n.pasteQueueShortcutPromptMessage, [
             Button.ghost(
               onPressed: () => unawaited(shortcuts.dismissShortcutPrompt()),
@@ -752,6 +750,9 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
     final ready =
         _controller.enabled && _controller.status == PasteQueueLoadStatus.ready;
     final copyOnly = _controller.pasteNextStyle == PasteNextStyle.clipboardOnly;
+    final pasteAllLabel = copyOnly
+        ? l10n.pasteQueueCopyAll
+        : l10n.pasteQueuePasteAll;
     final block = snapshot.pasteAllBlock;
     final pending = _controller.pendingCount > 0;
     final finished = snapshot.hasFinishedEntries;
@@ -788,7 +789,7 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
                   tooltip: (context) => TooltipContainer(
                     child: Text(
                       block == null
-                          ? l10n.pasteQueuePasteAll
+                          ? pasteAllLabel
                           : l10n.pasteQueueBlock(block),
                     ),
                   ),
@@ -805,12 +806,7 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
                                 : _controller.pasteAll(),
                           )
                         : null,
-                    child: Text(
-                      copyOnly
-                          ? l10n.pasteQueueCopyAll
-                          : l10n.pasteQueuePasteAll,
-                      maxLines: 1,
-                    ),
+                    child: Text(pasteAllLabel, maxLines: 1),
                   ),
                 ),
               ),

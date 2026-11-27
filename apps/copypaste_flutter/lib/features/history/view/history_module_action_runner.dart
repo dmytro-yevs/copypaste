@@ -73,9 +73,7 @@ Future<void> runHistoryModuleAction(
     AppToast.show(
       context,
       title: context.l10n.historyActionFailedTitle,
-      message:
-          ErrorText.reason(error) ??
-          AppStrings.current.modulesOperationIncomplete,
+      message: ErrorText.reason(error),
       tone: AppToastTone.error,
     );
     return;
