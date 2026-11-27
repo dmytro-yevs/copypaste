@@ -252,9 +252,19 @@ class FlutterDesktopWindowHost
   /// Renders the glyphs [menu] needs, then shows it in [root]. Returns
   /// whether any native row changed.
   Future<bool> _showTrayMenu(_NativeMenu root, List<TrayMenuEntry> menu) async {
-    for (final glyph in _glyphsOf(menu)) {
-      if (!_trayGlyphs.containsKey(glyph)) {
-        _trayGlyphs[glyph] = await createTrayMenuIcon(glyph);
+    final missing = {
+      for (final glyph in _glyphsOf(menu))
+        if (!_trayGlyphs.containsKey(glyph)) glyph,
+    };
+    if (missing.isNotEmpty) {
+      final rendered = await createTrayMenuIcons(missing);
+      for (final MapEntry(key: glyph, value: image) in rendered.entries) {
+        // A menu update that overlapped this one may have rendered it first.
+        if (_trayGlyphs.containsKey(glyph)) {
+          image.dispose();
+        } else {
+          _trayGlyphs[glyph] = image;
+        }
       }
     }
     if (!identical(root, _trayMenu)) return false;

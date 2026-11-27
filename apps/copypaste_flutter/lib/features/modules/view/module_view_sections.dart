@@ -6,6 +6,7 @@ import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../settings/view/settings_section.dart';
 import '../models/module_view.dart';
@@ -419,7 +420,7 @@ class _ModuleViewSectionsState extends State<ModuleViewSections> {
     IconData icon,
     VoidCallback? onPressed, {
     Key? key,
-  }) => Tooltip(
+  }) => AppTooltip(
     tooltip: (context) => TooltipContainer(child: Text(label)),
     child: Button.ghost(
       key: key,
@@ -464,7 +465,7 @@ class _TextBlockState extends State<_TextBlock> {
         CodeSnippet(
           code: SelectableText(widget.block.text),
           actions: [
-            Tooltip(
+            AppTooltip(
               tooltip: (context) =>
                   TooltipContainer(child: Text(context.l10n.commonCopy)),
               child: Button.ghost(

@@ -8,6 +8,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
@@ -164,7 +165,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                     AppIconFrame(child: Icon(LucideIcons.puzzle)),
                   ],
                   trailing: [
-                    Tooltip(
+                    AppTooltip(
                       tooltip: (context) => TooltipContainer(
                         child: Text(context.l10n.modulesCloseSettings),
                       ),

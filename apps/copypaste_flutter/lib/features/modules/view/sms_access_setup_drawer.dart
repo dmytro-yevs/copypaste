@@ -7,6 +7,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/android_access_setup.dart';
 import '../../../shared/setup_setting_row.dart';
@@ -81,7 +82,7 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                       ),
                     ],
                     trailing: [
-                      Tooltip(
+                      AppTooltip(
                         tooltip: (context) => TooltipContainer(
                           child: Text(context.l10n.modulesCloseSmsAccess),
                         ),

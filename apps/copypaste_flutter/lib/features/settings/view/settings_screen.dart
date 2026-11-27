@@ -23,6 +23,7 @@ import '../../../app/theme/app_appearance.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../platform/desktop/global_shortcut.dart';
 import '../../../platform/desktop/desktop_visibility_controller.dart';
 import '../../../platform/permissions/linux_integration.dart';
@@ -393,11 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   leading: AppTheme.attentionAlertIcon(context),
                   title: Text(context.l10n.settingsAttentionTitle),
                   content: Text(message),
-                  trailing: Tooltip(
-                    showDuration: AppMotion.resolve(
-                      context,
-                      AppMotion.standard,
-                    ),
+                  trailing: AppTooltip(
                     tooltip: (context) => TooltipContainer(
                       child: Text(context.l10n.commonDismiss),
                     ),
@@ -2199,11 +2196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (context, app, label) => Row(
                         children: [
                           Expanded(child: label.small()),
-                          Tooltip(
-                            showDuration: AppMotion.resolve(
-                              context,
-                              AppMotion.standard,
-                            ),
+                          AppTooltip(
                             tooltip: (context) => TooltipContainer(
                               child: Text(
                                 context.l10n.settingsExcludedAppsRemove(

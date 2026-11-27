@@ -8,6 +8,7 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../controller/transform_controller.dart';
@@ -143,7 +144,7 @@ class _PipelineEditorDrawerState extends State<PipelineEditorDrawer> {
                     AppIconFrame(child: Icon(LucideIcons.workflow)),
                   ],
                   trailing: [
-                    Tooltip(
+                    AppTooltip(
                       tooltip: (context) =>
                           TooltipContainer(child: Text(l10n.commonClose)),
                       child: Button.ghost(
@@ -345,7 +346,7 @@ class _PipelineEditorDrawerState extends State<PipelineEditorDrawer> {
   }
 
   Widget _iconButton(String label, IconData icon, VoidCallback? onPressed) =>
-      Tooltip(
+      AppTooltip(
         tooltip: (context) => TooltipContainer(child: Text(label)),
         child: Button.ghost(
           style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),

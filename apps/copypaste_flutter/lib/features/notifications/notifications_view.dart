@@ -7,6 +7,7 @@ import '../../app/shell/header_fit.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import '../../shared/state_view.dart';
 import 'notifications_controller.dart';
 
@@ -35,7 +36,7 @@ class _NotificationsHeaderActionState extends State<NotificationsHeaderAction> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.controller,
-    builder: (context, _) => Tooltip(
+    builder: (context, _) => AppTooltip(
       tooltip: (_) => TooltipContainer(
         child: Text(
           context.l10n.notificationsTooltip(widget.controller.unread),

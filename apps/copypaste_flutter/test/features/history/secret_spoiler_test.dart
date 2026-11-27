@@ -10,6 +10,50 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets('dust draws frames only while it is on screen', (tester) async {
+    final controller = HistorySpoilerController(null);
+    addTearDown(controller.dispose);
+    final scroll = ScrollController();
+    addTearDown(scroll.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: (context, child) => AppTheme.builder(context, child!),
+        home: Scaffold(
+          child: ListView(
+            controller: scroll,
+            children: [
+              SecretSpoiler(
+                clipId: 'clip',
+                controller: controller,
+                child: const SizedBox(width: 200, height: 40),
+              ),
+              const SizedBox(height: 2000),
+            ],
+          ),
+        ),
+      ),
+    );
+    Future<void> frames() async {
+      for (var frame = 0; frame < 5; frame++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+    }
+
+    await frames();
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+
+    // Scrolled out of view, yet still built inside the list's cache extent.
+    scroll.jumpTo(100);
+    await frames();
+    expect(find.byType(SecretSpoiler, skipOffstage: false), findsOneWidget);
+    expect(tester.binding.transientCallbackCount, 0);
+
+    scroll.jumpTo(0);
+    await frames();
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+  });
+
   for (final scale in [1.0, 2.0]) {
     for (final imageContent in [false, true]) {
       testWidgets(

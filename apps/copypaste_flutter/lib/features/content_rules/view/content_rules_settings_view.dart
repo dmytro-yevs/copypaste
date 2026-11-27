@@ -11,6 +11,7 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/failure_toasts.dart';
 import '../../../shared/state_view.dart';
@@ -524,7 +525,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
     IconData icon,
     VoidCallback? onPressed, {
     Key? key,
-  }) => Tooltip(
+  }) => AppTooltip(
     tooltip: (context) => TooltipContainer(child: Text(label)),
     child: Button.ghost(
       key: key,

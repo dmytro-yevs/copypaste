@@ -7,6 +7,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../controller/history_controller.dart';
 import 'history_clip_menu.dart';
 import 'history_delete_dialog.dart';
@@ -31,7 +32,7 @@ class HistoryBulkToolbar extends StatelessWidget {
       runSpacing: AppSpacing.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Tooltip(
+        AppTooltip(
           tooltip: (context) =>
               TooltipContainer(child: Text(context.l10n.historyBulkTagTooltip)),
           child: Button.secondary(
@@ -51,7 +52,7 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         if (canQueue)
-          Tooltip(
+          AppTooltip(
             tooltip: (context) => TooltipContainer(
               child: Text(context.l10n.historyActionAddToQueue),
             ),
@@ -79,7 +80,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             ),
           ),
         _BulkShareButton(controller: controller, enabled: canApply),
-        Tooltip(
+        AppTooltip(
           tooltip: (context) =>
               TooltipContainer(child: Text(context.l10n.historyBulkPin)),
           child: Semantics(
@@ -98,7 +99,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             ),
           ),
         ),
-        Tooltip(
+        AppTooltip(
           tooltip: (context) =>
               TooltipContainer(child: Text(context.l10n.historyBulkUnpin)),
           child: Semantics(
@@ -117,7 +118,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             ),
           ),
         ),
-        Tooltip(
+        AppTooltip(
           tooltip: (context) =>
               TooltipContainer(child: Text(context.l10n.historyBulkDelete)),
           child: Semantics(
@@ -151,7 +152,7 @@ class HistoryBulkToolbar extends StatelessWidget {
     );
     final count = Semantics(liveRegion: true, child: Text(label));
     // Leaving selection sits with the count it clears, apart from the actions.
-    final exit = Tooltip(
+    final exit = AppTooltip(
       tooltip: (context) =>
           TooltipContainer(child: Text(context.l10n.historyBulkExit)),
       child: Semantics(
@@ -230,7 +231,7 @@ class _BulkShareButton extends StatelessWidget {
         final label = progress == null
             ? context.l10n.historyBulkShare
             : context.l10n.historyDownloadingPercent((progress * 100).floor());
-        return Tooltip(
+        return AppTooltip(
           tooltip: (context) => TooltipContainer(child: Text(label)),
           child: Semantics(
             label: label,

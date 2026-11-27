@@ -22,6 +22,7 @@ import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_toast.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import '../../shared/state_view.dart';
 import '../../platform/desktop/desktop_shortcuts.dart';
 import '../history/controller/history_window_controller.dart';
@@ -666,7 +667,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
     final theme = Theme.of(context);
     final busy = controller.activating;
     Widget hostAction(String label, IconData icon, VoidCallback onPressed) =>
-        Tooltip(
+        AppTooltip(
           tooltip: (context) => TooltipContainer(child: Text(label)),
           child: Button.ghost(
             style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
@@ -1471,7 +1472,7 @@ class _MaskedClip extends StatelessWidget {
           ),
         ),
         if (clip.secret && controller.secretsLocked && !controller.maskedMode)
-          Tooltip(
+          AppTooltip(
             tooltip: (context) =>
                 TooltipContainer(child: Text(l10n.quickPasteUnlockSecrets)),
             child: Button.ghost(

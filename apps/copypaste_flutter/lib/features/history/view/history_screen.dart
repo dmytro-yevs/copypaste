@@ -16,6 +16,7 @@ import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/app/theme/app_toast.dart';
+import 'package:copypaste_flutter/app/theme/app_tooltip.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
@@ -1330,7 +1331,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   Widget _newClipButton() => Semantics(
     label: context.l10n.historyNewClip,
     button: true,
-    child: Tooltip(
+    child: AppTooltip(
       tooltip: (_) =>
           TooltipContainer(child: Text(context.l10n.historyNewClip)),
       child: Button.secondary(
@@ -1347,7 +1348,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     ),
   );
 
-  Widget _resetButton() => Tooltip(
+  Widget _resetButton() => AppTooltip(
     tooltip: (_) =>
         TooltipContainer(child: Text(context.l10n.historyResetFilters)),
     child: Semantics(
@@ -1372,7 +1373,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   Widget _importButton() => Semantics(
     label: context.l10n.historyImportFiles,
     button: true,
-    child: Tooltip(
+    child: AppTooltip(
       tooltip: (_) =>
           TooltipContainer(child: Text(context.l10n.historyImportFiles)),
       child: Button.secondary(
@@ -1399,7 +1400,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   Widget _selectionButton() => Semantics(
     label: context.l10n.historySelectClips,
     button: true,
-    child: Tooltip(
+    child: AppTooltip(
       tooltip: (_) =>
           TooltipContainer(child: Text(context.l10n.historySelectClips)),
       child: Button.secondary(
@@ -1933,7 +1934,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
     }
   }
 
-  Widget _copyButton({required bool touch}) => Tooltip(
+  Widget _copyButton({required bool touch}) => AppTooltip(
     tooltip: (context) =>
         TooltipContainer(child: Text(context.l10n.commonCopy)),
     child: Semantics(
@@ -1950,7 +1951,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
     ),
   );
 
-  Widget _moreButton() => Tooltip(
+  Widget _moreButton() => AppTooltip(
     tooltip: (context) =>
         TooltipContainer(child: Text(context.l10n.historyMoreActions)),
     child: Semantics(
@@ -2095,7 +2096,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                         if (showActions || showTouchCopy)
                           _copyButton(touch: touch),
                         if (showActions) ...[
-                          Tooltip(
+                          AppTooltip(
                             tooltip: (context) => TooltipContainer(
                               child: Text(
                                 clip.pinned
@@ -2134,7 +2135,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                         ],
                         if (showActions) _moreButton(),
                         if (showHandle)
-                          Tooltip(
+                          AppTooltip(
                             key: ValueKey<String>(
                               'history-reorder-action-${clip.id}',
                             ),

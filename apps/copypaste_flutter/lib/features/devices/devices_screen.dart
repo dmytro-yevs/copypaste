@@ -6,10 +6,10 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import '../../platform/camera/pairing_camera_scanner.dart';
 import '../../platform/camera/qr_scanner.dart';
 import '../../shared/adaptive_breakpoints.dart';
@@ -888,8 +888,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                     ],
                   ),
                 ),
-                Tooltip(
-                  showDuration: AppMotion.resolve(context, AppMotion.standard),
+                AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.devicesCloseDetails),
                   ),

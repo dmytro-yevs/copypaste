@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_tooltip.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -145,12 +146,12 @@ void main() {
           ? '⌘'
           : 'Ctrl+';
       for (final (index, destination) in appNavigationDestinations.indexed) {
-        final tooltip = tester.widget<Tooltip>(
+        final tooltip = tester.widget<AppTooltip>(
           find.ancestor(
             of: find.byKey(
               ValueKey('header-destination-${destination.destination.name}'),
             ),
-            matching: find.byType(Tooltip),
+            matching: find.byType(AppTooltip),
           ),
         );
         final content =

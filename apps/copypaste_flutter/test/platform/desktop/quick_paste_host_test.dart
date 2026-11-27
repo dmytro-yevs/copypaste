@@ -49,6 +49,21 @@ void main() {
     expect(finds, 1);
   });
 
+  test('a stopped presentation engine reaches its handler', () async {
+    var stops = 0;
+    host.setEngineStoppedHandler(() => stops += 1);
+    final completion = Completer<void>();
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('engineStopped'),
+      ),
+      (_) => completion.complete(),
+    );
+    await completion.future;
+    expect(stops, 1);
+  });
+
   test('foreground paste port follows the native channel contract', () async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(channel, (call) async {

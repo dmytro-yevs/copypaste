@@ -7,6 +7,7 @@ import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
@@ -136,7 +137,7 @@ class _DiagnosticsSettingsViewState extends State<DiagnosticsSettingsView> {
                 },
                 onChanged: _controller.setSource,
               ),
-            Tooltip(
+            AppTooltip(
               tooltip: (context) =>
                   TooltipContainer(child: Text(l10n.diagnosticsRefresh)),
               child: Button.secondary(

@@ -8,9 +8,9 @@ import '../../l10n/l10n.dart';
 import '../../platform/desktop/desktop_shortcuts.dart';
 import '../navigation/app_destination.dart';
 import '../theme/app_brand_logo.dart';
-import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../theme/app_tooltip.dart';
 import 'header_fit.dart';
 import 'macos_window_header.dart';
 
@@ -251,8 +251,7 @@ class _HeaderNavigationItem extends StatelessWidget {
         child: Center(
           widthFactor: 1,
           child: usesDesktopShortcuts
-              ? Tooltip(
-                  showDuration: AppMotion.resolve(context, AppMotion.standard),
+              ? AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(
                       '${item.label} · '

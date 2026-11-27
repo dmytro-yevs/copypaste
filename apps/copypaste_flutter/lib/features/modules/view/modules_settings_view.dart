@@ -12,6 +12,7 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../settings/view/settings_section.dart';
@@ -242,7 +243,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     required IconData icon,
     required ButtonStyle style,
     required VoidCallback? onPressed,
-  }) => Tooltip(
+  }) => AppTooltip(
     tooltip: (_) => TooltipContainer(child: Text(label)),
     child: Semantics(
       label: label,

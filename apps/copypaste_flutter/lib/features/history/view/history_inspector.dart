@@ -12,11 +12,11 @@ import 'history_selectable_text.dart';
 
 import 'dart:math' as math;
 
-import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/app/theme/app_tooltip.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/controller/history_module_actions.dart';
@@ -159,11 +159,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                 ],
                 if (!inDrawer) ...[
                   const Gap(AppSpacing.sm),
-                  Tooltip(
-                    showDuration: AppMotion.resolve(
-                      context,
-                      AppMotion.standard,
-                    ),
+                  AppTooltip(
                     tooltip: (context) => TooltipContainer(
                       child: Text(context.l10n.historyCloseClipDetails),
                     ),
@@ -496,7 +492,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
       bool iconOnlyAlways = false,
     }) {
       final asIcon = iconOnly || iconOnlyAlways;
-      return Tooltip(
+      return AppTooltip(
         tooltip: (_) => TooltipContainer(child: Text(label)),
         child: Semantics(
           label: asIcon ? label : null,
@@ -595,7 +591,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
         );
       case _FooterSlot.ocr:
         final ocr = controller.ocr!;
-        return Tooltip(
+        return AppTooltip(
           tooltip: (_) =>
               TooltipContainer(child: Text(strings.historyRecognizeImageText)),
           child: Semantics(
@@ -639,7 +635,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     required bool iconOnly,
   }) => ButtonGroup(
     children: [
-      Tooltip(
+      AppTooltip(
         tooltip: (_) => TooltipContainer(child: Text(context.l10n.commonCopy)),
         child: Semantics(
           label: iconOnly ? context.l10n.commonCopy : null,
@@ -852,7 +848,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     HistoryClipAction action,
   ) {
     final label = action.label(context, clip);
-    return Tooltip(
+    return AppTooltip(
       tooltip: (_) => TooltipContainer(child: Text(label)),
       child: Semantics(
         label: label,
@@ -880,7 +876,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     HistoryModuleClipAction action,
   ) {
     final label = action.action.title;
-    return Tooltip(
+    return AppTooltip(
       tooltip: (_) => TooltipContainer(child: Text(label)),
       child: Semantics(
         label: label,
@@ -902,7 +898,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     );
   }
 
-  Widget _moreActions(BuildContext context, List<MenuItem> items) => Tooltip(
+  Widget _moreActions(BuildContext context, List<MenuItem> items) => AppTooltip(
     tooltip: (_) =>
         TooltipContainer(child: Text(context.l10n.historyMoreActions)),
     child: Semantics(
@@ -1027,7 +1023,7 @@ class _DownloadButtonState extends State<_DownloadButton> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Tooltip(
+      child: AppTooltip(
         tooltip: (_) => TooltipContainer(
           child: Text(
             cancelling

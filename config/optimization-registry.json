@@ -7579,6 +7579,234 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Cloud, sync and Supabase module tests passed; the request strings have not been run against a real PostgREST; no native measurement."
+    },
+    {
+      "id": "RUN-195",
+      "title": "Secret dust drifts only while it is painted",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "SecretSpoiler",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/secret_spoiler.dart",
+        "apps/copypaste_flutter/lib/app/theme/app_motion.dart"
+      ],
+      "invariant": "The dust of a concealed clip animates only while Flutter paints it. Two animation ticks without a paint stop its ticker, so a spoiler that is built but not on screen, such as a History row inside the list cache extent, schedules no frames; the next paint restarts the drift at the end of that frame. Dust that is on screen animates exactly as before.",
+      "tradeoffs": "Dust entering the viewport is still for its first frame. A concealed clip that is on screen still redraws the whole window at the display rate; that cost is the animation itself and is unchanged.",
+      "next_step": "Footprint, window-surface count and CPU on macOS 27 hardware, Windows and Android with a concealed clip on screen, just outside the viewport and far outside it. On Apple GPUs also the count of 2 MiB driver-pooled render-pass resources, which only real hardware shows.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process physical footprint, median over 10 s, with one concealed clip built just outside the History viewport",
+        "baseline": 125829120,
+        "candidate": 97517568,
+        "footprint_min_median_max_bytes_before": [
+          124780544,
+          125829120,
+          160432128
+        ],
+        "footprint_min_median_max_bytes_after": [
+          97517568,
+          97517568,
+          97517568
+        ],
+        "window_surfaces_min_max_before": [
+          3,
+          6
+        ],
+        "window_surfaces_min_max_after": [
+          2,
+          2
+        ],
+        "process_cpu_seconds_per_10_s_before": 1.6,
+        "process_cpu_seconds_per_10_s_after": 0.0,
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU at 2x scale, 60 Hz, release builds on Flutter 3.47.6: the published 0.1.3 against the same tree with this change. 32 clips including one detected credential; a fresh process, the list scrolled until the concealed row had just left the viewport, the pointer outside the window, then 10 s sampled with footprint. A login-keychain prompt covered part of the window in both runs. Values are the tool's whole mebibytes.",
+        "repetitions_per_version": 1,
+        "attribution": "Before the change the dust ticker of the unseen row requested a frame on every refresh although nothing was painted for it, so the window kept three to six window-sized surfaces alive and the process allocated continuously. With it the ticker stops after two unpainted ticks. With the row on screen both builds animate and no saving is expected or claimed.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Widget tests for the spoiler passed, including one that scrolls it out of view and back. In the macOS guest the dust animated on screen, stopped when scrolled out of view and resumed when scrolled back; Windows and Android not built."
+    },
+    {
+      "id": "RUN-196",
+      "title": "Tooltips are placed once and wait on a timer",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppTooltip",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/theme/app_tooltip.dart",
+        "apps/copypaste_flutter/lib/app/theme/app_motion.dart"
+      ],
+      "invariant": "Every application tooltip is an AppTooltip. It opens the stock tooltip surface with following off, so no per-frame anchor poll runs while it is shown, and it times its opening delay with a timer instead of an animation. A tooltip under a resting pointer schedules no frames. The triggers match the stock component: a resting pointer on desktop, a long press on touch, closed when the pointer leaves or on a tap elsewhere.",
+      "tradeoffs": "A tooltip does not move with an anchor that moves while it is open; the pointer leaving the anchor closes it first. The application owns the hover and long-press triggers, because the stock Tooltip exposes neither its follow option nor its hover component.",
+      "next_step": "Window-surface count, CPU and footprint with a tooltip open under a resting pointer on macOS, Windows and Android release builds, before and after; on Apple GPUs also the driver-pooled render-pass resources. The same per-frame poll remains in stock menus and selects anchored by context, which stay open only while the user chooses.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process CPU seconds over 10 s with a tooltip open under a resting pointer",
+        "baseline": 0.74,
+        "candidate": 0.0,
+        "window_surfaces_min_max_before": [
+          3,
+          4
+        ],
+        "window_surfaces_min_max_after": [
+          2,
+          2
+        ],
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU at 2x scale, 60 Hz, release builds on Flutter 3.47.6: the published 0.1.3 against the same tree with this change. A fresh process, the Devices destination opened with a click, the pointer left on its header button so the tooltip stayed open, then 10 s sampled. A login-keychain prompt covered part of the window in both runs.",
+        "repetitions_per_version": 1,
+        "attribution": "The stock tooltip polled its anchor through a ticker for as long as it was shown, so the window was redrawn at the display rate; the application tooltip schedules nothing once it is open. Footprint is not compared: the two processes had loaded different amounts of History content, so only CPU time and the surface count are like for like.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Widget tests passed, including one that opens a tooltip, finds no transient frame callback while it is open and closes it on pointer exit. A one-off comparison in the test harness showed the stock component keeping one transient callback while open, and matching open, pointer-exit, long-press and tap-elsewhere behaviour on the macOS and Android test platforms. In the macOS guest the published 0.1.3 held three window surfaces and used 0.34 s of CPU per 6 s with a tooltip open, against two surfaces and none without it; the candidate showed the same tooltip in the same place. Windows and Android were not built."
+    },
+    {
+      "id": "RUN-197",
+      "title": "Tray menu glyphs rendered in one picture",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "Desktop tray menu",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/desktop/tray_menu_icons.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart"
+      ],
+      "invariant": "The glyphs a tray menu needs are drawn into one picture, rasterized once and read back once; each native icon is cut from that buffer and encoded on the CPU. Rendering the menu costs two offscreen passes whatever the number of glyphs, instead of about two per glyph.",
+      "tradeoffs": "The icons are encoded as PNG in Dart with the image package instead of by the engine.",
+      "next_step": "Release-build footprint and pooled render-pass resources at process start and on a tray click on macOS 27 hardware, where about twenty pooled blocks still appear at start from other first-frame work; the same on Windows.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "driver-pooled 2 MiB render-pass resources held by the application process after a hot restart",
+        "baseline": 46,
+        "candidate": 0,
+        "graphics_bytes_at_peak_before": 105906176,
+        "graphics_bytes_at_peak_after": 11534336,
+        "scenario": "macOS 27.3 on Apple silicon at 2x scale, the development (debug) build on Flutter 3.47.6 with the Skia renderer, pool drained before each run, then one hot restart, which rebuilds the tray menu and its glyphs; the process sampled with footprint for 9 to 12 s. One run before and one after.",
+        "repetitions_per_version": 1,
+        "attribution": "A stack sample of the earlier build during the restart showed the raster thread in Picture.toImage snapshots, which only the tray glyph renderer requests. On Apple GPUs every render pass takes a pooled 2 MiB driver resource that is released seconds later; the paravirtual GPU of the test guest has no such pool. Debug builds are not representative of release footprint, so only the pooled-resource count and graphics memory are reported.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Dart analysis and the tray menu tests passed and the development build started and restarted without a rendering error. In the macOS guest the tray menu of a release build showed the same eleven icons in the same places as the build before the change."
+    },
+    {
+      "id": "RUN-198",
+      "title": "A stopped Quick Paste engine's heap pages are returned",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/quick_paste_host.dart",
+        "apps/copypaste_flutter/lib/main.dart",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/test/app/resource_policy_test.dart",
+        "apps/copypaste_flutter/test/platform/desktop/quick_paste_host_test.dart"
+      ],
+      "invariant": "When the host has shut down the engine of a retired Quick Paste presentation it tells the main engine. A suspended presentation then renders its settling frames again and a visible one renders one frame. The idle notification that follows a frame is what makes the Dart VM return the heap pages the stopped engine freed; without a frame it keeps them in a process-wide cache for as long as no engine renders.",
+      "tradeoffs": "Four placeholder frames in the hidden main window after each Quick Paste closing. A hidden presentation that is not suspended yet renders nothing and returns the pages when it suspends.",
+      "next_step": "The same sequence on macOS 27 hardware and on Windows, where the same second engine and notification exist but nothing was built or measured. Linux runs Quick Paste in a separate process and needs none of this.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "growth of the application process's untagged VM_ALLOCATE dirty memory (Dart heap) from before the first Quick Paste opening to 20 s after it closes, MiB",
+        "baseline": 15.6,
+        "candidate": 0.1,
+        "footprint_mib_hidden_before_opening_without_change": [
+          86.2,
+          83
+        ],
+        "footprint_mib_after_closing_without_change": [
+          113.8,
+          109.2,
+          114.0,
+          107
+        ],
+        "footprint_bytes_hidden_before_opening_with_change": 91458048,
+        "footprint_bytes_20_s_after_closing_with_change": 99600896,
+        "footprint_bytes_120_s_after_closing_with_change": 94833152,
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU at 2x scale, release builds on Flutter 3.47.6 from the same tree without and with RUN-198 and RUN-199. 32 clips in History. The main window was closed and left hidden 80 s so its presentation suspended, then Quick Paste was opened with its shortcut for 6 to 7 s and closed with Escape; footprint -f bytes was read before the opening and after the closing. Four closings over two processes per version. A login-keychain prompt was on screen in the runs with the change.",
+        "repetitions_per_version": 4,
+        "attribution": "Without the change the Dart heap category stayed 15.6 to 16.1 MiB above its level before the first opening for as long as it was watched, up to 150 s, and later openings reused that memory instead of adding to it; simulated memory pressure did not return it, showing the main window did. With the change it was back within 0.1 MiB 3 s after the closing. The footprint figures also include RUN-199. Two whole-megabyte figures without the change come from the default footprint output.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Dart analysis and the resource-policy and Quick Paste host tests passed, including one in which a suspended presentation renders its settling frames again after an engine stops. In the macOS guest Quick Paste opened and closed twice per run and showed the same list as before the change. The Windows change is one call on the existing host channel; it was not compiled or run."
+    },
+    {
+      "id": "RUN-199",
+      "title": "A retired Quick Paste panel releases its window buffers",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "macOS Quick Paste presentation",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/macos/Runner/MacosScreenshotProtection.swift",
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift"
+      ],
+      "invariant": "A screenshot-protection client is removed as soon as its window is deallocated, so the Flutter layer it holds does not outlive the window until the next registration. When a Quick Paste presentation is released the host posts one empty application event, which has AppKit empty the main thread's autorelease pool; a hidden application receives no events, so the retired panel would otherwise stay alive with its last frame until the user next interacts.",
+      "tradeoffs": "One empty application-defined event per Quick Paste closing. One panel-sized buffer still outlives the closing by 10 to 40 s in the guest and is then released without any interaction; what holds it meanwhile was not identified. Two layers of the retired view stay in the autorelease pool until the next event.",
+      "next_step": "The same sequence on macOS 27 hardware; the holder of the last panel buffer; the pairing window, which registers with screenshot protection the same way and was not exercised.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "application process owned-but-unmapped non-graphics bytes beyond the hidden main window's own buffer, 120 s after Quick Paste closes",
+        "baseline": 4898816,
+        "candidate": 0,
+        "baseline_other_closings_bytes": 9797632,
+        "candidate_first_seconds_after_closing_bytes": 4898816,
+        "scenario": "macOS 26.6.2 guest with 4 cores and a paravirtual GPU at 2x scale, release builds on Flutter 3.47.6 from the same tree without and with RUN-198 and RUN-199. 32 clips in History. The main window was closed and left hidden 80 s so its presentation suspended, then Quick Paste was opened with its shortcut for 6 to 7 s and closed with Escape; footprint -f bytes was read before the opening and after the closing. Four closings over two processes per version. A login-keychain prompt was on screen in the runs with the change.",
+        "repetitions_per_version": 4,
+        "attribution": "Without the change one or two panel-sized buffers of 4,898,816 bytes stayed until the next Quick Paste opening, however long that took. Tried on the running release process with a debugger: one empty application event deallocated the panel and freed one buffer, and pruning the stale protection client freed the other; committing the layer transaction, redisplaying or shrinking the window freed nothing. With the change the panel and the client were gone 3 s after the closing. See RUN-198 for the footprint of the whole process.",
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "The release build compiled without warnings in the changed files. In the macOS guest Quick Paste opened and closed twice per run, showed the same list as before the change, and the heap listed no Quick Paste panel and one protection client after each closing. No native unit test was added: the runner tests need a host application launch."
     }
   ]
 }

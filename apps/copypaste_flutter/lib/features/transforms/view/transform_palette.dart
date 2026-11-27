@@ -11,6 +11,7 @@ import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../app/theme/app_tooltip.dart';
 import '../../../l10n/l10n.dart';
 import '../../../platform/desktop/quick_paste_host.dart';
 import '../../../shared/adaptive_breakpoints.dart';
@@ -1112,7 +1113,7 @@ class _ChainStrip extends StatelessWidget {
               ),
             ),
             if (onSavePipeline != null)
-              Tooltip(
+              AppTooltip(
                 tooltip: (context) =>
                     TooltipContainer(child: Text(l10n.transformsSavePipeline)),
                 child: Button.ghost(
@@ -1191,7 +1192,7 @@ class _ChainStrip extends StatelessWidget {
     required String label,
     required IconData icon,
     required VoidCallback? onPressed,
-  }) => Tooltip(
+  }) => AppTooltip(
     tooltip: (context) => TooltipContainer(child: Text(label)),
     child: Button.ghost(
       key: ValueKey(key),

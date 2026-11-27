@@ -103,6 +103,21 @@ abstract final class AppResourcePolicy {
     }
   }
 
+  /// Has the Dart VM return the heap pages of an engine that has shut down in
+  /// this process, such as a retired Quick Paste presentation.
+  ///
+  /// The VM keeps the pages a finished engine frees and returns them only on
+  /// an idle notification, which follows a rendered frame. A suspended
+  /// presentation renders none on its own, so it settles again; a hidden one
+  /// that is not suspended yet settles when it suspends.
+  static Future<void> releaseRetiredEngine() async {
+    if (_presentationSuspended) {
+      await _settleWindowSurface(_suspension);
+    } else {
+      WidgetsBinding.instance.scheduleFrame();
+    }
+  }
+
   /// Restores the renderer budget before a suspended presentation rebuilds.
   static Future<void> resumePresentation() async {
     _presentationSuspended = false;

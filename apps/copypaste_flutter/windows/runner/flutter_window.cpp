@@ -1354,6 +1354,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (found != retiring_quick_paste_windows_.end()) {
       found->second->Destroy();
       retiring_quick_paste_windows_.erase(found);
+      // The main engine returns the heap pages the stopped one left cached.
+      if (quick_paste_channel_) {
+        quick_paste_channel_->InvokeMethod(
+            "engineStopped", std::make_unique<flutter::EncodableValue>());
+      }
     }
     return 0;
   } else if (!is_protected_pairing_context_ && message == WM_APP + 41) {

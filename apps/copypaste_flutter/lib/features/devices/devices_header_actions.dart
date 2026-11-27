@@ -6,8 +6,8 @@ import '../../app/shell/header_action_content.dart';
 import '../../app/shell/header_fit.dart';
 import '../../app/theme/app_theme.dart';
 
-import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import 'device_presentation.dart';
 import 'devices_controller.dart';
 import 'devices_gateway.dart';
@@ -146,8 +146,7 @@ class DevicesHeaderActions extends StatelessWidget {
     // A visible label needs no tooltip repeating it. The tooltip stays in
     // every stage, so the button keeps its focus when the label leaves.
     final labelShown = HeaderFit.stageOf(context) == HeaderStage.detailed;
-    return Tooltip(
-      showDuration: AppMotion.resolve(context, AppMotion.standard),
+    return AppTooltip(
       tooltip: (context) => labelShown
           ? const SizedBox.shrink()
           : TooltipContainer(child: Text(label)),

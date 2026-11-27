@@ -4,6 +4,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/app_tooltip.dart';
 import '../../shared/format_bytes.dart';
 import 'file_operations_controller.dart';
 
@@ -99,7 +100,7 @@ class _ErroredFileOperation extends StatelessWidget {
               Expanded(child: _OperationName(operation: operation, lines: 1)),
               if (onRemove != null) ...[
                 const Gap(AppSpacing.sm),
-                Tooltip(
+                AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.transfersRemoveFromHistory),
                   ),
@@ -259,7 +260,7 @@ class _ActiveFileOperation extends StatelessWidget {
               PositionedDirectional(
                 top: -AppSpacing.sm,
                 end: -AppSpacing.sm,
-                child: Tooltip(
+                child: AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.transfersCancelDownload),
                   ),
@@ -350,7 +351,7 @@ class _CompletedFileOperation extends StatelessWidget {
                 if (onOpenFile != null && onRemove != null)
                   const Gap(AppSpacing.sm),
                 if (onRemove != null)
-                  Tooltip(
+                  AppTooltip(
                     tooltip: (context) => TooltipContainer(
                       child: Text(context.l10n.transfersRemoveFromHistory),
                     ),
@@ -431,7 +432,7 @@ class _TerminalFileOperation extends StatelessWidget {
           ],
           if (onRemove != null) ...[
             const Gap(AppSpacing.sm),
-            Tooltip(
+            AppTooltip(
               tooltip: (context) => TooltipContainer(
                 child: Text(context.l10n.transfersRemoveFromHistory),
               ),
