@@ -8,6 +8,10 @@ import '../../app/theme/app_tooltip.dart';
 import '../../shared/format_bytes.dart';
 import 'file_operations_controller.dart';
 
+/// The space between a leading icon and its text. The rows of a tile share
+/// it, so their text starts on one edge.
+const double _iconTextGap = AppSpacing.sm;
+
 /// Compact presentation for one file operation in the transfer manager.
 class FileOperationTile extends StatelessWidget {
   const FileOperationTile({
@@ -237,35 +241,22 @@ class _ActiveFileOperation extends StatelessWidget {
                   ),
                 ),
                 const Gap(AppSpacing.xs),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        context.l10n.transfersBytesProgress(
-                          formatBytes(operation.written),
-                          formatBytes(operation.total),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).typography.xSmall.copyWith(
-                          color: colors.mutedForeground,
-                        ),
-                      ),
-                    ),
-                    const Gap(AppSpacing.sm),
-                    Text(
-                      _percentage(context, operation.progress),
-                      style: Theme.of(context).typography.xSmall.copyWith(
-                        color: colors.mutedForeground,
-                      ),
-                    ),
-                  ],
+                Text(
+                  context.l10n.transfersBytesProgress(
+                    formatBytes(operation.written),
+                    formatBytes(operation.total),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).typography.xSmall.copyWith(color: colors.mutedForeground),
                 ),
               ],
             ),
             if (onCancel != null)
               PositionedDirectional(
                 top: -AppSpacing.sm,
-                end: -AppSpacing.sm,
+                end: AppSpacing.zero,
                 child: AppTooltip(
                   tooltip: (context) => TooltipContainer(
                     child: Text(context.l10n.transfersCancelDownload),
@@ -326,7 +317,7 @@ class _CompletedFileOperation extends StatelessWidget {
                     color: AppTheme.statusColor(context, AppStatusTone.success),
                   ),
                 ),
-                const Gap(AppSpacing.sm),
+                const Gap(_iconTextGap),
                 Expanded(child: _OperationName(operation: operation, lines: 1)),
               ],
             ),
@@ -414,7 +405,7 @@ class _TerminalFileOperation extends StatelessWidget {
               color: AppTheme.statusColor(context, AppStatusTone.muted),
             ),
           ),
-          const Gap(AppSpacing.sm),
+          const Gap(_iconTextGap),
           Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -517,7 +508,7 @@ class _RouteLine extends StatelessWidget {
             size: AppIconSize.sm,
           ),
         ),
-        const Gap(AppSpacing.xs),
+        const Gap(_iconTextGap),
         Flexible(
           child: Text(
             operation.sourceDevice,
@@ -539,7 +530,7 @@ class _RouteLine extends StatelessWidget {
             size: AppIconSize.sm,
           ),
         ),
-        const Gap(AppSpacing.xs),
+        const Gap(_iconTextGap),
         Flexible(
           child: Text(
             operation.destinationDevice,
@@ -551,9 +542,4 @@ class _RouteLine extends StatelessWidget {
       ],
     );
   }
-}
-
-String _percentage(BuildContext context, double? progress) {
-  if (progress == null) return '—';
-  return context.l10n.transfersProgressPercent((progress * 100).round());
 }

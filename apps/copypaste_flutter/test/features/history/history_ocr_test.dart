@@ -362,7 +362,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('history-ocr-copy')));
       await tester.pumpAndSettle();
       expect(f.clipboard.values, [text]);
-      expect(find.text('Recognized text copied.'), findsOneWidget);
+      expect(find.text('Copied'), findsOneWidget);
       // Advance the toast's normal auto-dismiss lifecycle before teardown.
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();

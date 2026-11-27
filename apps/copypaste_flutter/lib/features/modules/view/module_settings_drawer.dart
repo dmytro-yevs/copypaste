@@ -257,7 +257,6 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                   controller.canRestart))
                             StateView.empty(
                               title: context.l10n.modulesNoSettingsTitle,
-                              message: context.l10n.modulesNoSettingsMessage,
                             ),
                           if (module.error case final error?) ...[
                             Alert(

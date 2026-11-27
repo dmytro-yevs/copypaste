@@ -169,7 +169,6 @@ class PasteQueueSettingsView extends StatelessWidget {
             if (shortcuts != null) ...[
               SettingRow(
                 title: l10n.pasteQueuePasteNextStyleTitle,
-                description: l10n.pasteQueuePasteNextStyleDescription,
                 trailing: _select<PasteNextStyle>(
                   key: 'paste-queue-style',
                   value: shortcuts.pasteNextStyle,
@@ -200,7 +199,6 @@ class PasteQueueSettingsView extends StatelessWidget {
             ],
             SettingRow(
               title: l10n.pasteQueueInsertTitle,
-              description: l10n.pasteQueueInsertDescription,
               trailing: _select<bool>(
                 key: 'paste-queue-insert',
                 value: settings.insertAtStart,
@@ -216,7 +214,6 @@ class PasteQueueSettingsView extends StatelessWidget {
             ),
             SettingRow(
               title: l10n.pasteQueueEndBehaviorTitle,
-              description: l10n.pasteQueueEndBehaviorDescription,
               trailing: _select<PasteQueueEndBehavior>(
                 key: 'paste-queue-end',
                 value: settings.endBehavior,
@@ -234,7 +231,6 @@ class PasteQueueSettingsView extends StatelessWidget {
                 PasteQueueSettingsContribution.separatorTargetId,
               ),
               title: l10n.pasteQueueSeparatorTitle,
-              description: l10n.pasteQueueSeparatorDescription,
               trailing: _select<PasteQueueSeparator>(
                 key: 'paste-queue-settings-separator',
                 value: settings.separator,
@@ -256,7 +252,6 @@ class PasteQueueSettingsView extends StatelessWidget {
             ),
             SettingRow(
               title: l10n.pasteQueuePlainTextTitle,
-              description: l10n.pasteQueuePlainTextDescription,
               trailing: Switch(
                 value: settings.plainText,
                 onChanged: options
@@ -300,7 +295,6 @@ class PasteQueueSettingsView extends StatelessWidget {
             ),
             SettingRow(
               title: l10n.pasteQueueRestoreTitle,
-              description: l10n.pasteQueueRestoreDescription,
               trailing: Switch(
                 value: settings.restoreWhenFinished,
                 onChanged: options
@@ -330,7 +324,6 @@ class PasteQueueSettingsView extends StatelessWidget {
           key != null &&
           scope.isHighlighted(PasteQueueSettingsContribution.shortcutsTargetId),
       title: l10n.pasteQueueShortcutAction(action),
-      description: l10n.pasteQueueShortcutDescription,
       status: problem == null
           ? null
           : Text(
@@ -418,7 +411,7 @@ class PasteQueueShortcutsSettingsView extends StatelessWidget {
       );
       return SettingsSection(
         title: l10n.pasteQueueSettingsTitle,
-        description: l10n.pasteQueueShortcutDescription,
+        description: l10n.pasteQueueSettingsSummary,
         children: [
           if (shortcuts.needsShortcuts)
             Alert(

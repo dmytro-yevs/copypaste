@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/content_rules/models/content_rule_models.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
@@ -362,7 +363,15 @@ void main() {
     await sending;
     expect(repository.sent.single.$1, ['a']);
     expect(repository.sent.single.$2, ['tablet']);
-    expect(find.text(l10n.historySentTo('Tablet')), findsOneWidget);
+    final toast = find.byType(AppToast);
+    expect(
+      find.descendant(of: toast, matching: find.text(l10n.historySentTitle)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: toast, matching: find.text('Tablet')),
+      findsOneWidget,
+    );
     await tester.pump(const Duration(seconds: 6));
   });
 

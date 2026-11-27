@@ -57,6 +57,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get commonEnable => '켜기';
 
   @override
+  String get commonChoose => '선택';
+
+  @override
   String get settingsLanguageTitle => '언어';
 
   @override
@@ -78,9 +81,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsRuntimeRefreshFailed => '설정을 새로 고칠 수 없습니다. 다시 시도하십시오.';
-
-  @override
-  String get settingsRuntimeLoadFailed => '설정을 불러올 수 없습니다.';
 
   @override
   String get settingsRuntimeAppAlreadyExcluded => '이미 제외된 앱입니다.';
@@ -341,9 +341,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickPasteSearchPlaceholder => '입력하여 검색…';
 
   @override
-  String get quickPasteLoadingHistory => '클립보드 기록을 불러오는 중입니다.';
-
-  @override
   String get quickPasteHistoryUnavailable => '기록을 사용할 수 없음';
 
   @override
@@ -390,7 +387,7 @@ class AppLocalizationsKo extends AppLocalizations {
       'macOS, Android, Windows, Linux에서 사용하는 비공개 클립보드 기록.';
 
   @override
-  String get transfersTitle => '다운로드 및 전송';
+  String get transfersTitle => '전송';
 
   @override
   String transfersActiveTooltip(int count, String written, String total) {
@@ -419,10 +416,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transfersShowEarlier => '이전';
 
   @override
-  String get transfersClearCompletedHistory => '완료된 기록 지우기';
-
-  @override
-  String get transfersErrorTitle => '전송';
+  String get transfersClearCompletedHistory => '기록 지우기';
 
   @override
   String get transfersEmptyTitle => '전송 없음';
@@ -497,9 +491,6 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get transfersUpdatesUnavailable =>
       '전송 업데이트를 사용할 수 없습니다. 새로 고치려면 다시 여십시오.';
-
-  @override
-  String get transfersLoadFailed => '전송 목록을 불러올 수 없습니다. 다시 시도하십시오.';
 
   @override
   String get transfersUpdatesLoadFailed => '전송 업데이트를 불러올 수 없습니다.';
@@ -606,9 +597,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get platformCaptureActionResumeStopped => '수집 재개(실행 중이 아님)';
 
   @override
-  String get platformTrayOpen => '열기';
-
-  @override
   String get platformTraySettings => '설정';
 
   @override
@@ -623,7 +611,7 @@ class AppLocalizationsKo extends AppLocalizations {
       '시스템 트레이를 사용할 수 없습니다. CopyPaste를 열어 둔 채로 다시 시도하거나 종료하십시오.';
 
   @override
-  String get platformQuitFailed => 'CopyPaste를 종료할 수 없습니다. 다시 시도하십시오.';
+  String get platformQuitFailed => 'CopyPaste를 종료할 수 없습니다.';
 
   @override
   String get platformVisibilityChangeFailed =>
@@ -699,16 +687,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSectionGeneral => '일반';
 
   @override
-  String get settingsSectionGeneralSummary => '언어 및 앱 표시 여부.';
-
-  @override
   String get settingsSectionAppearance => '모양';
-
-  @override
-  String get settingsSectionAppearanceSummary => '테마 및 창 재질.';
-
-  @override
-  String get settingsAppearanceDescription => '테마 및 창 모양.';
 
   @override
   String get settingsThemeTitle => '테마';
@@ -771,43 +750,22 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSectionClipboard => '클립보드';
 
   @override
-  String get settingsSectionClipboardSummary => '수집 및 기록 한도.';
-
-  @override
   String get settingsSectionPrivacy => '개인정보 보호';
-
-  @override
-  String get settingsSectionPrivacySummary => '앱 제외 및 화면 보호.';
 
   @override
   String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
-  String get settingsSectionQuickPasteSummary => '단축키 및 자동 붙여넣기 동작.';
-
-  @override
   String get settingsSectionSync => '동기화';
-
-  @override
-  String get settingsSectionSyncSummary => '동기화 및 근처 기기 검색.';
 
   @override
   String get settingsSectionNotifications => '알림';
 
   @override
-  String get settingsSectionNotificationsSummary => '수집 알림 및 사운드.';
-
-  @override
   String get settingsSectionData => '데이터';
 
   @override
-  String get settingsSectionDataSummary => '내보내기, 백업 및 복원.';
-
-  @override
   String get settingsSectionModules => '모듈';
-
-  @override
-  String get settingsSectionModulesSummary => '선택적 모듈 설치 및 관리.';
 
   @override
   String get settingsSectionRules => '콘텐츠 규칙';
@@ -820,13 +778,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSectionQuickAccess => '빠른 액세스';
 
   @override
-  String get settingsSectionQuickAccessSummary => '키보드, 타일, 홈 화면 위젯.';
-
-  @override
   String get settingsSectionTransforms => '텍스트 변환';
-
-  @override
-  String get settingsSectionTransformsSummary => '즐겨찾기, 파이프라인, 붙여넣기 기본 변환.';
 
   @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
@@ -965,17 +917,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueueCollectingEmptyTitle => '복사하면 추가됩니다';
 
   @override
-  String get pasteQueueCollectingEmptyMessage =>
-      '수집을 중지할 때까지 복사한 항목이 대기열에 추가됩니다.';
-
-  @override
   String get pasteQueueStartCollecting => '수집 시작';
 
   @override
   String get pasteQueueStopCollecting => '수집 중지';
-
-  @override
-  String get pasteQueueLoading => '대기열을 불러오는 중…';
 
   @override
   String get pasteQueueLoadFailed => '대기열을 불러오지 못했습니다';
@@ -1145,9 +1090,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueuePasteNextStyleTitle => '다음 붙여 넣기 동작';
 
   @override
-  String get pasteQueuePasteNextStyleDescription => '자동으로 붙여넣거나 클립보드에 복사만 합니다.';
-
-  @override
   String get pasteQueuePasteIntoApp => '앞에 있는 앱에 붙여 넣기';
 
   @override
@@ -1157,9 +1099,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueueInsertTitle => '새 항목 추가 위치';
 
   @override
-  String get pasteQueueInsertDescription => '수집하거나 추가한 항목이 대기열의 어디에 들어갈지 정합니다.';
-
-  @override
   String get pasteQueueInsertEnd => '끝(선입선출)';
 
   @override
@@ -1167,10 +1106,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get pasteQueueEndBehaviorTitle => '마지막 항목 다음';
-
-  @override
-  String get pasteQueueEndBehaviorDescription =>
-      '모든 항목을 붙여 넣은 뒤 다음 붙여 넣기의 동작입니다.';
 
   @override
   String get pasteQueueEndStop => '중지';
@@ -1218,13 +1153,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueuePlainTextTitle => '항상 일반 텍스트로 붙여 넣기';
 
   @override
-  String get pasteQueuePlainTextDescription => '대기열 항목의 서식을 제거합니다.';
-
-  @override
   String get pasteQueueIdleStopTitle => '수집 자동 중지 시간';
 
   @override
-  String get pasteQueueIdleStopDescription => '이 시간 동안 복사가 없으면 수집을 중지합니다.';
+  String get pasteQueueIdleStopDescription => '새 복사가 없는 시간입니다.';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1244,46 +1176,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueueRestoreTitle => '완료되면 이전 클립보드 복원';
 
   @override
-  String get pasteQueueRestoreDescription => '붙여넣기 전에 복사했던 내용을 되돌립니다.';
-
-  @override
   String get pasteQueueSettingsKeywords => 'paste queue 대기열 수집 순서 단축키 구분자';
 
   @override
   String get settingsSectionAbout => '정보';
 
   @override
-  String get settingsSectionAboutSummary => '버전 및 앱 업데이트.';
-
-  @override
-  String get settingsGeneralDescription => '언어, 자동 시작 및 앱 표시 여부.';
-
-  @override
   String get settingsModulesDescription => 'CopyPaste의 선택적 기능.';
 
   @override
-  String get settingsClipboardDescription => '클립보드 변경 사항을 수집하고 기록 한도를 관리합니다.';
-
-  @override
-  String get settingsDataDescription => '클립보드 기록을 내보내고, 백업하고, 복원합니다.';
-
-  @override
-  String get settingsSyncDescription => '페어링된 기기와의 동기화를 제어합니다.';
-
-  @override
-  String get settingsPrivacyDescription => '수집할 앱을 제어하고 클립보드 내용을 보호합니다.';
-
-  @override
-  String get settingsNotificationsDescription => '수집된 클립에 대한 알림과 사운드를 선택합니다.';
-
-  @override
-  String get settingsAboutDescription => 'CopyPaste 버전 및 앱 업데이트.';
-
-  @override
   String get settingsQuickPasteDescription => '창을 전환하지 않고 어디서든 클립보드 기록을 엽니다.';
-
-  @override
-  String get settingsLoadingMessage => '설정을 불러오는 중입니다.';
 
   @override
   String get settingsUnavailableTitle => '설정을 사용할 수 없음';
@@ -1331,9 +1233,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsStartupAndroidDescription => '재시작 후 백그라운드 서비스를 다시 실행합니다.';
 
   @override
-  String get settingsStartupDesktopDescription => '로그인할 때 CopyPaste를 자동으로 엽니다.';
-
-  @override
   String get settingsShowInDock => 'Dock에 표시';
 
   @override
@@ -1370,9 +1269,6 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get settingsLightweightModeKeywords =>
       '경량 닫기 종료 백그라운드 메모리 lightweight close quit background memory';
-
-  @override
-  String get settingsVisibilityErrorTitle => '표시 여부를 변경할 수 없음';
 
   @override
   String get settingsModulesSearchDescription => '선택적 모듈을 설치, 업데이트 및 제거합니다.';
@@ -1453,7 +1349,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsRetentionTitle => '보관 기간';
 
   @override
-  String get settingsRetentionDescription => '고정되지 않은 오래된 클립보드 항목을 자동으로 제거합니다.';
+  String get settingsRetentionDescription => '고정되지 않은 오래된 클립을 자동으로 제거합니다.';
 
   @override
   String get settingsRetentionForever => '영구 보관';
@@ -1545,7 +1441,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsExportTextTitle => '텍스트 기록 내보내기';
 
   @override
-  String get settingsExportTextDescription => '텍스트 클립을 이동 가능한 파일로 저장합니다.';
+  String get settingsExportTextDescription => '텍스트 클립을 JSON 파일로 저장합니다.';
 
   @override
   String get settingsExportAction => '내보내기';
@@ -1688,7 +1584,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get applicationPickerEmpty => '앱을 찾을 수 없습니다';
 
   @override
-  String get settingsSkipSecretTitle => '기밀 클립보드 건너뛰기';
+  String get settingsSkipSecretTitle => '비밀 클립보드 건너뛰기';
 
   @override
   String get settingsSkipSecretDescription => '앱이 비밀로 표시한 복사본은 저장하지 않습니다.';
@@ -1748,9 +1644,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsVersionTitle => '버전';
 
   @override
-  String get settingsVersionDescription => '설치된 CopyPaste 버전.';
-
-  @override
   String get settingsVersionUnavailable => '알 수 없음';
 
   @override
@@ -1763,9 +1656,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsUpdatesKeywords => '버전 깃허브 릴리스 version github release';
 
   @override
-  String get settingsUpdateIdle => '최신 CopyPaste 버전이 있는지 확인합니다.';
-
-  @override
   String get settingsUpdateChecking => '업데이트를 확인하는 중입니다.';
 
   @override
@@ -1774,6 +1664,11 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String settingsUpdateVersionUpToDate(String version) {
     return '$version 버전이 최신 상태입니다.';
+  }
+
+  @override
+  String settingsUpdateVersion(String version) {
+    return '$version 버전';
   }
 
   @override
@@ -1819,26 +1714,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsUpdateCheckAgainAction => '다시 확인';
 
   @override
+  String get settingsUpdateCheckAction => '지금 확인';
+
+  @override
   String get settingsUpdateNoneTitle => '사용 가능한 업데이트 없음';
 
   @override
-  String get settingsUpdateLatest => 'CopyPaste가 최신 버전입니다.';
-
-  @override
-  String settingsUpdateVersionLatest(String version) {
-    return '최신 버전인 CopyPaste $version 버전을 사용 중입니다.';
-  }
-
-  @override
   String get settingsUpdateAvailableTitle => '업데이트 사용 가능';
-
-  @override
-  String get settingsUpdateReady => '최신 CopyPaste 버전을 설치할 준비가 되었습니다.';
-
-  @override
-  String settingsUpdateVersionReady(String version) {
-    return 'CopyPaste $version 버전을 설치할 준비가 되었습니다.';
-  }
 
   @override
   String get settingsUpdateUnavailableTitle => '업데이트를 사용할 수 없음';
@@ -1848,9 +1730,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsUpdateCheckFailedTitle => '업데이트 확인 실패';
-
-  @override
-  String get settingsUpdateCheckFailedMessage => 'CopyPaste가 업데이트를 확인할 수 없습니다.';
 
   @override
   String get settingsQuickPasteSetupTitle => 'Quick Paste 설정';
@@ -1867,9 +1746,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsQuickPasteCheckAgain => '다시 확인';
-
-  @override
-  String get settingsQuickPasteLoading => 'Quick Paste 설정을 불러오는 중입니다.';
 
   @override
   String get settingsQuickPasteUnavailableTitle => 'Quick Paste를 사용할 수 없음';
@@ -1953,9 +1829,6 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get devicesLoading => '기기를 불러오는 중…';
-
-  @override
   String get devicesUnavailableTitle => '기기 목록을 사용할 수 없음';
 
   @override
@@ -1963,6 +1836,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get devicesScan => '검색';
+
+  @override
+  String get devicesScanInvalidTitle => '잘못된 QR 코드';
 
   @override
   String get devicesScanning => '검색 중…';
@@ -2119,15 +1995,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get devicesConnectionUnknown => '알 수 없음';
 
   @override
-  String get devicesPeerAvailable => '사용 가능';
-
-  @override
-  String get devicesPeerVisibleNow => '지금 감지됨';
-
-  @override
-  String get devicesPeerStatusUnknown => '상태 알 수 없음';
-
-  @override
   String get devicesPingUnavailable => '— ms';
 
   @override
@@ -2200,19 +2067,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingSendingRequest => '연결 요청을 보내는 중…';
 
   @override
-  String get pairingEmptyTitle => '페어링 방법 선택';
-
-  @override
-  String get pairingEmptyMessage => '페어링 제어 항목이 여기에 표시됩니다.';
-
-  @override
   String get pairingCreatingInvitation => '페어링 초대를 만드는 중입니다.';
 
   @override
   String get pairingCode => '페어링 코드';
 
   @override
-  String get pairingCodeHint => '다른 기기에 표시된 8자리 코드를 입력하십시오.';
+  String get pairingCodeHint => '다른 기기에 표시됩니다.';
 
   @override
   String get pairingDeviceAddress => '기기 주소';
@@ -2230,13 +2091,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingConnectingDevice => '기기 연결 중…';
 
   @override
-  String get pairingQrScannerTitle => 'QR 스캐너';
-
-  @override
   String get pairingCameraPreviewPlaceholder => '카메라 미리보기가 여기에 표시됩니다.';
-
-  @override
-  String get pairingScannerNeedsAttention => '스캐너 확인 필요';
 
   @override
   String get pairingCodeIncomplete => '8자리 페어링 코드를 모두 입력하십시오.';
@@ -2249,11 +2104,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingWaitingForOtherDevice => '다른 기기를 기다리는 중';
 
   @override
-  String get pairingInviteInstructions =>
-      '다른 기기에서 ‘기기 추가’ → ‘코드 입력’을 선택하거나 QR 코드를 스캔하십시오.';
-
-  @override
-  String get pairingDetailsTitle => '페어링 정보';
+  String get pairingInviteInstructions => '다른 기기에서 ‘코드 입력’ 또는 ‘QR 스캔’을 선택하십시오.';
 
   @override
   String get pairingAddress => '주소';
@@ -2280,9 +2131,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingStartScanner => '스캐너 시작';
 
   @override
-  String get pairingActionNotStarted => '페어링 작업을 시작할 수 없습니다.';
-
-  @override
   String get pairingStateHandshaking => '기기 확인 중';
 
   @override
@@ -2307,12 +2155,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingHandshakingDescription => '기기 간에 보안 채널을 설정하는 중입니다.';
 
   @override
-  String get pairingAwaitingConfirmationDescription =>
-      '보호된 확인 코드를 비교한 다음 두 기기에서 확인하십시오.';
-
-  @override
-  String get pairingConfirmedDescription =>
-      '기기가 연결되었습니다. 그룹 구성원 정보가 자동으로 동기화됩니다.';
+  String get pairingConfirmedDescription => '내 스페이스의 다른 기기도 자동으로 연결됩니다.';
 
   @override
   String get pairingNoDeviceAdded => '추가된 기기가 없습니다.';
@@ -2526,7 +2369,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get syncPeerLastCheckStarted => '마지막 확인 시작';
 
   @override
-  String get syncPeerItemsOverSizeLimit => '크기 한도 초과 항목';
+  String get syncPeerItemsOverSizeLimit => '크기 한도 초과 클립';
 
   @override
   String syncPeerLastSeen(String time) {
@@ -2605,9 +2448,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyErrorRefresh => '기록을 새로 고칠 수 없습니다. 다시 시도하십시오.';
 
   @override
-  String get historyErrorLoad => '기록을 불러올 수 없습니다. 다시 시도하십시오.';
-
-  @override
   String get historyErrorLoadMore => '추가 기록을 불러올 수 없습니다.';
 
   @override
@@ -2655,7 +2495,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get historyErrorSecrecyUpdate => '클립의 기밀 상태를 업데이트할 수 없습니다.';
+  String get historyErrorSecrecyUpdate => '스포일러를 업데이트할 수 없습니다.';
 
   @override
   String get historyErrorPinUpdate => '고정 상태를 업데이트할 수 없습니다.';
@@ -2680,10 +2520,10 @@ class AppLocalizationsKo extends AppLocalizations {
       'OCR을 사용할 수 없습니다. 설정에서 모듈을 확인하고 다시 시도하십시오.';
 
   @override
-  String get historyOcrErrorStart => 'OCR을 시작할 수 없습니다. 다시 시도하십시오.';
+  String get historyOcrErrorStart => 'OCR을 시작할 수 없습니다.';
 
   @override
-  String get historyOcrErrorRecognize => '이미지 텍스트를 인식할 수 없습니다. 다시 시도하십시오.';
+  String get historyOcrErrorRecognize => '이미지 텍스트를 인식할 수 없습니다.';
 
   @override
   String get historyOcrRecognizing => '이미지 텍스트를 인식하는 중입니다.';
@@ -2696,9 +2536,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyOcrTitle => '이미지 텍스트';
-
-  @override
-  String get historyOcrTextCopied => '인식된 텍스트를 복사했습니다.';
 
   @override
   String get historyOcrCopyError => '텍스트를 복사할 수 없습니다. 다시 시도하십시오.';
@@ -2779,9 +2616,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyActionFailedTitle => '작업 실패';
 
   @override
-  String get historyLoadingMessage => '클립보드 기록을 불러오는 중입니다.';
-
-  @override
   String get historyUnavailableTitle => '기록을 사용할 수 없음';
 
   @override
@@ -2810,13 +2644,13 @@ class AppLocalizationsKo extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '클립보드 항목 $count개를 건너뛰었습니다',
+      other: '클립 $count개를 건너뛰었습니다',
     );
     return '$_temp0';
   }
 
   @override
-  String get historySkippedRowsMessage => '보관된 일부 클립을 읽을 수 없어 이 목록에 표시되지 않습니다.';
+  String get historySkippedRowsMessage => '일부 클립을 읽을 수 없어 이 목록에 표시되지 않습니다.';
 
   @override
   String get historySearch => '기록 검색';
@@ -2903,9 +2737,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyCopyPlainText => '일반 텍스트로 복사';
 
   @override
-  String get historyManageClipTags => '클립 태그 관리';
-
-  @override
   String get historyPinnedButton => '고정됨';
 
   @override
@@ -2927,16 +2758,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyCopyFailedTitle => '복사 실패';
 
   @override
-  String get historyPlainTextCopied => '일반 텍스트를 복사했습니다.';
-
-  @override
-  String get historyClipCopied => '클립을 복사했습니다.';
+  String get historyPlainTextCopied => '일반 텍스트로.';
 
   @override
   String get historyDownloadedTitle => '다운로드됨';
-
-  @override
-  String get historyFileSaved => '파일을 저장했습니다.';
 
   @override
   String get historyShare => '공유';
@@ -2996,16 +2821,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyRetryDownload => '다운로드 다시 시도';
 
   @override
-  String get historyDownloadFailedTitle => '다운로드 실패';
-
-  @override
   String get historyShowFile => '파일 보기';
-
-  @override
-  String get historyMetadataPrivacy => '개인정보 보호';
-
-  @override
-  String get historyMetadataConfidential => '기밀';
 
   @override
   String get historyMetadataCaptured => '수집 시각';
@@ -3015,9 +2831,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyMetadataDevice => '기기';
-
-  @override
-  String get historyMetadataClipType => '클립 유형';
 
   @override
   String get historyMetadataType => '유형';
@@ -3041,7 +2854,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyMetadataSync => '동기화';
 
   @override
-  String get historyMetadataTooLargeToSync => '너무 커서 동기화할 수 없음';
+  String get historyMetadataTooLargeToSync => '너무 큼';
 
   @override
   String historyBulkDeleteTitle(int count) {
@@ -3104,22 +2917,19 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyDatePresetAllTime => '전체 기간';
 
   @override
-  String get appRuntimeStartFailed => 'CopyPaste가 런타임을 시작할 수 없습니다.';
-
-  @override
-  String get appPreparing => 'CopyPaste를 준비하는 중입니다.';
+  String get appRuntimeStartFailed => 'CopyPaste 백그라운드 서비스를 시작할 수 없습니다.';
 
   @override
   String get appRuntimeWaiting => 'CopyPaste가 보호된 기록에 대한 접근을 기다리는 중입니다.';
 
   @override
-  String get appHistoryUnavailableTitle => '기록 런타임을 사용할 수 없음';
+  String get appHistoryUnavailableTitle => '기록을 사용할 수 없음';
 
   @override
-  String get appDevicesUnavailableTitle => '기기 런타임을 사용할 수 없음';
+  String get appDevicesUnavailableTitle => '기기를 사용할 수 없음';
 
   @override
-  String get appSettingsUnavailableTitle => '설정 런타임을 사용할 수 없음';
+  String get appSettingsUnavailableTitle => '설정을 사용할 수 없음';
 
   @override
   String get appQuit => 'CopyPaste 종료';
@@ -3138,11 +2948,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get appDestinationSettings => '설정';
-
-  @override
-  String appDestinationSelected(String destination) {
-    return '$destination, 선택됨';
-  }
 
   @override
   String get appActiveFilter => '활성 필터';
@@ -3172,7 +2977,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get sharedShizukuNoLongerNeeded => '이제 Shizuku가 필요하지 않습니다.';
 
   @override
-  String get sharedGetShizukuDescription => '일회성 접근 권한을 적용하려면 Shizuku를 설치하십시오.';
+  String get sharedGetShizukuDescription => 'Shizuku가 일회성 접근 권한을 적용합니다.';
 
   @override
   String get sharedShizukuWirelessDebugging =>
@@ -3198,6 +3003,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get sharedAllow => '허용';
+
+  @override
+  String get sharedApply => '적용';
 
   @override
   String get sharedSetupCommandsCopyFailed => '설정 명령어를 복사할 수 없습니다.';
@@ -3244,9 +3052,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get onboardingStartAtLogin => '로그인 시 시작';
-
-  @override
-  String get onboardingStartAtLoginDescription => '로그인할 때 CopyPaste 열기';
 
   @override
   String get onboardingStartAtLoginSemantics => '로그인 시 CopyPaste 시작';
@@ -3369,7 +3174,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get onboardingLinuxCompanion => 'GNOME 또는 KDE 컴패니언';
 
   @override
-  String get onboardingLinuxCompanionReady => '인증된 Clipboard v2 브리지가 준비되었습니다.';
+  String get onboardingLinuxCompanionReady => '준비되었습니다.';
 
   @override
   String get onboardingLinuxCompanionCapturePaused =>
@@ -3386,30 +3191,25 @@ class AppLocalizationsKo extends AppLocalizations {
   String get onboardingLinuxKeyboardControl => '키보드 제어';
 
   @override
-  String get onboardingLinuxKeyboardAllowed => 'Quick Paste에 키보드 제어가 허용되었습니다.';
+  String get onboardingLinuxKeyboardAllowed => 'Quick Paste에 허용되었습니다.';
 
   @override
-  String get onboardingLinuxKeyboardUnsupported =>
-      '이 데스크톱 세션에서는 키보드 제어를 사용할 수 없습니다.';
+  String get onboardingLinuxKeyboardUnsupported => '이 데스크톱 세션에서는 사용할 수 없습니다.';
 
   @override
   String get onboardingLinuxAllowKeyboard => '키보드 제어 허용';
 
   @override
-  String get onboardingLinuxQuickPasteReady => 'Quick Paste가 준비되었습니다.';
+  String get onboardingLinuxQuickPasteReady => '준비되었습니다.';
 
   @override
-  String get onboardingLinuxQuickPastePending =>
-      '필요한 데스크톱 통합이 활성화되면 Quick Paste가 준비됩니다.';
-
-  @override
-  String get onboardingLinuxStartAtLoginDescription => '로그인할 때 CopyPaste를 엽니다.';
+  String get onboardingLinuxQuickPastePending => '필요한 데스크톱 통합이 활성화되면 준비됩니다.';
 
   @override
   String get onboardingLinuxLinks => 'CopyPaste 링크';
 
   @override
-  String get onboardingLinuxLinksRegistered => 'CopyPaste 링크가 이 앱에서 열립니다.';
+  String get onboardingLinuxLinksRegistered => '이 앱에서 열립니다.';
 
   @override
   String get onboardingLinuxLinksUnregistered =>
@@ -3423,7 +3223,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get onboardingLinuxScreenshotBlockingUnavailable =>
-      'Linux에서는 스크린샷 차단을 사용할 수 없습니다. 보호된 저장 데이터는 계속 암호화됩니다.';
+      'Linux에서는 사용할 수 없습니다. 저장된 데이터는 계속 암호화됩니다.';
 
   @override
   String get onboardingLinuxCheckAgain => '다시 확인';
@@ -3491,7 +3291,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get onboardingAndroidApplyAccess => '수집 접근 권한 적용';
 
   @override
-  String get onboardingAndroidApplyAccessDescription => '일회성 수집 접근 권한을 적용합니다.';
+  String get onboardingAndroidApplyAccessDescription =>
+      '한 번만 하면 됩니다. 이후에는 Shizuku가 필요하지 않습니다.';
 
   @override
   String get onboardingAndroidFullCaptureLater => '전체 수집은 나중에 설정할 수 있습니다.';
@@ -3524,7 +3325,7 @@ class AppLocalizationsKo extends AppLocalizations {
       'Android 설정 모니터링을 사용할 수 없습니다.';
 
   @override
-  String get onboardingAndroidIntakeFailed => '클립보드 수신을 켤 수 없습니다.';
+  String get onboardingAndroidIntakeFailed => '클립보드 수집을 켤 수 없습니다.';
 
   @override
   String get onboardingAndroidStopCaptureFailed => '백그라운드 수집을 중지할 수 없습니다.';
@@ -3534,11 +3335,11 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get onboardingAndroidGrantsFailed =>
-      'Shizuku에서 CopyPaste가 허용되었지만 Android 수집 권한을 적용할 수 없습니다.';
+      'Shizuku에서 CopyPaste가 허용되었지만 수집 접근 권한을 적용할 수 없습니다.';
 
   @override
   String get onboardingAndroidAllowInShizuku =>
-      '수집 권한을 적용하려면 Shizuku에서 CopyPaste를 허용하십시오.';
+      '수집 접근 권한을 적용하려면 Shizuku에서 CopyPaste를 허용하십시오.';
 
   @override
   String get onboardingAndroidGrantAccessFirst =>
@@ -3580,13 +3381,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesOperationFailed => '모듈 작업 실패';
 
   @override
-  String get modulesLoading => '모듈을 불러오는 중입니다.';
-
-  @override
   String get modulesUnavailableTitle => '모듈을 사용할 수 없음';
-
-  @override
-  String get modulesUnavailableMessage => '모듈을 다시 불러오십시오.';
 
   @override
   String get modulesNoneInstalled => '설치된 모듈 없음';
@@ -3601,13 +3396,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesTryDifferentSearch => '다른 검색어로 시도하십시오.';
 
   @override
-  String get modulesMarketplaceLoading => '마켓플레이스를 불러오는 중입니다.';
-
-  @override
   String get modulesMarketplaceUnavailableTitle => '마켓플레이스를 사용할 수 없음';
-
-  @override
-  String get modulesMarketplaceUnavailableMessage => '마켓플레이스를 다시 불러오십시오.';
 
   @override
   String get modulesNoneAvailable => '사용 가능한 모듈 없음';
@@ -3669,9 +3458,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesNoSettingsTitle => '추가 설정 없음';
 
   @override
-  String get modulesNoSettingsMessage => '이 모듈은 추가 구성이 필요하지 않습니다.';
-
-  @override
   String get modulesSetUpSmsAccess => 'SMS 접근 권한 설정';
 
   @override
@@ -3682,9 +3468,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get modulesCloseSmsAccess => 'SMS 접근 권한 닫기';
-
-  @override
-  String get modulesSmsChecking => 'SMS 접근 권한을 확인하는 중입니다.';
 
   @override
   String get modulesSmsReady =>
@@ -3709,16 +3492,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesSmsApplyAccess => 'SMS 접근 권한 적용';
 
   @override
-  String get modulesSmsApplyAccessDescription => '일회성 SMS 접근 권한을 적용합니다.';
+  String get modulesSmsApplyAccessDescription => '한 번만 필요합니다.';
 
   @override
   String get modulesSmsSetupFailed => 'SMS 설정 실패';
 
   @override
   String get modulesFileSelectionFailed => '파일 선택 실패';
-
-  @override
-  String get modulesChooseLanguages => '언어 선택';
 
   @override
   String get modulesChooseFile => '파일 선택';
@@ -3812,9 +3592,6 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get modulesMarketplaceLoadFailed => '모듈 마켓플레이스를 불러올 수 없습니다.';
-
-  @override
   String get modulesSmsSetupRequired => '이 모듈을 켜기 전에 SMS 접근 권한을 설정하십시오.';
 
   @override
@@ -3856,10 +3633,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesResponseInvalid => '모듈 응답이 유효하지 않습니다.';
 
   @override
-  String get modulesFileSelectionUnavailable => '파일 선택을 사용할 수 없습니다.';
-
-  @override
-  String get modulesFileSelectFailed => '파일을 선택할 수 없습니다.';
+  String get modulesFileSelectionUnavailable => '여기에서는 사용할 수 없습니다.';
 
   @override
   String modulesFileNotAccepted(String field) {
@@ -3917,12 +3691,6 @@ class AppLocalizationsKo extends AppLocalizations {
     });
     return '$_temp0';
   }
-
-  @override
-  String get deviceAuthUnavailable => '이 시스템에서는 사용할 수 없음';
-
-  @override
-  String get deviceAuthNotConfigured => '먼저 기기 암호, PIN 또는 생체 인증을 설정하세요';
 
   @override
   String get commonOn => '켜짐';
@@ -4047,7 +3815,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return '새 한도: $limit. 고정되지 않은 이전 항목은 영구적으로 삭제됩니다.';
+    return '새 한도: $limit. 고정되지 않은 이전 클립은 영구적으로 삭제됩니다.';
   }
 
   @override
@@ -4055,7 +3823,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return '새 할당량: $size. 초과하면 고정되지 않은 오래된 항목부터 영구 삭제됩니다.';
+    return '새 할당량: $size. 초과하면 고정되지 않은 오래된 클립부터 영구 삭제됩니다.';
   }
 
   @override
@@ -4090,7 +3858,7 @@ class AppLocalizationsKo extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '텍스트 클립 $count개를 내보냈습니다',
+      other: '텍스트 클립 $count개',
     );
     return '$_temp0';
   }
@@ -4109,14 +3877,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String settingsOutcomeDetail(String outcome, String detail) {
     return '$outcome · $detail';
   }
-
-  @override
-  String settingsBackupDoneMessage(String size) {
-    return '암호화된 백업을 저장했습니다 · $size';
-  }
-
-  @override
-  String get settingsRestoreDoneMessage => '이 기기의 클립보드 기록이 백업 내용으로 바뀌었습니다.';
 
   @override
   String sharedSizeKibibytes(String size) {
@@ -4168,7 +3928,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return '새 할당량: $size. 현재 $used를 사용 중이므로 고정되지 않은 오래된 항목부터 영구 삭제됩니다.';
+    return '새 할당량: $size. 현재 $used를 사용 중이므로 고정되지 않은 오래된 클립부터 영구 삭제됩니다.';
   }
 
   @override
@@ -4354,9 +4114,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsCategoryOther => '기타';
 
   @override
-  String get transformsChainEmpty => '아직 단계 없음';
-
-  @override
   String transformsStepLabel(int step, String name) {
     return '$step · $name';
   }
@@ -4413,7 +4170,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String transformsPipelineSavedMessage(String name) {
-    return '$name을(를) 모든 변환 팔레트에서 사용할 수 있습니다.';
+    return '$name이(가) 이제 ‘파이프라인’에 있습니다.';
   }
 
   @override
@@ -4440,13 +4197,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get transformsNotTextMessage =>
-      '이 항목은 이미지, 파일 또는 색상입니다. 텍스트 항목을 선택하거나 텍스트를 복사하세요.';
+      '이 클립은 이미지, 파일 또는 색상입니다. 텍스트 클립을 선택하거나 텍스트를 복사하세요.';
 
   @override
   String get transformsNothingTitle => '변환할 내용 없음';
 
   @override
-  String get transformsNothingMessage => '텍스트를 복사하거나 기록 항목을 선택하세요.';
+  String get transformsNothingMessage => '텍스트를 복사하거나 기록에서 클립을 선택하세요.';
 
   @override
   String get transformsPickTransform => '변환을 선택하세요';
@@ -4509,13 +4266,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsActionSave => '새 항목으로 저장';
 
   @override
-  String get transformsCopiedMessage => '결과가 클립보드와 기록에 있습니다.';
+  String get transformsCopiedMessage => '결과가 기록에도 있습니다.';
 
   @override
   String get transformsSavedTitle => '저장됨';
 
   @override
-  String get transformsSavedMessage => '새 기록 항목으로 저장했습니다.';
+  String get transformsSavedMessage => '결과가 기록에 새 클립으로 추가되었습니다.';
 
   @override
   String get transformsPasteFailedTitle => '붙여넣을 수 없음';
@@ -4548,6 +4305,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get transformsErrorTimestampUnit => '숫자가 초인지 밀리초인지 선택하세요';
+
+  @override
+  String get transformsErrorTimeLimit => '너무 오래 걸렸습니다';
 
   @override
   String get transformsErrorExternalEntity => '외부 엔터티는 허용되지 않습니다';
@@ -4657,11 +4417,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsFavoritesTitle => '즐겨찾기';
 
   @override
-  String get transformsFavoritesDescription => '모든 팔레트에서 먼저 표시됩니다.';
+  String get transformsFavoritesDescription => '텍스트를 변환할 때 위쪽에 표시됩니다.';
 
   @override
   String transformsFavoriteShortcut(String shortcut) {
-    return '팔레트에서 $shortcut';
+    return '‘텍스트 변환’에서 $shortcut';
   }
 
   @override
@@ -4704,7 +4464,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsHiddenTitle => '숨긴 변환';
 
   @override
-  String get transformsHiddenDescription => '팔레트와 제안에 표시되지 않습니다.';
+  String get transformsHiddenDescription => '목록과 추천에 표시되지 않습니다.';
 
   @override
   String get transformsHideTransform => '변환 숨기기';
@@ -4758,10 +4518,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickAccessUnavailableTitle => '빠른 액세스 상태를 사용할 수 없음';
 
   @override
-  String get quickAccessUnavailableMessage =>
-      'CopyPaste가 키보드, 타일, 위젯 상태를 읽지 못했습니다. 다시 시도하세요.';
-
-  @override
   String get quickAccessActionFailedTitle => '작업을 완료할 수 없음';
 
   @override
@@ -4784,18 +4540,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickAccessOpenKeyboardSettings => '키보드 설정 열기';
 
   @override
-  String get quickAccessKeyboardSearchDescription =>
-      'CopyPaste 클립 키보드 패널을 켭니다.';
+  String get quickAccessKeyboardSearchDescription => 'CopyPaste 클립 키보드를 켭니다.';
 
   @override
   String get quickAccessKeyboardKeywords => '키보드 입력 방법 ime 패널 사용';
 
   @override
   String get quickAccessSwitchKeyboardTitle => '클립 키보드로 전환';
-
-  @override
-  String get quickAccessSwitchKeyboardDescription =>
-      'CopyPaste 클립을 현재 키보드로 설정하세요.';
 
   @override
   String get quickAccessSwitchKeyboardAction => '키보드 선택';
@@ -4805,9 +4556,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierTitle => '수집 모드';
-
-  @override
-  String get quickAccessCaptureTierDescription => '다른 앱의 복사 항목이 저장되는 방식입니다.';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -4820,10 +4568,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickAccessTierFull => '전체: 모든 복사 내용을 백그라운드에서 저장';
 
   @override
-  String get quickAccessTierPanelCollecting => '패널 선택됨: 수집 중';
+  String get quickAccessTierPanelCollecting => '클립 키보드: 선택된 동안 모든 복사 내용을 저장';
 
   @override
-  String get quickAccessTierPanelCatchUp => '패널 모드: 열 때 가져오기';
+  String get quickAccessTierPanelCatchUp => '클립 키보드: 열 때 클립보드를 저장';
 
   @override
   String get quickAccessTierManual => '수동: 앱, 타일, 위젯 또는 공유에서 저장';
@@ -4841,10 +4589,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickAccessAutoReturnKeywords => '돌아가기 이전 키보드 자동 삽입';
 
   @override
-  String get quickAccessFocusSearchTitle => '패널을 열 때 검색에 포커스';
-
-  @override
-  String get quickAccessFocusSearchDescription => '검색이 준비된 상태로 패널을 엽니다.';
+  String get quickAccessFocusSearchTitle => '클립 키보드를 열 때 검색에 포커스';
 
   @override
   String get quickAccessTilesTitle => '빠른 설정 타일';
@@ -4977,10 +4722,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get quickPasteDefaultSkippedMessage => '대신 원본을 사용했습니다.';
 
   @override
-  String get quickPastePasteManually => '내용이 클립보드에 있습니다. 직접 붙여넣으세요.';
-
-  @override
-  String get quickPastePaste => '붙여넣기';
+  String get quickPastePasteManually => '직접 붙여넣으세요.';
 
   @override
   String get rulesLoadFailed => '콘텐츠 규칙을 불러올 수 없습니다.';
@@ -5027,9 +4769,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get rulesEmptyTitle => '아직 규칙이 없습니다';
-
-  @override
-  String get rulesEmptyMessage => '규칙은 새 복사 항목에 태그를 달거나 보호, 만료, 건너뛰기를 합니다.';
 
   @override
   String get rulesDeletedTitle => '최근 삭제됨';
@@ -5164,7 +4903,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get rulesApplyToItems => '기존 항목에 적용…';
+  String get rulesApplyToItems => '기존 클립에 적용…';
 
   @override
   String get rulesResetBuiltin => '기본값으로 재설정';
@@ -5347,13 +5086,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get rulesPatternPlaceholder => '패턴(예: ^ticket-[0-9]+)';
 
   @override
-  String get rulesPatternHint => '전후방 탐색과 역참조는 지원되지 않습니다.';
+  String get rulesPatternHint => '전방 탐색, 후방 탐색, 역참조는 지원되지 않습니다.';
 
   @override
   String get rulesCaseSensitive => '대/소문자 구분';
-
-  @override
-  String get rulesChooseValues => '선택';
 
   @override
   String get rulesUnknownConditionNotice => '이 조건은 최신 버전의 CopyPaste에서 만들어졌습니다.';
@@ -5467,9 +5203,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get rulesTestTitle => '테스트';
-
-  @override
-  String get rulesTestDescription => '샘플 텍스트로 규칙을 시험합니다.';
 
   @override
   String get rulesSamplePlaceholder => '샘플 텍스트를 붙여넣거나 입력';
@@ -5589,7 +5322,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get rulesTraceOutput => '변환된 텍스트';
 
   @override
-  String get rulesPreviewTitle => '기존 항목에 적용';
+  String get rulesPreviewTitle => '기존 클립에 적용';
 
   @override
   String rulesPreviewRunning(int count) {
@@ -5663,12 +5396,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get rulesPreviewNote => '적용하기 전에는 아무것도 바뀌지 않습니다.';
 
   @override
-  String get rulesSecretItem => '비밀 항목';
-
-  @override
-  String rulesSecretItemFrom(String app) {
-    return '$app의 비밀 항목';
-  }
+  String get rulesSecretItem => '비밀 클립';
 
   @override
   String get rulesPreviewCancelled => '미리 보기를 중지했습니다. 변경된 내용은 없습니다.';
@@ -5756,11 +5484,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historySentTitle => '보냄';
 
   @override
-  String historySentTo(String devices) {
-    return '$devices(으)로 보냈습니다.';
-  }
-
-  @override
   String get historySendFailedTitle => '보내지 못함';
 
   @override
@@ -5793,9 +5516,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyEditSaved => '편집한 텍스트가 기록 맨 위에 새 클립으로 추가되었습니다.';
-
-  @override
-  String get historyNewClipSaved => '텍스트를 저장했습니다.';
 
   @override
   String historyQueueAddedInOrder(int count) {
@@ -5978,9 +5698,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get diagnosticsExported => '진단을 내보냈습니다';
 
   @override
-  String get diagnosticsExportedMessage => '로그 파일을 지원팀에 보낼 수 있습니다.';
-
-  @override
   String get diagnosticsExportFailed => '내보내기 실패';
 
   @override
@@ -5996,8 +5713,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get diagnosticsLogLevelTitle => '로그 수준';
 
   @override
-  String get diagnosticsLogLevelDescription =>
-      '이 기기에서 기록하는 세부 정보의 양입니다. 클립보드 내용은 로그에 포함되지 않습니다.';
+  String get diagnosticsLogLevelDescription => '이 기기에서 기록하는 세부 정보의 양입니다.';
 
   @override
   String get onboardingAndroidCaptureMethod => '감지 방법';
@@ -6080,9 +5796,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get fileSetShowFolder => '폴더 보기';
 
   @override
-  String get historyFilesSaved => '파일을 저장했습니다.';
-
-  @override
   String get transfersResume => '이어받기';
 
   @override
@@ -6161,9 +5874,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsLogsFolderTitle => '로그 폴더';
 
   @override
-  String get settingsLogsFolderDescription => '이 기기의 진단 로그를 엽니다.';
-
-  @override
   String get settingsOpenFolderAction => '열기';
 
   @override
@@ -6238,7 +5948,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get devicesSpaceRemovedMessage =>
-      '이 기기는 제거되었거나 스페이스에서 나갔습니다. 기록은 이 기기에 남아 있습니다. 다시 동기화하려면 스페이스에 참여하세요.';
+      '이 기기는 제거되었거나 스페이스에서 나갔습니다. 기록은 이 기기에 남아 있습니다.';
 
   @override
   String get devicesSpaceJoin => '스페이스 참여';
@@ -6304,8 +6014,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get onboardingSpaceLater => '나중에';
 
   @override
-  String get onboardingReadySpaceCreated =>
-      '스페이스가 준비되었습니다. 다른 기기는 지금 또는 나중에 기기 화면에서 추가하세요.';
+  String get onboardingReadySpaceCreated => '다른 기기는 지금 또는 나중에 기기 화면에서 추가하세요.';
 
   @override
   String get onboardingReadyJoin => '다음으로 다른 기기에 표시된 코드를 확인하세요.';
@@ -6332,15 +6041,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get onboardingPairJoinTitle => '스페이스 참여';
 
   @override
-  String get onboardingPairJoinSubtitle =>
-      '다른 기기의 코드를 입력하거나 QR 코드를 스캔하세요. 그런 다음 두 기기에 같은 확인 코드가 표시되는지 확인하세요.';
-
-  @override
   String get onboardingPairAddDeviceSubtitle =>
-      '다른 기기에서 CopyPaste를 열고 이 QR 코드나 코드로 참여하세요. 그런 다음 두 기기에 같은 확인 코드가 표시되는지 확인하세요.';
+      '다른 기기에서 CopyPaste를 열고 이 코드나 QR 코드로 참여하세요.';
 
   @override
-  String get onboardingPairSkip => '지금은 건너뛰기';
+  String get onboardingPairSkip => '나중에';
 
   @override
   String get onboardingPairInterruptedTitle => '페어링이 완료되지 않았습니다';
@@ -6350,13 +6055,7 @@ class AppLocalizationsKo extends AppLocalizations {
       '다시 시도하거나, 계속한 뒤 나중에 기기 화면에서 페어링하세요.';
 
   @override
-  String onboardingReadyPaired(String device) {
-    return '$device와(과) 페어링되었습니다. 이제 두 기기 간에 클립보드가 동기화됩니다.';
-  }
-
-  @override
-  String get onboardingReadyPairedUnnamed =>
-      '기기가 페어링되었습니다. 이제 기기 간에 클립보드가 동기화됩니다.';
+  String get onboardingReadyPaired => '이제 기기 간에 클립보드가 동기화됩니다.';
 
   @override
   String get onboardingReadyPairLater => '언제든지 기기 화면에서 기기를 페어링할 수 있습니다.';
@@ -6396,7 +6095,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesDetailsPermissionsPending => '설치 후 표시됩니다. 모듈을 켤 때 확인합니다.';
 
   @override
-  String get modulesDetailsNoPermissions => 'CopyPaste 서비스를 사용하지 않습니다.';
+  String get modulesDetailsNoPermissions => '권한이 필요하지 않습니다.';
 
   @override
   String get modulesDetailsInformation => '정보';

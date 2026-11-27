@@ -240,16 +240,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return FailureToasts(
       listenable: visibility,
       failure: () => visibility.error,
-      title: (context) => context.l10n.settingsVisibilityErrorTitle,
       child: withStartup,
     );
   }
 
   Widget _loadedContent(Widget Function() ready) =>
       switch (widget.controller.loadState) {
-        SettingsLoadState.loading => StateView.loading(
-          message: context.l10n.settingsLoadingMessage,
-        ),
+        SettingsLoadState.loading => const StateView.loading(),
         SettingsLoadState.error => StateView.error(
           title: context.l10n.settingsUnavailableTitle,
           message: widget.controller.errorMessage,
@@ -792,7 +789,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             id: 'section-${section.slug}',
             section: section,
             label: section.label,
-            description: section.description,
+            description: section.description ?? '',
             targetKey: _sectionKey(section),
           ),
     ];
@@ -1355,7 +1352,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     title: context.l10n.settingsSectionAppearance,
     showHeading: showHeading,
     icon: SettingsSectionId.appearance.icon,
-    description: context.l10n.settingsAppearanceDescription,
     children: [
       if (widget.appearance case final appearance?)
         ListenableBuilder(
@@ -1394,7 +1390,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: _themeModeKey,
             highlighted: _isHighlighted(_SettingsTargetId.themeMode),
             title: context.l10n.settingsThemeTitle,
-            description: context.l10n.settingsThemeDescription,
             trailing: Select<ThemeMode>(
               key: const ValueKey('settings-theme-mode'),
               value: mode,
@@ -1449,7 +1444,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: context.l10n.settingsSectionGeneral,
       showHeading: showHeading,
       icon: SettingsSectionId.general.icon,
-      description: context.l10n.settingsGeneralDescription,
       children: [
         if (widget.language case final language?)
           ListenableBuilder(
@@ -1458,7 +1452,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               key: _languageKey,
               highlighted: _isHighlighted(_SettingsTargetId.language),
               title: context.l10n.settingsLanguageTitle,
-              description: context.l10n.settingsLanguageDescription,
               trailing: Select<AppLanguage>(
                 key: const ValueKey('settings-language'),
                 value: language.language,
@@ -1496,7 +1489,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _ =>
                 defaultTargetPlatform == TargetPlatform.android
                     ? context.l10n.settingsStartupAndroidDescription
-                    : context.l10n.settingsStartupDesktopDescription,
+                    : null,
             },
             trailing: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -1560,7 +1553,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: _taskbarVisibilityKey,
             highlighted: _isHighlighted('result-taskbar-visibility'),
             title: _taskbarVisibilityLabel,
-            description: context.l10n.settingsTaskbarVisibilityDescription,
             trailing: Switch(
               key: const ValueKey('settings-show-in-taskbar'),
               value: preferences.showInTaskbar,
@@ -1616,7 +1608,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.clipboard.icon,
       key: _clipboardSectionKey,
       title: context.l10n.settingsSectionClipboard,
-      description: context.l10n.settingsClipboardDescription,
       children: [
         if (widget.onOpenAndroidCaptureSetup != null) ...[
           SettingRow(
@@ -1882,7 +1873,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.data.icon,
       key: _dataSectionKey,
       title: context.l10n.settingsSectionData,
-      description: context.l10n.settingsDataDescription,
       groupContent: false,
       children: [
         if (widget.storage case final storage?) ...[
@@ -1966,7 +1956,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.sync.icon,
       key: _syncSectionKey,
       title: context.l10n.settingsSectionSync,
-      description: context.l10n.settingsSyncDescription,
       children: [
         SettingRow(
           key: _syncEnabledKey,
@@ -2130,7 +2119,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.privacy.icon,
       key: _privacySectionKey,
       title: context.l10n.settingsSectionPrivacy,
-      description: context.l10n.settingsPrivacyDescription,
       children: [
         OutlinedContainer(
           key: _excludedApplicationsKey,
@@ -2293,7 +2281,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.notifications.icon,
       key: _notificationsSectionKey,
       title: context.l10n.settingsSectionNotifications,
-      description: context.l10n.settingsNotificationsDescription,
       children: [
         SettingRow(
           key: _notificationOnCopyKey,
@@ -2329,7 +2316,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           key: _soundOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.soundOnCopy),
           title: context.l10n.settingsSoundOnCopyTitle,
-          description: context.l10n.settingsSoundOnCopyDescription,
           trailing: Switch(
             value: settings.soundOnCopy,
             onChanged: widget.controller.canStart(SettingsOperation.soundOnCopy)
@@ -2347,7 +2333,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       icon: SettingsSectionId.about.icon,
       key: _aboutSectionKey,
       title: context.l10n.settingsSectionAbout,
-      description: context.l10n.settingsAboutDescription,
       children: [
         if (widget.onShowWelcomeTour case final showTour?)
           SettingRow(
@@ -2363,7 +2348,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         SettingRow(
           title: context.l10n.settingsVersionTitle,
-          description: context.l10n.settingsVersionDescription,
           trailing: Text(
             widget.appUpdate?.currentVersion?.toString() ??
                 context.l10n.settingsVersionUnavailable,
@@ -2401,12 +2385,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _updateDescription(AppUpdateController controller) {
+  String? _updateDescription(AppUpdateController controller) {
     final current = controller.currentVersion?.toString();
     final available = controller.release?.version.toString();
     final l10n = context.l10n;
     return switch (controller.phase) {
-      AppUpdatePhase.idle => l10n.settingsUpdateIdle,
+      AppUpdatePhase.idle => null,
       AppUpdatePhase.checking => l10n.settingsUpdateChecking,
       AppUpdatePhase.upToDate =>
         current == null
@@ -2483,7 +2467,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         key: const ValueKey<String>('check-app-update'),
         onPressed: () => _checkForUpdates(controller),
         leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
-        child: Text(context.l10n.settingsUpdateCheckAgainAction),
+        child: Text(
+          controller.phase == AppUpdatePhase.idle
+              ? context.l10n.settingsUpdateCheckAction
+              : context.l10n.settingsUpdateCheckAgainAction,
+        ),
       ),
     };
   }
@@ -2499,9 +2487,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AppToast.show(
           context,
           title: l10n.settingsUpdateNoneTitle,
-          message: version == null
-              ? l10n.settingsUpdateLatest
-              : l10n.settingsUpdateVersionLatest(version),
+          message: version == null ? null : l10n.settingsUpdateVersion(version),
           tone: AppToastTone.success,
         );
         break;
@@ -2510,9 +2496,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AppToast.show(
           context,
           title: l10n.settingsUpdateAvailableTitle,
-          message: version == null
-              ? l10n.settingsUpdateReady
-              : l10n.settingsUpdateVersionReady(version),
+          message: version == null ? null : l10n.settingsUpdateVersion(version),
         );
         break;
       case AppUpdatePhase.unavailable:
@@ -2527,7 +2511,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AppToast.show(
           context,
           title: l10n.settingsUpdateCheckFailedTitle,
-          message: controller.message ?? l10n.settingsUpdateCheckFailedMessage,
+          message: controller.message,
           tone: AppToastTone.error,
         );
         break;
@@ -2807,7 +2791,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     AppToast.show(
       context,
       title: l10n.settingsRestoreDoneTitle,
-      message: l10n.settingsRestoreDoneMessage,
       tone: AppToastTone.success,
     );
   }
@@ -2833,7 +2816,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     AppToast.show(
       context,
       title: l10n.settingsBackupDoneTitle,
-      message: SettingsOutcomes.backedUp(l10n, result),
+      message: formatBytes(result.sizeBytes),
       tone: AppToastTone.success,
     );
   }
@@ -2933,9 +2916,7 @@ class _QuickPasteSection extends StatelessWidget {
                     ),
                   ),
               if (!controller.initialized && controller.busy)
-                StateView.loading(
-                  message: context.l10n.settingsQuickPasteLoading,
-                )
+                const StateView.loading()
               else if (!controller.supported && !controller.startFailed)
                 Alert(
                   leading: const AppIconFrame(
@@ -2986,8 +2967,6 @@ class _QuickPasteSection extends StatelessWidget {
                     key: maskPasswordFieldsKey,
                     highlighted: maskPasswordFieldsHighlighted,
                     title: context.l10n.settingsMaskPasswordFieldsTitle,
-                    description:
-                        context.l10n.settingsMaskPasswordFieldsDescription,
                     trailing: Switch(
                       value: controller.maskPasswordFields,
                       onChanged: controller.busy

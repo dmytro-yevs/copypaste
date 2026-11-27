@@ -14,14 +14,16 @@ class AppToast extends StatelessWidget {
   const AppToast({
     super.key,
     required this.title,
-    required this.message,
+    this.message,
     this.tone = AppToastTone.information,
     this.actionLabel,
     this.onAction,
   }) : assert((actionLabel == null) == (onAction == null));
 
   final String title;
-  final String message;
+
+  /// What the title leaves unsaid; omitted when the title says it all.
+  final String? message;
   final AppToastTone tone;
 
   /// One action, such as Undo, that also closes the toast.
@@ -33,17 +35,18 @@ class AppToast extends StatelessWidget {
   static ToastOverlay show(
     BuildContext context, {
     required String title,
-    required String message,
+    String? message,
     AppToastTone tone = AppToastTone.information,
     String? actionLabel,
     VoidCallback? onAction,
   }) {
     final shown = _lastError;
     final window = Navigator.maybeOf(context, rootNavigator: true);
+    final failure = message ?? title;
     if (tone == AppToastTone.error &&
         shown != null &&
         shown.isShowing &&
-        _lastErrorMessage == message &&
+        _lastErrorMessage == failure &&
         identical(_lastErrorWindow?.target, window)) {
       return shown;
     }
@@ -70,7 +73,7 @@ class AppToast extends StatelessWidget {
     );
     if (tone == AppToastTone.error) {
       _lastError = overlay;
-      _lastErrorMessage = message;
+      _lastErrorMessage = failure;
       _lastErrorWindow = window == null ? null : WeakReference(window);
     }
     return overlay;
@@ -89,7 +92,10 @@ class AppToast extends StatelessWidget {
       AppToastTone.success => LucideIcons.circleCheck,
       AppToastTone.error => LucideIcons.circleAlert,
     };
-    final content = Text(message);
+    final content = switch (message) {
+      final message? => Text(message),
+      null => null,
+    };
     final action = actionLabel == null
         ? null
         : Button.ghost(

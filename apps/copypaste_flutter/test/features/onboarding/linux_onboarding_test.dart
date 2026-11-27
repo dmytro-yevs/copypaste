@@ -263,10 +263,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Screenshot blocking'), findsOneWidget);
-    expect(
-      find.textContaining('Screenshot blocking is unavailable on Linux.'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Unavailable on Linux.'), findsOneWidget);
     expect(find.widgetWithText(Button, 'Open setup'), findsOneWidget);
     expect(find.widgetWithText(Button, 'Register links'), findsOneWidget);
   });

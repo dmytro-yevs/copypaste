@@ -102,9 +102,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
         builder: (context, _) {
           final controller = widget.controller;
           return switch (controller.loadState) {
-            DevicesLoadState.loading => StateView.loading(
-              message: context.l10n.devicesLoading,
-            ),
+            DevicesLoadState.loading => const StateView.loading(),
             DevicesLoadState.error => StateView.error(
               title: context.l10n.devicesUnavailableTitle,
               message: controller.errorMessage,
@@ -872,21 +870,11 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 ),
                 const Gap(AppSpacing.md),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        device.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ).h3(),
-                      Text(
-                        DevicePresentation.summary(device.details),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ).muted(),
-                    ],
-                  ),
+                  child: Text(
+                    device.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ).h3(),
                 ),
                 AppTooltip(
                   tooltip: (context) => TooltipContainer(
@@ -1361,6 +1349,8 @@ class _PairingInspectorState extends State<PairingInspector> {
   @override
   Widget build(BuildContext context) {
     final mode = widget.controller.pairingEntryMode;
+    // Closing clears the mode before its listeners take this surface away.
+    if (mode == null) return const SizedBox.shrink();
     final body = _withStepIndicator(switch (mode) {
       PairingEntryMode.invite => _invitationContent(),
       PairingEntryMode.nearby =>
@@ -1371,10 +1361,6 @@ class _PairingInspectorState extends State<PairingInspector> {
             : _pairingError(),
       PairingEntryMode.scanQr => _scannerContent(),
       PairingEntryMode.enterCode => _codeContent(),
-      null => StateView.empty(
-        title: context.l10n.pairingEmptyTitle,
-        message: context.l10n.pairingEmptyMessage,
-      ),
     });
     final content = FocusTraversalGroup(
       child: Card(
@@ -1435,7 +1421,7 @@ class _PairingInspectorState extends State<PairingInspector> {
               )
             else
               body,
-            if (_pairingActions() case final actions?) ...[
+            if (_pairingActions(mode) case final actions?) ...[
               const Gap(AppSpacing.xl),
               actions,
             ],
@@ -1553,51 +1539,32 @@ class _PairingInspectorState extends State<PairingInspector> {
       if (widget.controller.errorMessage != null) return _pairingError();
       return StateView.loading(message: context.l10n.pairingConnectingDevice);
     }
-    final scanner = _scanner;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (scanner?.preview case final preview?)
-          ClipRect(
-            child: SizedBox(
-              key: const ValueKey<String>('pairing-camera-preview'),
-              height: 260,
-              child: preview,
-            ),
-          )
-        else
-          Card(
-            child: SizedBox(
-              height: 220,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const AppIconFrame(
-                      size: AppIconSize.state,
-                      child: Icon(
-                        LucideIcons.scanLine,
-                        size: AppIconSize.state,
-                      ),
-                    ),
-                    const Gap(AppSpacing.md),
-                    Text(context.l10n.pairingQrScannerTitle).h4(),
-                    const Gap(AppSpacing.xs),
-                    Text(context.l10n.pairingCameraPreviewPlaceholder).muted(),
-                  ],
-                ),
+    if (_scanner?.preview case final preview?) {
+      return ClipRect(
+        child: SizedBox(
+          key: const ValueKey<String>('pairing-camera-preview'),
+          height: 260,
+          child: preview,
+        ),
+      );
+    }
+    return Card(
+      child: SizedBox(
+        height: 220,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppIconFrame(
+                size: AppIconSize.state,
+                child: Icon(LucideIcons.scanLine, size: AppIconSize.state),
               ),
-            ),
+              const Gap(AppSpacing.md),
+              Text(context.l10n.pairingCameraPreviewPlaceholder).muted(),
+            ],
           ),
-        if (_validationMessage != null) ...[
-          const Gap(AppSpacing.md),
-          Alert.destructive(
-            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: Text(context.l10n.pairingScannerNeedsAttention),
-            content: Text(_validationMessage!),
-          ),
-        ],
-      ],
+        ),
+      ),
     );
   }
 
@@ -1663,7 +1630,6 @@ class _PairingInspectorState extends State<PairingInspector> {
   }
 
   Future<void> _startScanner() async {
-    setState(() => _validationMessage = null);
     final scanner = _scanner ??= PairingCameraScanner(
       source: const CameraPluginPairingSource(),
       coordinatorFactory: (onProgress) => QrScanCoordinator(
@@ -1710,6 +1676,10 @@ class _PairingInspectorState extends State<PairingInspector> {
   Widget _pairingProgress(PairingCeremony ceremony) {
     final l10n = context.l10n;
     final progress = widget.controller.pairingProgress;
+    final detail =
+        ceremony.failureMessage ??
+        ceremony.peerName ??
+        DevicePresentation.pairingStateDescription(ceremony.state);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1734,12 +1704,10 @@ class _PairingInspectorState extends State<PairingInspector> {
               ),
             ],
           ),
-          const Gap(AppSpacing.sm),
-          Text(
-            ceremony.failureMessage ??
-                ceremony.peerName ??
-                DevicePresentation.pairingStateDescription(ceremony.state),
-          ).muted(),
+          if (detail != null) ...[
+            const Gap(AppSpacing.sm),
+            Text(detail).muted(),
+          ],
         ],
         if (widget.controller.invitation case final invitation?) ...[
           if (ceremony.state != PairingState.waitingForPeer)
@@ -1748,11 +1716,6 @@ class _PairingInspectorState extends State<PairingInspector> {
           const Gap(AppSpacing.lg),
           const Divider(key: ValueKey('pairing-invite-divider')),
           const Gap(AppSpacing.lg),
-          AppBar(
-            title: Text(l10n.pairingDetailsTitle),
-            leading: const [AppIconFrame(child: Icon(LucideIcons.info))],
-          ),
-          const Gap(AppSpacing.md),
           Column(
             key: const ValueKey<String>('pairing-invite-details'),
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1827,7 +1790,7 @@ class _PairingInspectorState extends State<PairingInspector> {
     );
   }
 
-  Widget? _pairingActions() {
+  Widget? _pairingActions(PairingEntryMode mode) {
     final l10n = context.l10n;
     final ceremony = widget.controller.pairing;
     if (ceremony != null) {
@@ -1872,7 +1835,7 @@ class _PairingInspectorState extends State<PairingInspector> {
         ],
       );
     }
-    switch (widget.controller.pairingEntryMode) {
+    switch (mode) {
       case PairingEntryMode.enterCode:
         return Align(
           alignment: Alignment.center,
@@ -1906,25 +1869,22 @@ class _PairingInspectorState extends State<PairingInspector> {
         );
       case PairingEntryMode.invite:
       case PairingEntryMode.nearby:
-      case null:
         return null;
     }
   }
 
   Widget _pairingError() => StateView.error(
     title: context.l10n.pairingActionFailed,
-    message:
-        widget.controller.errorMessage ?? context.l10n.pairingActionNotStarted,
+    message: widget.controller.errorMessage,
   );
 
-  String _modeTitle(PairingEntryMode? mode) {
+  String _modeTitle(PairingEntryMode mode) {
     final l10n = context.l10n;
     return switch (mode) {
       PairingEntryMode.invite => l10n.pairingPairDevice,
       PairingEntryMode.scanQr => l10n.pairingScanQrCode,
       PairingEntryMode.enterCode => l10n.pairingEnterPairingCode,
       PairingEntryMode.nearby => l10n.pairingConnectNearbyDevice,
-      null => l10n.pairingTitle,
     };
   }
 }

@@ -9,19 +9,22 @@ class SetupSettingRow extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.description,
+    this.description,
     this.action,
     this.statusIcon,
   }) : assert(action == null || statusIcon == null);
 
   final IconData icon;
   final String title;
-  final String description;
+
+  /// Omitted when the title already says everything.
+  final String? description;
   final Widget? action;
   final IconData? statusIcon;
 
   @override
   Widget build(BuildContext context) {
+    final description = this.description;
     final details = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -42,14 +45,18 @@ class SetupSettingRow extends StatelessWidget {
             ],
           ],
         ),
-        const Gap(AppSpacing.xs),
-        Padding(
-          padding: const EdgeInsets.only(left: AppIconSize.md + AppSpacing.md),
-          child: Text(
-            description,
-            style: Theme.of(context).typography.xSmall,
-          ).muted(),
-        ),
+        if (description != null) ...[
+          const Gap(AppSpacing.xs),
+          Padding(
+            padding: const EdgeInsets.only(
+              left: AppIconSize.md + AppSpacing.md,
+            ),
+            child: Text(
+              description,
+              style: Theme.of(context).typography.xSmall,
+            ).muted(),
+          ),
+        ],
       ],
     );
     return LayoutBuilder(

@@ -28,12 +28,17 @@ class ModuleViewController extends ChangeNotifier {
   int _generation = 0;
   int _running = 0;
   String? _error;
+  String? _errorReason;
   bool _disposed = false;
 
   ModulesController get modules => _modules;
   ModuleView? get view => _view;
   bool get busy => _running > 0;
   String? get errorMessage => _error;
+
+  /// Why the last command failed, or null when no cause is known; the line
+  /// under a title that already says a module operation failed.
+  String? get errorReason => _errorReason;
 
   /// Shows the view [command] returns.
   Future<void> open(
@@ -77,7 +82,10 @@ class ModuleViewController extends ChangeNotifier {
     if (_disposed) return null;
     final generation = show ? ++_generation : _generation;
     _running += 1;
-    if (report) _error = null;
+    if (report) {
+      _error = null;
+      _errorReason = null;
+    }
     notifyListeners();
     try {
       final result = await _modules.request(moduleId, command, arguments);
@@ -93,9 +101,8 @@ class ModuleViewController extends ChangeNotifier {
       return result;
     } catch (error) {
       if (!_disposed && report) {
-        _error =
-            ErrorText.reason(error) ??
-            AppStrings.current.modulesOperationIncomplete;
+        _errorReason = ErrorText.reason(error);
+        _error = _errorReason ?? AppStrings.current.modulesOperationIncomplete;
       }
       return null;
     } finally {

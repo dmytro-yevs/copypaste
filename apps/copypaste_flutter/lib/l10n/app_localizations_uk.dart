@@ -57,6 +57,9 @@ class AppLocalizationsUk extends AppLocalizations {
   String get commonEnable => 'Увімкнути';
 
   @override
+  String get commonChoose => 'Вибрати';
+
+  @override
   String get settingsLanguageTitle => 'Мова';
 
   @override
@@ -81,10 +84,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsRuntimeRefreshFailed =>
       'Не вдалося оновити налаштування. Спробуйте ще раз.';
-
-  @override
-  String get settingsRuntimeLoadFailed =>
-      'Не вдалося завантажити налаштування.';
 
   @override
   String get settingsRuntimeAppAlreadyExcluded => 'Цю програму вже виключено.';
@@ -375,9 +374,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get quickPasteSearchPlaceholder => 'Введіть текст для пошуку…';
 
   @override
-  String get quickPasteLoadingHistory => 'Завантаження історії буфера обміну.';
-
-  @override
   String get quickPasteHistoryUnavailable => 'Історія недоступна';
 
   @override
@@ -425,7 +421,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'Приватна історія буфера обміну для macOS, Android, Windows і Linux.';
 
   @override
-  String get transfersTitle => 'Завантаження й передавання';
+  String get transfersTitle => 'Передавання';
 
   @override
   String transfersActiveTooltip(int count, String written, String total) {
@@ -460,10 +456,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get transfersShowEarlier => 'Раніші';
 
   @override
-  String get transfersClearCompletedHistory => 'Очистити історію завершених';
-
-  @override
-  String get transfersErrorTitle => 'Передавання';
+  String get transfersClearCompletedHistory => 'Очистити історію';
 
   @override
   String get transfersEmptyTitle => 'Немає передавань';
@@ -539,10 +532,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get transfersUpdatesUnavailable =>
       'Оновлення стану передавань недоступні. Відкрийте знову, щоб оновити.';
-
-  @override
-  String get transfersLoadFailed =>
-      'Не вдалося завантажити передавання. Спробуйте ще раз.';
 
   @override
   String get transfersUpdatesLoadFailed =>
@@ -660,9 +649,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Відновити запис (не запущено)';
 
   @override
-  String get platformTrayOpen => 'Відкрити';
-
-  @override
   String get platformTraySettings => 'Налаштування';
 
   @override
@@ -677,8 +663,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'Системний трей недоступний. Не закривайте CopyPaste, а потім повторіть спробу або вийдіть.';
 
   @override
-  String get platformQuitFailed =>
-      'Не вдалося вийти з CopyPaste. Спробуйте ще раз.';
+  String get platformQuitFailed => 'Не вдалося вийти з CopyPaste.';
 
   @override
   String get platformVisibilityChangeFailed =>
@@ -764,16 +749,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsSectionGeneral => 'Загальні';
 
   @override
-  String get settingsSectionGeneralSummary => 'Мова й видимість програми.';
-
-  @override
   String get settingsSectionAppearance => 'Вигляд';
-
-  @override
-  String get settingsSectionAppearanceSummary => 'Тема й матеріал вікна.';
-
-  @override
-  String get settingsAppearanceDescription => 'Тема й вигляд вікон.';
 
   @override
   String get settingsThemeTitle => 'Тема';
@@ -836,70 +812,35 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsSectionClipboard => 'Буфер обміну';
 
   @override
-  String get settingsSectionClipboardSummary => 'Запис та обмеження історії.';
-
-  @override
   String get settingsSectionPrivacy => 'Приватність';
-
-  @override
-  String get settingsSectionPrivacySummary =>
-      'Виключення програм і захист екрана.';
 
   @override
   String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
-  String get settingsSectionQuickPasteSummary =>
-      'Скорочення й автоматичне вставлення.';
-
-  @override
   String get settingsSectionSync => 'Синхронізація';
-
-  @override
-  String get settingsSectionSyncSummary =>
-      'Синхронізація й виявлення пристроїв поблизу.';
 
   @override
   String get settingsSectionNotifications => 'Сповіщення';
 
   @override
-  String get settingsSectionNotificationsSummary =>
-      'Сповіщення й звуки запису.';
-
-  @override
   String get settingsSectionData => 'Дані';
 
   @override
-  String get settingsSectionDataSummary =>
-      'Експорт, резервне копіювання й відновлення.';
-
-  @override
   String get settingsSectionModules => 'Модулі';
-
-  @override
-  String get settingsSectionModulesSummary =>
-      'Встановлення й керування додатковими модулями.';
 
   @override
   String get settingsSectionRules => 'Правила вмісту';
 
   @override
   String get settingsSectionRulesSummary =>
-      'Автоматично додавайте теги, пропускайте, захищайте або видаляйте записи за часом.';
+      'Автоматично додавайте теги, пропускайте, захищайте або видаляйте кліпи за часом.';
 
   @override
   String get settingsSectionQuickAccess => 'Швидкий доступ';
 
   @override
-  String get settingsSectionQuickAccessSummary =>
-      'Клавіатура, плитки й віджет головного екрана.';
-
-  @override
   String get settingsSectionTransforms => 'Перетворення тексту';
-
-  @override
-  String get settingsSectionTransformsSummary =>
-      'Улюблені, конвеєри й типові перетворення під час вставлення.';
 
   @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
@@ -1063,17 +1004,10 @@ class AppLocalizationsUk extends AppLocalizations {
       'Копіюйте елементи, щоб додати їх';
 
   @override
-  String get pasteQueueCollectingEmptyMessage =>
-      'Кожна копія потрапляє в чергу, доки ви не зупините збирання.';
-
-  @override
   String get pasteQueueStartCollecting => 'Почати збирання';
 
   @override
   String get pasteQueueStopCollecting => 'Зупинити збирання';
-
-  @override
-  String get pasteQueueLoading => 'Завантаження черги…';
 
   @override
   String get pasteQueueLoadFailed => 'Не вдалося завантажити чергу';
@@ -1252,10 +1186,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pasteQueuePasteNextStyleTitle => '«Вставити наступний» виконує';
 
   @override
-  String get pasteQueuePasteNextStyleDescription =>
-      'Вставляти автоматично або лише копіювати в буфер обміну.';
-
-  @override
   String get pasteQueuePasteIntoApp => 'Вставити в активний застосунок';
 
   @override
@@ -1263,10 +1193,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get pasteQueueInsertTitle => 'Нові елементи додаються';
-
-  @override
-  String get pasteQueueInsertDescription =>
-      'Куди в черзі потрапляють зібрані й додані елементи.';
 
   @override
   String get pasteQueueInsertEnd => 'У кінець (першим прийшов — першим вийшов)';
@@ -1277,10 +1203,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get pasteQueueEndBehaviorTitle => 'Після останнього елемента';
-
-  @override
-  String get pasteQueueEndBehaviorDescription =>
-      'Що робить «Вставити наступний», коли всі елементи вже вставлено.';
 
   @override
   String get pasteQueueEndStop => 'Зупинити';
@@ -1330,15 +1252,10 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pasteQueuePlainTextTitle => 'Завжди вставляти як звичайний текст';
 
   @override
-  String get pasteQueuePlainTextDescription =>
-      'Прибирає форматування з елементів черги.';
-
-  @override
   String get pasteQueueIdleStopTitle => 'Зупиняти збирання через';
 
   @override
-  String get pasteQueueIdleStopDescription =>
-      'Зупиняти збирання, якщо стільки часу немає копій.';
+  String get pasteQueueIdleStopDescription => 'Час без нових копій.';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1360,10 +1277,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Відновлювати попередній буфер обміну після завершення';
 
   @override
-  String get pasteQueueRestoreDescription =>
-      'Повертає те, що було скопійовано до вставлення.';
-
-  @override
   String get pasteQueueSettingsKeywords =>
       'paste queue черга збирання порядок поєднання клавіш роздільник';
 
@@ -1371,45 +1284,11 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsSectionAbout => 'Про програму';
 
   @override
-  String get settingsSectionAboutSummary => 'Версія й оновлення програми.';
-
-  @override
-  String get settingsGeneralDescription =>
-      'Мова, автозапуск і видимість програми.';
-
-  @override
   String get settingsModulesDescription => 'Додаткові функції для CopyPaste.';
-
-  @override
-  String get settingsClipboardDescription =>
-      'Записуйте зміни буфера обміну й керуйте обмеженнями історії.';
-
-  @override
-  String get settingsDataDescription =>
-      'Експортуйте, створюйте резервні копії й відновлюйте історію буфера обміну.';
-
-  @override
-  String get settingsSyncDescription =>
-      'Керуйте синхронізацією зі сполученими пристроями.';
-
-  @override
-  String get settingsPrivacyDescription =>
-      'Визначайте, з яких програм записувати дані, і захищайте вміст буфера обміну.';
-
-  @override
-  String get settingsNotificationsDescription =>
-      'Виберіть сповіщення й звуки для записаних кліпів.';
-
-  @override
-  String get settingsAboutDescription =>
-      'Версія CopyPaste та оновлення програми.';
 
   @override
   String get settingsQuickPasteDescription =>
       'Відкривайте історію буфера обміну звідусіль, не перемикаючи вікна.';
-
-  @override
-  String get settingsLoadingMessage => 'Завантаження налаштувань.';
 
   @override
   String get settingsUnavailableTitle => 'Налаштування недоступні';
@@ -1460,10 +1339,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Відновлювати фонові служби після перезапуску.';
 
   @override
-  String get settingsStartupDesktopDescription =>
-      'Автоматично відкривати CopyPaste під час входу в систему.';
-
-  @override
   String get settingsShowInDock => 'Показувати в Dock';
 
   @override
@@ -1501,9 +1376,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsLightweightModeKeywords =>
       'легкий закрити вийти фон пам\'ять lightweight close quit background memory';
-
-  @override
-  String get settingsVisibilityErrorTitle => 'Не вдалося змінити видимість';
 
   @override
   String get settingsModulesSearchDescription =>
@@ -1589,7 +1461,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsRetentionDescription =>
-      'Автоматично вилучати старі незакріплені елементи буфера обміну.';
+      'Автоматично вилучати старі незакріплені кліпи.';
 
   @override
   String get settingsRetentionForever => 'Зберігати завжди';
@@ -1688,7 +1560,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsExportTextDescription =>
-      'Зберегти текстові кліпи в переносному файлі.';
+      'Зберегти текстові кліпи у файл JSON.';
 
   @override
   String get settingsExportAction => 'Експортувати';
@@ -1701,7 +1573,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'Зберегти всю локальну історію цього пристрою.';
 
   @override
-  String get settingsCreateBackupAction => 'Резервна копія';
+  String get settingsCreateBackupAction => 'Створити копію';
 
   @override
   String get settingsRestoreTitle => 'Відновити з резервної копії';
@@ -1840,7 +1712,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get applicationPickerEmpty => 'Програм не знайдено';
 
   @override
-  String get settingsSkipSecretTitle => 'Пропускати конфіденційні дані';
+  String get settingsSkipSecretTitle => 'Пропускати секретні дані';
 
   @override
   String get settingsSkipSecretDescription =>
@@ -1906,9 +1778,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsVersionTitle => 'Версія';
 
   @override
-  String get settingsVersionDescription => 'Встановлена версія CopyPaste.';
-
-  @override
   String get settingsVersionUnavailable => 'Недоступно';
 
   @override
@@ -1923,9 +1792,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'версія github випуск version github release';
 
   @override
-  String get settingsUpdateIdle => 'Перевірте, чи є новіша версія CopyPaste.';
-
-  @override
   String get settingsUpdateChecking => 'Перевірка оновлень.';
 
   @override
@@ -1934,6 +1800,11 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String settingsUpdateVersionUpToDate(String version) {
     return 'Версія $version найновіша.';
+  }
+
+  @override
+  String settingsUpdateVersion(String version) {
+    return 'Версія $version';
   }
 
   @override
@@ -1981,27 +1852,13 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsUpdateCheckAgainAction => 'Перевірити знову';
 
   @override
+  String get settingsUpdateCheckAction => 'Перевірити зараз';
+
+  @override
   String get settingsUpdateNoneTitle => 'Немає доступних оновлень';
 
   @override
-  String get settingsUpdateLatest => 'У вас найновіша версія CopyPaste.';
-
-  @override
-  String settingsUpdateVersionLatest(String version) {
-    return 'CopyPaste $version — найновіша версія.';
-  }
-
-  @override
   String get settingsUpdateAvailableTitle => 'Доступне оновлення';
-
-  @override
-  String get settingsUpdateReady =>
-      'Новіша версія CopyPaste готова до встановлення.';
-
-  @override
-  String settingsUpdateVersionReady(String version) {
-    return 'Версія CopyPaste $version готова до встановлення.';
-  }
 
   @override
   String get settingsUpdateUnavailableTitle => 'Оновлення недоступне';
@@ -2013,10 +1870,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsUpdateCheckFailedTitle =>
       'Не вдалося перевірити оновлення';
-
-  @override
-  String get settingsUpdateCheckFailedMessage =>
-      'CopyPaste не вдалося перевірити оновлення.';
 
   @override
   String get settingsQuickPasteSetupTitle => 'Налаштуйте Quick Paste';
@@ -2035,10 +1888,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsQuickPasteCheckAgain => 'Перевірити знову';
-
-  @override
-  String get settingsQuickPasteLoading =>
-      'Завантаження налаштувань Quick Paste.';
 
   @override
   String get settingsQuickPasteUnavailableTitle =>
@@ -2132,9 +1981,6 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get devicesLoading => 'Завантаження пристроїв…';
-
-  @override
   String get devicesUnavailableTitle => 'Пристрої недоступні';
 
   @override
@@ -2142,6 +1988,9 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get devicesScan => 'Сканувати';
+
+  @override
+  String get devicesScanInvalidTitle => 'Не той QR-код';
 
   @override
   String get devicesScanning => 'Сканування…';
@@ -2301,15 +2150,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get devicesConnectionUnknown => 'Невідомо';
 
   @override
-  String get devicesPeerAvailable => 'Доступний';
-
-  @override
-  String get devicesPeerVisibleNow => 'Видимий зараз';
-
-  @override
-  String get devicesPeerStatusUnknown => 'Стан невідомий';
-
-  @override
   String get devicesPingUnavailable => '— мс';
 
   @override
@@ -2383,21 +2223,13 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pairingSendingRequest => 'Надсилання запиту на з’єднання…';
 
   @override
-  String get pairingEmptyTitle => 'Виберіть дію сполучення';
-
-  @override
-  String get pairingEmptyMessage =>
-      'Тут з’являться елементи керування сполученням.';
-
-  @override
   String get pairingCreatingInvitation => 'Створення запрошення до сполучення.';
 
   @override
   String get pairingCode => 'Код сполучення';
 
   @override
-  String get pairingCodeHint =>
-      'Введіть 8-символьний код, показаний на іншому пристрої.';
+  String get pairingCodeHint => 'Показаний на іншому пристрої.';
 
   @override
   String get pairingDeviceAddress => 'Адреса пристрою';
@@ -2416,14 +2248,8 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pairingConnectingDevice => 'Під’єднання пристрою…';
 
   @override
-  String get pairingQrScannerTitle => 'Сканер QR-кодів';
-
-  @override
   String get pairingCameraPreviewPlaceholder =>
       'Тут з’явиться зображення з камери.';
-
-  @override
-  String get pairingScannerNeedsAttention => 'Сканер потребує уваги';
 
   @override
   String get pairingCodeIncomplete =>
@@ -2438,10 +2264,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get pairingInviteInstructions =>
-      'На іншому пристрої виберіть «Додати пристрій → Ввести код» або відскануйте QR-код.';
-
-  @override
-  String get pairingDetailsTitle => 'Дані сполучення';
+      'На іншому пристрої виберіть «Ввести код» або «Сканувати QR».';
 
   @override
   String get pairingAddress => 'Адреса';
@@ -2467,9 +2290,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get pairingStartScanner => 'Запустити сканер';
-
-  @override
-  String get pairingActionNotStarted => 'Не вдалося розпочати сполучення.';
 
   @override
   String get pairingStateHandshaking => 'Перевірка пристрою';
@@ -2498,12 +2318,8 @@ class AppLocalizationsUk extends AppLocalizations {
       'Пристрої встановлюють захищений канал.';
 
   @override
-  String get pairingAwaitingConfirmationDescription =>
-      'Порівняйте захищений код перевірки, а потім підтвердьте на обох пристроях.';
-
-  @override
   String get pairingConfirmedDescription =>
-      'Пристрій під’єднано. Членство у вашій групі синхронізуватиметься автоматично.';
+      'Інші пристрої вашого простору під’єднаються автоматично.';
 
   @override
   String get pairingNoDeviceAdded => 'Пристрій не додано.';
@@ -2744,7 +2560,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get syncPeerLastCheckStarted => 'Початок останньої перевірки';
 
   @override
-  String get syncPeerItemsOverSizeLimit => 'Елементи понад обмеження розміру';
+  String get syncPeerItemsOverSizeLimit => 'Кліпи понад обмеження розміру';
 
   @override
   String syncPeerLastSeen(String time) {
@@ -2826,10 +2642,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Не вдалося оновити історію. Спробуйте ще раз.';
 
   @override
-  String get historyErrorLoad =>
-      'Не вдалося завантажити історію. Спробуйте ще раз.';
-
-  @override
   String get historyErrorLoadMore => 'Не вдалося завантажити більше історії.';
 
   @override
@@ -2887,8 +2699,7 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get historyErrorSecrecyUpdate =>
-      'Не вдалося змінити конфіденційність кліпу.';
+  String get historyErrorSecrecyUpdate => 'Не вдалося змінити спойлер.';
 
   @override
   String get historyErrorPinUpdate => 'Не вдалося змінити закріплення.';
@@ -2917,11 +2728,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyOcrErrorStart =>
-      'Не вдалося запустити розпізнавання тексту. Спробуйте ще раз.';
+      'Не вдалося запустити розпізнавання тексту.';
 
   @override
   String get historyOcrErrorRecognize =>
-      'Не вдалося розпізнати текст на зображенні. Спробуйте ще раз.';
+      'Не вдалося розпізнати текст на зображенні.';
 
   @override
   String get historyOcrRecognizing => 'Розпізнавання тексту на зображенні.';
@@ -2934,9 +2745,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyOcrTitle => 'Текст на зображенні';
-
-  @override
-  String get historyOcrTextCopied => 'Розпізнаний текст скопійовано.';
 
   @override
   String get historyOcrCopyError =>
@@ -3024,9 +2832,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyActionFailedTitle => 'Дію не виконано';
 
   @override
-  String get historyLoadingMessage => 'Завантаження історії буфера обміну.';
-
-  @override
   String get historyUnavailableTitle => 'Історія недоступна';
 
   @override
@@ -3056,17 +2861,17 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Пропущено $count елемента буфера обміну',
-      many: 'Пропущено $count елементів буфера обміну',
-      few: 'Пропущено $count елементи буфера обміну',
-      one: 'Пропущено $count елемент буфера обміну',
+      other: 'Пропущено $count кліпу',
+      many: 'Пропущено $count кліпів',
+      few: 'Пропущено $count кліпи',
+      one: 'Пропущено $count кліп',
     );
     return '$_temp0';
   }
 
   @override
   String get historySkippedRowsMessage =>
-      'Деякі збережені кліпи не вдалося прочитати, тому їх не показано в цьому списку.';
+      'Деякі кліпи не вдалося прочитати, тому їх не показано в цьому списку.';
 
   @override
   String get historySearch => 'Пошук в історії';
@@ -3154,9 +2959,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyCopyPlainText => 'Скопіювати як звичайний текст';
 
   @override
-  String get historyManageClipTags => 'Керувати тегами кліпу';
-
-  @override
   String get historyPinnedButton => 'Закріплено';
 
   @override
@@ -3178,16 +2980,10 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyCopyFailedTitle => 'Не вдалося скопіювати';
 
   @override
-  String get historyPlainTextCopied => 'Звичайний текст скопійовано.';
-
-  @override
-  String get historyClipCopied => 'Кліп скопійовано.';
+  String get historyPlainTextCopied => 'Як звичайний текст.';
 
   @override
   String get historyDownloadedTitle => 'Завантажено';
-
-  @override
-  String get historyFileSaved => 'Файл збережено.';
 
   @override
   String get historyShare => 'Поділитися';
@@ -3249,16 +3045,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyRetryDownload => 'Повторити завантаження';
 
   @override
-  String get historyDownloadFailedTitle => 'Не вдалося завантажити';
-
-  @override
   String get historyShowFile => 'Показати файл';
-
-  @override
-  String get historyMetadataPrivacy => 'Приватність';
-
-  @override
-  String get historyMetadataConfidential => 'Конфіденційно';
 
   @override
   String get historyMetadataCaptured => 'Записано';
@@ -3268,9 +3055,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyMetadataDevice => 'Пристрій';
-
-  @override
-  String get historyMetadataClipType => 'Тип кліпу';
 
   @override
   String get historyMetadataType => 'Тип';
@@ -3294,7 +3078,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyMetadataSync => 'Синхронізація';
 
   @override
-  String get historyMetadataTooLargeToSync => 'Завеликий для синхронізації';
+  String get historyMetadataTooLargeToSync => 'Завеликий';
 
   @override
   String historyBulkDeleteTitle(int count) {
@@ -3368,23 +3152,20 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get appRuntimeStartFailed =>
-      'CopyPaste не вдалося запустити середовище виконання.';
-
-  @override
-  String get appPreparing => 'Підготовка CopyPaste.';
+      'CopyPaste не вдалося запустити фонову службу.';
 
   @override
   String get appRuntimeWaiting =>
       'CopyPaste очікує доступу до захищеної історії.';
 
   @override
-  String get appHistoryUnavailableTitle => 'Середовище історії недоступне';
+  String get appHistoryUnavailableTitle => 'Історія недоступна';
 
   @override
-  String get appDevicesUnavailableTitle => 'Середовище пристроїв недоступне';
+  String get appDevicesUnavailableTitle => 'Пристрої недоступні';
 
   @override
-  String get appSettingsUnavailableTitle => 'Середовище налаштувань недоступне';
+  String get appSettingsUnavailableTitle => 'Налаштування недоступні';
 
   @override
   String get appQuit => 'Вийти з CopyPaste';
@@ -3403,11 +3184,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get appDestinationSettings => 'Налаштування';
-
-  @override
-  String appDestinationSelected(String destination) {
-    return '$destination, вибрано';
-  }
 
   @override
   String get appActiveFilter => 'Активний фільтр';
@@ -3438,8 +3214,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get sharedShizukuNoLongerNeeded => 'Більше Shizuku не знадобиться.';
 
   @override
-  String get sharedGetShizukuDescription =>
-      'Завантажте Shizuku, щоб надати одноразовий доступ.';
+  String get sharedGetShizukuDescription => 'Shizuku надає одноразовий доступ.';
 
   @override
   String get sharedShizukuWirelessDebugging =>
@@ -3467,6 +3242,9 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get sharedAllow => 'Дозволити';
+
+  @override
+  String get sharedApply => 'Надати';
 
   @override
   String get sharedSetupCommandsCopyFailed =>
@@ -3512,14 +3290,10 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingSaveProgressFailed =>
-      'CopyPaste не вдалося зберегти поступ початкового налаштування.';
+      'CopyPaste не вдалося зберегти поступ налаштування.';
 
   @override
   String get onboardingStartAtLogin => 'Запуск під час входу';
-
-  @override
-  String get onboardingStartAtLoginDescription =>
-      'Відкривати CopyPaste під час входу в систему';
 
   @override
   String get onboardingStartAtLoginSemantics =>
@@ -3648,8 +3422,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get onboardingLinuxCompanion => 'Супровідний компонент GNOME або KDE';
 
   @override
-  String get onboardingLinuxCompanionReady =>
-      'Автентифікований міст Clipboard v2 готовий.';
+  String get onboardingLinuxCompanionReady => 'Готово.';
 
   @override
   String get onboardingLinuxCompanionCapturePaused =>
@@ -3666,33 +3439,27 @@ class AppLocalizationsUk extends AppLocalizations {
   String get onboardingLinuxKeyboardControl => 'Керування клавіатурою';
 
   @override
-  String get onboardingLinuxKeyboardAllowed =>
-      'Керування клавіатурою дозволено для Quick Paste.';
+  String get onboardingLinuxKeyboardAllowed => 'Дозволено для Quick Paste.';
 
   @override
   String get onboardingLinuxKeyboardUnsupported =>
-      'Керування клавіатурою недоступне в цьому сеансі робочого середовища.';
+      'Недоступне в цьому сеансі робочого середовища.';
 
   @override
   String get onboardingLinuxAllowKeyboard => 'Дозволити керування клавіатурою';
 
   @override
-  String get onboardingLinuxQuickPasteReady => 'Функція Quick Paste готова.';
+  String get onboardingLinuxQuickPasteReady => 'Готово.';
 
   @override
   String get onboardingLinuxQuickPastePending =>
-      'Функція Quick Paste запрацює, щойно буде активовано потрібну інтеграцію з робочим середовищем.';
-
-  @override
-  String get onboardingLinuxStartAtLoginDescription =>
-      'Відкривати CopyPaste під час входу в систему.';
+      'Запрацює, щойно буде активовано потрібну інтеграцію з робочим середовищем.';
 
   @override
   String get onboardingLinuxLinks => 'Посилання CopyPaste';
 
   @override
-  String get onboardingLinuxLinksRegistered =>
-      'Посилання CopyPaste відкриваються в цій програмі.';
+  String get onboardingLinuxLinksRegistered => 'Відкриваються в цій програмі.';
 
   @override
   String get onboardingLinuxLinksUnregistered =>
@@ -3706,7 +3473,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingLinuxScreenshotBlockingUnavailable =>
-      'Блокування знімків екрана недоступне в Linux. Захищені збережені дані залишаються зашифрованими.';
+      'Недоступне в Linux. Збережені дані залишаються зашифрованими.';
 
   @override
   String get onboardingLinuxCheckAgain => 'Перевірити знову';
@@ -3782,7 +3549,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingAndroidApplyAccessDescription =>
-      'Надати одноразовий доступ до запису.';
+      'Одноразово. Потім Shizuku не знадобиться.';
 
   @override
   String get onboardingAndroidFullCaptureLater =>
@@ -3819,7 +3586,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingAndroidIntakeFailed =>
-      'Не вдалося ввімкнути приймання буфера обміну.';
+      'Не вдалося ввімкнути запис буфера обміну.';
 
   @override
   String get onboardingAndroidStopCaptureFailed =>
@@ -3831,11 +3598,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingAndroidGrantsFailed =>
-      'CopyPaste дозволено в Shizuku, але не вдалося застосувати дозволи Android для запису.';
+      'CopyPaste дозволено в Shizuku, але не вдалося надати доступ до запису.';
 
   @override
   String get onboardingAndroidAllowInShizuku =>
-      'Дозвольте CopyPaste у Shizuku, щоб застосувати дозволи для запису.';
+      'Дозвольте CopyPaste у Shizuku, щоб надати доступ до запису.';
 
   @override
   String get onboardingAndroidGrantAccessFirst =>
@@ -3879,14 +3646,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesOperationFailed => 'Не вдалося виконати операцію з модулем';
 
   @override
-  String get modulesLoading => 'Завантаження модулів.';
-
-  @override
   String get modulesUnavailableTitle => 'Модулі недоступні';
-
-  @override
-  String get modulesUnavailableMessage =>
-      'Спробуйте завантажити модулі ще раз.';
 
   @override
   String get modulesNoneInstalled => 'Немає встановлених модулів';
@@ -3901,14 +3661,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesTryDifferentSearch => 'Спробуйте інший запит.';
 
   @override
-  String get modulesMarketplaceLoading => 'Завантаження каталогу.';
-
-  @override
   String get modulesMarketplaceUnavailableTitle => 'Каталог недоступний';
-
-  @override
-  String get modulesMarketplaceUnavailableMessage =>
-      'Спробуйте завантажити каталог ще раз.';
 
   @override
   String get modulesNoneAvailable => 'Немає доступних модулів';
@@ -3972,10 +3725,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesNoSettingsTitle => 'Немає додаткових налаштувань';
 
   @override
-  String get modulesNoSettingsMessage =>
-      'Цей модуль не потребує додаткового налаштування.';
-
-  @override
   String get modulesSetUpSmsAccess => 'Налаштувати доступ до SMS';
 
   @override
@@ -3986,9 +3735,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get modulesCloseSmsAccess => 'Закрити панель доступу до SMS';
-
-  @override
-  String get modulesSmsChecking => 'Перевірка доступу до SMS.';
 
   @override
   String get modulesSmsReady =>
@@ -4016,17 +3762,13 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesSmsApplyAccess => 'Надати доступ до SMS';
 
   @override
-  String get modulesSmsApplyAccessDescription =>
-      'Надати одноразовий доступ до SMS.';
+  String get modulesSmsApplyAccessDescription => 'Потрібно лише один раз.';
 
   @override
   String get modulesSmsSetupFailed => 'Не вдалося налаштувати SMS';
 
   @override
   String get modulesFileSelectionFailed => 'Не вдалося вибрати файл';
-
-  @override
-  String get modulesChooseLanguages => 'Виберіть мови';
 
   @override
   String get modulesChooseFile => 'Вибрати файл';
@@ -4128,10 +3870,6 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get modulesMarketplaceLoadFailed =>
-      'Не вдалося завантажити каталог модулів.';
-
-  @override
   String get modulesSmsSetupRequired =>
       'Налаштуйте доступ до SMS, перш ніж вмикати цей модуль.';
 
@@ -4182,10 +3920,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesResponseInvalid => 'Недійсна відповідь модуля.';
 
   @override
-  String get modulesFileSelectionUnavailable => 'Вибір файлів недоступний.';
-
-  @override
-  String get modulesFileSelectFailed => 'Не вдалося вибрати файл.';
+  String get modulesFileSelectionUnavailable => 'Тут це недоступно.';
 
   @override
   String modulesFileNotAccepted(String field) {
@@ -4244,13 +3979,6 @@ class AppLocalizationsUk extends AppLocalizations {
     });
     return '$_temp0';
   }
-
-  @override
-  String get deviceAuthUnavailable => 'Недоступно в цій системі';
-
-  @override
-  String get deviceAuthNotConfigured =>
-      'Спершу налаштуйте пароль, PIN-код або біометрію пристрою';
 
   @override
   String get commonOn => 'Увімкнено';
@@ -4382,7 +4110,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'Нове обмеження: $limit. Старіші незакріплені елементи буде остаточно видалено.';
+    return 'Нове обмеження: $limit. Старіші незакріплені кліпи буде остаточно видалено.';
   }
 
   @override
@@ -4390,7 +4118,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'Нова квота: $size. Найстаріші незакріплені елементи понад неї буде остаточно видалено.';
+    return 'Нова квота: $size. Найстаріші незакріплені кліпи понад неї буде остаточно видалено.';
   }
 
   @override
@@ -4425,10 +4153,10 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Експортовано $count текстового кліпу',
-      many: 'Експортовано $count текстових кліпів',
-      few: 'Експортовано $count текстові кліпи',
-      one: 'Експортовано $count текстовий кліп',
+      other: '$count текстового кліпу',
+      many: '$count текстових кліпів',
+      few: '$count текстові кліпи',
+      one: '$count текстовий кліп',
     );
     return '$_temp0';
   }
@@ -4447,15 +4175,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String settingsOutcomeDetail(String outcome, String detail) {
     return '$outcome · $detail';
   }
-
-  @override
-  String settingsBackupDoneMessage(String size) {
-    return 'Зашифровану резервну копію збережено · $size';
-  }
-
-  @override
-  String get settingsRestoreDoneMessage =>
-      'Історія буфера обміну на цьому пристрої тепер відповідає резервній копії.';
 
   @override
   String sharedSizeKibibytes(String size) {
@@ -4507,7 +4226,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'Нова квота: $size. Зайнято $used, тож найстаріші незакріплені елементи буде остаточно видалено.';
+    return 'Нова квота: $size. Зайнято $used, тож найстаріші незакріплені кліпи буде остаточно видалено.';
   }
 
   @override
@@ -4709,9 +4428,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get transformsCategoryOther => 'Інше';
 
   @override
-  String get transformsChainEmpty => 'Кроків ще немає';
-
-  @override
   String transformsStepLabel(int step, String name) {
     return '$step · $name';
   }
@@ -4768,7 +4484,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String transformsPipelineSavedMessage(String name) {
-    return '$name доступний у кожній палітрі перетворень.';
+    return '$name тепер у розділі «Конвеєри».';
   }
 
   @override
@@ -4795,14 +4511,14 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get transformsNotTextMessage =>
-      'Цей елемент — зображення, файл або колір. Виберіть текстовий елемент або скопіюйте текст.';
+      'Цей кліп — зображення, файл або колір. Виберіть текстовий кліп або скопіюйте текст.';
 
   @override
   String get transformsNothingTitle => 'Немає що перетворювати';
 
   @override
   String get transformsNothingMessage =>
-      'Скопіюйте текст або виберіть елемент з історії.';
+      'Скопіюйте текст або виберіть кліп з історії.';
 
   @override
   String get transformsPickTransform => 'Виберіть перетворення';
@@ -4864,17 +4580,16 @@ class AppLocalizationsUk extends AppLocalizations {
   String get transformsActionPaste => 'Вставити';
 
   @override
-  String get transformsActionSave => 'Зберегти як новий елемент';
+  String get transformsActionSave => 'Зберегти як новий кліп';
 
   @override
-  String get transformsCopiedMessage =>
-      'Результат у буфері обміну та в історії.';
+  String get transformsCopiedMessage => 'Результат також в історії.';
 
   @override
   String get transformsSavedTitle => 'Збережено';
 
   @override
-  String get transformsSavedMessage => 'Збережено як новий елемент історії.';
+  String get transformsSavedMessage => 'Результат — новий кліп в історії.';
 
   @override
   String get transformsPasteFailedTitle => 'Не вдалося вставити';
@@ -4909,6 +4624,9 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get transformsErrorTimestampUnit =>
       'Виберіть, чи число в секундах, чи в мілісекундах';
+
+  @override
+  String get transformsErrorTimeLimit => 'Тривало надто довго';
 
   @override
   String get transformsErrorExternalEntity => 'Зовнішні сутності заборонені';
@@ -5027,11 +4745,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get transformsFavoritesDescription =>
-      'Показуються першими в кожній палітрі.';
+      'Показуються серед перших під час перетворення тексту.';
 
   @override
   String transformsFavoriteShortcut(String shortcut) {
-    return '$shortcut у палітрі';
+    return '$shortcut у вікні «Перетворити текст»';
   }
 
   @override
@@ -5075,8 +4793,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get transformsHiddenTitle => 'Приховані перетворення';
 
   @override
-  String get transformsHiddenDescription =>
-      'Не показуються в палітрах і пропозиціях.';
+  String get transformsHiddenDescription => 'Не показуються й не пропонуються.';
 
   @override
   String get transformsHideTransform => 'Приховати перетворення';
@@ -5134,10 +4851,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get quickAccessUnavailableTitle => 'Стан швидкого доступу недоступний';
 
   @override
-  String get quickAccessUnavailableMessage =>
-      'CopyPaste не вдалося прочитати стан клавіатури, плиток і віджета. Спробуйте ще раз.';
-
-  @override
   String get quickAccessActionFailedTitle => 'Не вдалося виконати дію';
 
   @override
@@ -5162,7 +4875,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get quickAccessKeyboardSearchDescription =>
-      'Увімкнути панель клавіатури «Кліпи CopyPaste».';
+      'Увімкнути клавіатуру кліпів CopyPaste.';
 
   @override
   String get quickAccessKeyboardKeywords =>
@@ -5172,10 +4885,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get quickAccessSwitchKeyboardTitle => 'Перейти на клавіатуру кліпів';
 
   @override
-  String get quickAccessSwitchKeyboardDescription =>
-      'Зробіть «Кліпи CopyPaste» поточною клавіатурою.';
-
-  @override
   String get quickAccessSwitchKeyboardAction => 'Вибрати клавіатуру';
 
   @override
@@ -5183,10 +4892,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierTitle => 'Режим запису';
-
-  @override
-  String get quickAccessCaptureTierDescription =>
-      'Як зберігаються копії з інших програм.';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -5201,11 +4906,12 @@ class AppLocalizationsUk extends AppLocalizations {
       'Повний: кожна копія зберігається у фоновому режимі';
 
   @override
-  String get quickAccessTierPanelCollecting => 'Панель вибрано: збирання';
+  String get quickAccessTierPanelCollecting =>
+      'Клавіатура кліпів: зберігає кожну копію, поки вибрана';
 
   @override
   String get quickAccessTierPanelCatchUp =>
-      'Режим панелі: синхронізація під час відкриття';
+      'Клавіатура кліпів: зберігає буфер обміну під час відкриття';
 
   @override
   String get quickAccessTierManual =>
@@ -5228,11 +4934,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get quickAccessFocusSearchTitle =>
-      'Фокус на пошуку під час відкриття панелі';
-
-  @override
-  String get quickAccessFocusSearchDescription =>
-      'Відкривати панель із готовим пошуком.';
+      'Фокус на пошуку під час відкриття клавіатури кліпів';
 
   @override
   String get quickAccessTilesTitle => 'Плитки швидких налаштувань';
@@ -5377,11 +5079,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'Натомість використано оригінал.';
 
   @override
-  String get quickPastePasteManually =>
-      'Вміст у буфері обміну. Вставте його вручну.';
-
-  @override
-  String get quickPastePaste => 'Вставити';
+  String get quickPastePasteManually => 'Вставте вручну.';
 
   @override
   String get rulesLoadFailed => 'Не вдалося завантажити правила вмісту.';
@@ -5430,10 +5128,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get rulesEmptyTitle => 'Ще немає правил';
-
-  @override
-  String get rulesEmptyMessage =>
-      'Правила додають теги, захищають, обмежують строк або пропускають нові копії.';
 
   @override
   String get rulesDeletedTitle => 'Нещодавно видалені';
@@ -5572,7 +5266,7 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get rulesApplyToItems => 'Застосувати до наявних записів…';
+  String get rulesApplyToItems => 'Застосувати до наявних кліпів…';
 
   @override
   String get rulesResetBuiltin => 'Скинути до типових';
@@ -5757,13 +5451,10 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get rulesPatternHint =>
-      'Перевірки lookaround і зворотні посилання не підтримуються.';
+      'Перегляд уперед і назад та зворотні посилання не підтримуються.';
 
   @override
   String get rulesCaseSensitive => 'Враховувати регістр';
-
-  @override
-  String get rulesChooseValues => 'Вибрати';
 
   @override
   String get rulesUnknownConditionNotice =>
@@ -5897,9 +5588,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get rulesTestTitle => 'Перевірка';
 
   @override
-  String get rulesTestDescription => 'Випробуйте правило на зразку тексту.';
-
-  @override
   String get rulesSamplePlaceholder => 'Вставте або введіть приклад тексту';
 
   @override
@@ -6021,26 +5709,26 @@ class AppLocalizationsUk extends AppLocalizations {
   String get rulesTraceOutput => 'Перетворений текст';
 
   @override
-  String get rulesPreviewTitle => 'Застосувати до наявних записів';
+  String get rulesPreviewTitle => 'Застосувати до наявних кліпів';
 
   @override
   String rulesPreviewRunning(int count) {
-    return 'Перевірка останніх $count записів…';
+    return 'Перевірка останніх $count кліпів…';
   }
 
   @override
   String get rulesPreviewNone =>
-      'Жоден нещодавній запис не відповідає цьому правилу.';
+      'Жоден нещодавній кліп не відповідає цьому правилу.';
 
   @override
   String rulesPreviewMatched(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Відповідають $count запису',
-      many: 'Відповідають $count записів',
-      few: 'Відповідають $count записи',
-      one: 'Відповідає $count запис',
+      other: 'Відповідають $count кліпу',
+      many: 'Відповідають $count кліпів',
+      few: 'Відповідають $count кліпи',
+      one: 'Відповідає $count кліп',
     );
     return '$_temp0';
   }
@@ -6099,7 +5787,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String rulesPreviewTruncated(int count) {
-    return 'Перевірено лише останні $count записів.';
+    return 'Перевірено лише останні $count кліпів.';
   }
 
   @override
@@ -6111,12 +5799,7 @@ class AppLocalizationsUk extends AppLocalizations {
   String get rulesPreviewNote => 'Нічого не зміниться, доки ви не застосуєте.';
 
   @override
-  String get rulesSecretItem => 'Секретний запис';
-
-  @override
-  String rulesSecretItemFrom(String app) {
-    return 'Секретний запис із $app';
-  }
+  String get rulesSecretItem => 'Секретний кліп';
 
   @override
   String get rulesPreviewCancelled => 'Перегляд зупинено. Нічого не змінено.';
@@ -6129,10 +5812,10 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Видалити $count запису?',
-      many: 'Видалити $count записів?',
-      few: 'Видалити $count записи?',
-      one: 'Видалити $count запис?',
+      other: 'Видалити $count кліпу?',
+      many: 'Видалити $count кліпів?',
+      few: 'Видалити $count кліпи?',
+      one: 'Видалити $count кліп?',
     );
     return '$_temp0';
   }
@@ -6154,10 +5837,10 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Змінено $count запису',
-      many: 'Змінено $count записів',
-      few: 'Змінено $count записи',
-      one: 'Змінено $count запис',
+      other: 'Змінено $count кліпу',
+      many: 'Змінено $count кліпів',
+      few: 'Змінено $count кліпи',
+      one: 'Змінено $count кліп',
     );
     return '$_temp0';
   }
@@ -6167,10 +5850,10 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Видалено $count запису',
-      many: 'Видалено $count записів',
-      few: 'Видалено $count записи',
-      one: 'Видалено $count запис',
+      other: 'Видалено $count кліпу',
+      many: 'Видалено $count кліпів',
+      few: 'Видалено $count кліпи',
+      one: 'Видалено $count кліп',
     );
     return '$_temp0';
   }
@@ -6180,10 +5863,10 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Не вдалося змінити $count запису',
-      many: 'Не вдалося змінити $count записів',
-      few: 'Не вдалося змінити $count записи',
-      one: 'Не вдалося змінити $count запис',
+      other: 'Не вдалося змінити $count кліпу',
+      many: 'Не вдалося змінити $count кліпів',
+      few: 'Не вдалося змінити $count кліпи',
+      one: 'Не вдалося змінити $count кліп',
     );
     return '$_temp0';
   }
@@ -6216,11 +5899,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historySentTitle => 'Надіслано';
-
-  @override
-  String historySentTo(String devices) {
-    return 'Надіслано на $devices.';
-  }
 
   @override
   String get historySendFailedTitle => 'Не надіслано';
@@ -6256,9 +5934,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get historyEditSaved =>
       'Змінений текст став новим кліпом угорі історії.';
-
-  @override
-  String get historyNewClipSaved => 'Ваш текст збережено.';
 
   @override
   String historyQueueAddedInOrder(int count) {
@@ -6361,7 +6036,7 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.selectLogic(capability, {
       'history_read': 'Читати історію буфера обміну',
       'clipboard_write': 'Копіювати в буфер обміну',
-      'library_write': 'Зберігати фрагменти й закріплювати записи',
+      'library_write': 'Зберігати фрагменти й закріплювати кліпи',
       'snippets': 'Читати ваші фрагменти',
       'synced_records': 'Синхронізувати свої дані між пристроями',
       'local_state': 'Зберігати свої дані на цьому пристрої',
@@ -6455,10 +6130,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get diagnosticsExported => 'Діагностику експортовано';
 
   @override
-  String get diagnosticsExportedMessage =>
-      'Файл журналу готовий для надсилання в підтримку.';
-
-  @override
   String get diagnosticsExportFailed => 'Не вдалося експортувати';
 
   @override
@@ -6476,7 +6147,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get diagnosticsLogLevelDescription =>
-      'Скільки подробиць записується на цьому пристрої. Вміст буфера обміну ніколи не потрапляє в журнал.';
+      'Скільки подробиць записується на цьому пристрої.';
 
   @override
   String get onboardingAndroidCaptureMethod => 'Спосіб виявлення';
@@ -6566,9 +6237,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get fileSetShowFolder => 'Показати папку';
 
   @override
-  String get historyFilesSaved => 'Файли збережено.';
-
-  @override
   String get transfersResume => 'Продовжити';
 
   @override
@@ -6591,7 +6259,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsRestoreClipboardDescription =>
-      'Під час запуску повертає останній запис у порожній буфер обміну. Секретні записи пропускаються.';
+      'Під час запуску повертає останній кліп у порожній буфер обміну. Секретні кліпи пропускаються.';
 
   @override
   String get settingsStorageUsageTitle => 'Використання сховища';
@@ -6653,10 +6321,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsLogsFolderTitle => 'Тека журналів';
 
   @override
-  String get settingsLogsFolderDescription =>
-      'Показує діагностичні журнали цього пристрою.';
-
-  @override
   String get settingsOpenFolderAction => 'Відкрити';
 
   @override
@@ -6667,7 +6331,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsConfirmDeleteDescription =>
-      'Питати перед видаленням одного запису. Видалення кількох завжди потребує підтвердження.';
+      'Питати перед видаленням одного кліпу. Видалення кількох завжди потребує підтвердження.';
 
   @override
   String get settingsUpgradeBackupsTitle => 'Резервні копії оновлень';
@@ -6694,7 +6358,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsUpgradeBackupRestoreMessage(String date) {
-    return 'Історію буде замінено копією від $date. Записи, додані після цього, буде видалено.';
+    return 'Історію буде замінено копією від $date. Кліпи, додані після цього, буде видалено.';
   }
 
   @override
@@ -6737,7 +6401,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get devicesSpaceRemovedMessage =>
-      'Цей пристрій видалили або він вийшов. Його історія лишається тут. Приєднайтеся до простору, щоб знову синхронізувати.';
+      'Цей пристрій видалили або він вийшов. Його історія лишається тут.';
 
   @override
   String get devicesSpaceJoin => 'Приєднатися до простору';
@@ -6808,7 +6472,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get onboardingReadySpaceCreated =>
-      'Ваш простір готовий. Додайте інші пристрої зараз або пізніше в розділі «Пристрої».';
+      'Додайте інші пристрої зараз або пізніше в розділі «Пристрої».';
 
   @override
   String get onboardingReadyJoin =>
@@ -6836,15 +6500,11 @@ class AppLocalizationsUk extends AppLocalizations {
   String get onboardingPairJoinTitle => 'Приєднатися до свого простору';
 
   @override
-  String get onboardingPairJoinSubtitle =>
-      'Введіть код або відскануйте QR-код з іншого пристрою. Потім перевірте, що обидва пристрої показують однаковий код підтвердження.';
-
-  @override
   String get onboardingPairAddDeviceSubtitle =>
-      'На іншому пристрої відкрийте CopyPaste і приєднайтеся за цим QR-кодом або кодом. Потім перевірте, що обидва пристрої показують однаковий код підтвердження.';
+      'На іншому пристрої відкрийте CopyPaste і приєднайтеся за цим кодом або QR-кодом.';
 
   @override
-  String get onboardingPairSkip => 'Поки пропустити';
+  String get onboardingPairSkip => 'Пізніше';
 
   @override
   String get onboardingPairInterruptedTitle => 'Сполучення не завершилося';
@@ -6854,13 +6514,8 @@ class AppLocalizationsUk extends AppLocalizations {
       'Спробуйте ще раз або продовжте й сполучіть пізніше в розділі «Пристрої».';
 
   @override
-  String onboardingReadyPaired(String device) {
-    return 'Сполучено з $device. Буфер обміну тепер синхронізується між ними.';
-  }
-
-  @override
-  String get onboardingReadyPairedUnnamed =>
-      'Ваші пристрої сполучено. Буфер обміну тепер синхронізується між ними.';
+  String get onboardingReadyPaired =>
+      'Буфер обміну тепер синхронізується між вашими пристроями.';
 
   @override
   String get onboardingReadyPairLater =>
@@ -6904,7 +6559,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'Показуються після встановлення. Ви підтверджуєте їх, коли вмикаєте модуль.';
 
   @override
-  String get modulesDetailsNoPermissions => 'Не використовує служби CopyPaste.';
+  String get modulesDetailsNoPermissions => 'Не потребує дозволів.';
 
   @override
   String get modulesDetailsInformation => 'Інформація';
@@ -6962,7 +6617,7 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get transfersUnavailableTitle => 'Не вдалося завантажити передачі';
+  String get transfersUnavailableTitle => 'Не вдалося завантажити передавання';
 
   @override
   String get historyTagsLoadFailedTitle => 'Не вдалося завантажити теги';

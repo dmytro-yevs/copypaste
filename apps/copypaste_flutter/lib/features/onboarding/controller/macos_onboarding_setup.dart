@@ -24,6 +24,9 @@ class MacosOnboardingSetup extends OnboardingSetup {
   bool _loginDefaultPending = false;
   String? _noticeMessage;
 
+  /// The Login Item waits for approval; the setup step shows that itself.
+  String? _approvalNotice;
+
   @override
   String get platformLabel => 'macOS';
   LaunchAtLoginStatus get startupStatus => _startupStatus;
@@ -36,9 +39,12 @@ class MacosOnboardingSetup extends OnboardingSetup {
       launchAtLoginAvailable &&
       _startupStatus != LaunchAtLoginStatus.enabled;
   @override
-  String? get noticeMessage => _noticeMessage;
+  String? get noticeMessage => switch ((_noticeMessage, _approvalNotice)) {
+    (final notice?, final approval?) => '$notice $approval',
+    (final notice, final approval) => notice ?? approval,
+  };
   @override
-  bool get noticeOpensSystemSettings => loginItemNeedsAttention;
+  String? get stepNoticeMessage => _noticeMessage;
 
   @override
   Future<OnboardingResume> restore() async {
@@ -68,6 +74,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
     busy = true;
     errorMessage = null;
     _noticeMessage = null;
+    _approvalNotice = null;
     notifyIfActive();
     try {
       await _updateLaunchAtLogin(enabled);
@@ -115,6 +122,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
     busy = true;
     errorMessage = null;
     _noticeMessage = null;
+    _approvalNotice = null;
     notifyIfActive();
     try {
       _accessibilityGranted = await _setup.accessibilityGranted();
@@ -158,12 +166,11 @@ class MacosOnboardingSetup extends OnboardingSetup {
     try {
       _startupStatus = await _startup.setEnabled(enabled);
       _launchAtLogin = _loginItemRegistered;
-      if (enabled && _startupStatus != LaunchAtLoginStatus.enabled) {
-        _addNotice(
-          _startupStatus == LaunchAtLoginStatus.requiresApproval
-              ? AppStrings.current.onboardingMacosStartAtLoginApproval
-              : AppStrings.current.onboardingStartAtLoginEnableFailed,
-        );
+      if (enabled && _startupStatus == LaunchAtLoginStatus.requiresApproval) {
+        _approvalNotice =
+            AppStrings.current.onboardingMacosStartAtLoginApproval;
+      } else if (enabled && _startupStatus != LaunchAtLoginStatus.enabled) {
+        _addNotice(AppStrings.current.onboardingStartAtLoginEnableFailed);
       } else if (!enabled && _loginItemRegistered) {
         _addNotice(AppStrings.current.onboardingMacosStartAtLoginDisableFailed);
       }

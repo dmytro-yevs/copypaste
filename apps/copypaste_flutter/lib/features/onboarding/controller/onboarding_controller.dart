@@ -51,7 +51,11 @@ class OnboardingController extends ChangeNotifier {
   bool get complete => _complete;
   bool get busy => _busy || _pairingOpening || _setup.busy;
   String? get errorMessage => _errorMessage ?? _setup.errorMessage;
-  String? get noticeMessage => _setup.noticeMessage;
+
+  /// The setup notice; on the setup step, without what that step shows itself.
+  String? get noticeMessage => _step == OnboardingStep.setup
+      ? _setup.stepNoticeMessage
+      : _setup.noticeMessage;
 
   /// Whether pairing can run inside the tour instead of in Devices.
   bool get pairsInline => _pairing != null;

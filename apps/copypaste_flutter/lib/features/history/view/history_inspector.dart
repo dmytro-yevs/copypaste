@@ -153,7 +153,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         )
                       : Text(clip.contentKind.label).h4(),
                 ),
-                if (highlighted != null) ...[
+                if (highlighted != null &&
+                    highlighted.language != clip.contentKind.label) ...[
                   const Gap(AppSpacing.sm),
                   SecondaryBadge(child: Text(highlighted.language)),
                 ],
@@ -225,7 +226,6 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         clip: clip,
                         controller: controller,
                         compact: compact,
-                        revealConfidential: true,
                       ),
                     )
                   : _HistoryMetadataTable(
@@ -939,23 +939,17 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     AppToast.show(
       context,
       title: context.l10n.historyCopiedTitle,
-      message: plainText
-          ? context.l10n.historyPlainTextCopied
-          : context.l10n.historyClipCopied,
+      message: plainText ? context.l10n.historyPlainTextCopied : null,
       tone: AppToastTone.success,
     );
   }
 
   Future<void> _download(BuildContext context) async {
-    final set = controller.selection.selectedClip?.file?.isSet ?? false;
     final result = await controller.transfers.downloadSelected();
     if (result != HistoryFileDownloadResult.saved || !context.mounted) return;
     AppToast.show(
       context,
       title: context.l10n.historyDownloadedTitle,
-      message: set
-          ? context.l10n.historyFilesSaved
-          : context.l10n.historyFileSaved,
       tone: AppToastTone.success,
     );
   }
@@ -1174,11 +1168,7 @@ class _HistoryDetailContent extends StatelessWidget {
                   primary: false,
                   key: const ValueKey<String>('history-detail-scroll-metadata'),
                   child: _conceal(
-                    _HistoryMetadataTable(
-                      clip: clip,
-                      controller: controller,
-                      revealConfidential: true,
-                    ),
+                    _HistoryMetadataTable(clip: clip, controller: controller),
                     keyPrefix: 'inspector-metadata-spoiler',
                   ),
                 ),
@@ -1200,11 +1190,7 @@ class _HistoryDetailContent extends StatelessWidget {
             ),
             const Gap(AppSpacing.lg),
             _conceal(
-              _HistoryMetadataTable(
-                clip: clip,
-                controller: controller,
-                revealConfidential: true,
-              ),
+              _HistoryMetadataTable(clip: clip, controller: controller),
               keyPrefix: 'inspector-metadata-spoiler',
             ),
           ],
@@ -1257,7 +1243,7 @@ class _HistoryDetailContent extends StatelessWidget {
     if (clip.contentKind == HistoryClipKind.color && clip.colorRgba != null) {
       return Row(
         children: [
-          HistoryColorSwatch(rgba: clip.colorRgba!, size: 48),
+          HistoryColorSwatch(rgba: clip.colorRgba!, size: AppIconSize.state),
           const Gap(AppSpacing.md),
           Expanded(
             child: HistorySelectableText(
@@ -1350,23 +1336,17 @@ class _HistoryMetadataTable extends StatelessWidget {
   const _HistoryMetadataTable({
     required this.clip,
     required this.controller,
-    this.revealConfidential = false,
     this.compact = false,
   });
 
   final HistoryClip clip;
   final HistoryController controller;
   final bool compact;
-  final bool revealConfidential;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final rows = _historyMetadataRows(
-      context,
-      clip,
-      revealConfidential: revealConfidential,
-    );
+    final rows = _historyMetadataRows(context, clip);
     final textStyle = AppTheme.inspectorTextStyle(context, compact: compact);
     final table = InspectorTable(
       tableKey: const ValueKey<String>('history-detail-metadata'),
@@ -1488,7 +1468,7 @@ Widget? _historyMetadataValue(
       runSpacing: AppSpacing.xs,
       children: [
         for (final name in controller.tags.names(clip.annotations.ruleTagIds))
-          SecondaryBadge(child: Text(strings.historyRuleTag(name))),
+          SecondaryBadge(child: Text(name)),
       ],
     );
   }
@@ -1497,19 +1477,9 @@ Widget? _historyMetadataValue(
 
 List<_HistoryMetadataRow> _historyMetadataRows(
   BuildContext context,
-  HistoryClip clip, {
-  bool revealConfidential = false,
-}) {
+  HistoryClip clip,
+) {
   final strings = context.l10n;
-  if (clip.masked && !revealConfidential) {
-    return [
-      (
-        label: strings.historyMetadataPrivacy,
-        value: strings.historyMetadataConfidential,
-        warning: false,
-      ),
-    ];
-  }
   final type = clip.file?.mimeType ?? clip.contentType;
   final sizeBytes = clip.image?.sizeBytes ?? clip.file?.sizeBytes;
   final annotations = clip.annotations;
@@ -1533,11 +1503,6 @@ List<_HistoryMetadataRow> _historyMetadataRows(
         value: clip.origin!,
         warning: false,
       ),
-    (
-      label: strings.historyMetadataClipType,
-      value: clip.contentKind.label,
-      warning: false,
-    ),
     (label: strings.historyMetadataType, value: type, warning: false),
     if (clip.file?.sourceReference != null && !clip.file!.listsMembers)
       (

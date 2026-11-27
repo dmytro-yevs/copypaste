@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "Minimizza JSON",
-      "description": "Rimuove dal JSON tutti gli spazi non significativi."
+      "description": "",
+      "keywords": [
+        "rimuovi spazi"
+      ]
     },
     "structure.json_validate": {
       "name": "Convalida JSON",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "Da JSON a YAML",
-      "description": "Converte il JSON in YAML in stile a blocchi."
+      "description": "",
+      "keywords": [
+        "converti"
+      ]
     },
     "structure.csv_to_json": {
       "name": "Da CSV a JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "Minimizza XML",
-      "description": "Rimuove gli spazi tra gli elementi XML."
+      "description": "",
+      "keywords": [
+        "rimuovi spazi"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Codifica Base64",
-      "description": "Codifica in Base64 i byte UTF-8 del testo.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Alfabeto",
@@ -163,7 +172,7 @@
     },
     "encode.hex_encode": {
       "name": "Codifica esadecimale",
-      "description": "Scrive i byte UTF-8 del testo come cifre esadecimali.",
+      "description": "",
       "params": {
         "separator": {
           "label": "Separatore",
@@ -231,7 +240,10 @@
   "case": {
     "case.upper": {
       "name": "MAIUSCOLO",
-      "description": "Converte tutte le lettere in maiuscolo con le regole Unicode complete.",
+      "description": "",
+      "keywords": [
+        "lettere"
+      ],
       "params": {
         "locale": {
           "label": "Regole della lingua",
@@ -244,7 +256,10 @@
     },
     "case.lower": {
       "name": "minuscolo",
-      "description": "Converte tutte le lettere in minuscolo con le regole Unicode complete.",
+      "description": "",
+      "keywords": [
+        "lettere"
+      ],
       "params": {
         "locale": {
           "label": "Regole della lingua",
@@ -273,7 +288,7 @@
     },
     "case.sentence": {
       "name": "Stile frase",
-      "description": "Mette in maiuscolo la prima parola di ogni frase e il resto in minuscolo.",
+      "description": "",
       "params": {
         "keep_acronyms": {
           "label": "Mantieni le sigle"
@@ -282,7 +297,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Unisce le parole in un identificatore che inizia in minuscolo.",
+      "description": "",
+      "keywords": [
+        "identificatore"
+      ],
       "params": {
         "per_line": {
           "label": "Ogni riga separatamente"
@@ -294,7 +312,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Unisce le parole in un identificatore con ogni parola maiuscola.",
+      "description": "",
+      "keywords": [
+        "identificatore"
+      ],
       "params": {
         "per_line": {
           "label": "Ogni riga separatamente"
@@ -306,7 +327,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Unisce parole minuscole con trattini bassi.",
+      "description": "",
+      "keywords": [
+        "trattino basso"
+      ],
       "params": {
         "per_line": {
           "label": "Ogni riga separatamente"
@@ -315,7 +339,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Unisce parole minuscole con trattini.",
+      "description": "",
+      "keywords": [
+        "trattino"
+      ],
       "params": {
         "per_line": {
           "label": "Ogni riga separatamente"
@@ -324,7 +351,10 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Unisce parole maiuscole con trattini bassi.",
+      "description": "",
+      "keywords": [
+        "trattino basso"
+      ],
       "params": {
         "per_line": {
           "label": "Ogni riga separatamente"
@@ -333,13 +363,13 @@
     },
     "case.swap": {
       "name": "Inverti maiuscole",
-      "description": "Rende minuscole le maiuscole e maiuscole le minuscole."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "Hash MD5",
-      "description": "Digest MD5, non per la sicurezza. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
+      "description": "Non per la sicurezza. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
       "params": {
         "output": {
           "label": "Output",
@@ -353,7 +383,7 @@
     },
     "hash.sha1": {
       "name": "Hash SHA-1",
-      "description": "Digest SHA-1, non per la sicurezza. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
+      "description": "Non per la sicurezza. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
       "params": {
         "output": {
           "label": "Output",
@@ -367,7 +397,7 @@
     },
     "hash.sha256": {
       "name": "Hash SHA-256",
-      "description": "Digest SHA-256. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
+      "description": "Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
       "params": {
         "output": {
           "label": "Output",
@@ -381,7 +411,7 @@
     },
     "hash.sha512": {
       "name": "Hash SHA-512",
-      "description": "Digest SHA-512. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
+      "description": "Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
       "params": {
         "output": {
           "label": "Output",
@@ -395,7 +425,7 @@
     },
     "hash.crc32": {
       "name": "Checksum CRC-32",
-      "description": "CRC-32 con il polinomio IEEE usato da ZIP e PNG. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
+      "description": "Con il polinomio IEEE usato da ZIP e PNG. Calcola l’hash del testo in UTF-8 esattamente come mostrato, senza aggiungere a capo.",
       "params": {
         "output": {
           "label": "Output",
@@ -437,7 +467,10 @@
     },
     "lines.remove_empty": {
       "name": "Rimuovi righe vuote",
-      "description": "Elimina le righe vuote o con soli spazi.",
+      "description": "",
+      "keywords": [
+        "elimina"
+      ],
       "params": {
         "whitespace_only": {
           "label": "Righe di soli spazi contano come vuote"
@@ -481,11 +514,18 @@
     },
     "lines.reverse": {
       "name": "Inverti righe",
-      "description": "Mette le righe in ordine inverso."
+      "description": "",
+      "keywords": [
+        "ordine"
+      ]
     },
     "lines.join": {
       "name": "Unisci righe",
-      "description": "Combina tutte le righe in una con un separatore.",
+      "description": "",
+      "keywords": [
+        "combina",
+        "separatore"
+      ],
       "params": {
         "separator": {
           "label": "Separatore",
@@ -607,7 +647,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Decodifica",
+      "name": "Decodifica JWT",
       "description": "Mostra intestazione e payload del token come JSON. La firma non viene verificata.",
       "keywords": [
         "token"

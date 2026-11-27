@@ -13,7 +13,7 @@ class SettingsSection extends StatelessWidget {
   const SettingsSection({
     super.key,
     required this.title,
-    required this.description,
+    this.description,
     required this.children,
     this.groupContent = true,
     this.showHeading = true,
@@ -21,7 +21,9 @@ class SettingsSection extends StatelessWidget {
   });
 
   final String title;
-  final String description;
+
+  /// A line under the heading, for what the title does not say.
+  final String? description;
   final List<Widget> children;
   final bool groupContent;
   final bool showHeading;
@@ -34,7 +36,7 @@ class SettingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showHeading) ...[
+        if (showHeading)
           Row(
             children: [
               if (icon case final icon?) ...[
@@ -49,10 +51,11 @@ class SettingsSection extends StatelessWidget {
               ),
             ],
           ),
-          const Gap(AppSpacing.xs),
+        if (description case final description?) ...[
+          if (showHeading) const Gap(AppSpacing.xs),
+          Text(description).muted(),
         ],
-        Text(description).muted(),
-        const Gap(AppSpacing.lg),
+        if (showHeading || description != null) const Gap(AppSpacing.lg),
         if (groupContent) SettingsGroup(children: children) else ...children,
       ],
     );

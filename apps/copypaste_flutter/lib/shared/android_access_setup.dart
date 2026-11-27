@@ -31,6 +31,8 @@ class AndroidAccessSetup extends StatelessWidget {
   final bool granted;
   final bool busy;
   final String adbCommands;
+
+  /// Card title while Shizuku is ready to apply the access.
   final String applyAccessLabel;
   final String applyAccessDescription;
   final VoidCallback onOpenShizuku;
@@ -158,8 +160,8 @@ class _ShizukuSetup extends StatelessWidget {
                       : !shizuku.running
                       ? l10n.sharedOpenShizuku
                       : shizuku.permission
-                      ? setup.applyAccessLabel
-                      : l10n.sharedAllowCopyPaste,
+                      ? l10n.sharedApply
+                      : l10n.sharedAllow,
                 ),
               ),
             ),

@@ -102,8 +102,9 @@ fn golden_corpus_matches() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Every registered transform names, describes and demonstrates itself in
-/// every locale, and its worked example is what it really produces.
+/// Every registered transform names and demonstrates itself in every
+/// locale, a description is translated wherever English has one, and its
+/// worked example is what it really produces.
 #[test]
 fn catalogue_describes_every_transform() {
     for def in catalogue().iter() {
@@ -117,9 +118,13 @@ fn catalogue_describes_every_transform() {
     for locale in LOCALES {
         for (info, en) in describe(locale).iter().zip(&english) {
             let id = info.id;
-            assert!(!info.description.is_empty(), "{locale} {id} description");
+            assert_eq!(
+                info.description.is_empty(),
+                en.description.is_empty(),
+                "{locale} {id} description"
+            );
             assert!(info.name != id, "{locale} {id} has no name");
-            if locale != "en" {
+            if locale != "en" && !en.description.is_empty() {
                 assert_ne!(
                     info.description, en.description,
                     "{locale} {id} untranslated"

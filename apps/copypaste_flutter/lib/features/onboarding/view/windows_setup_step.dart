@@ -25,7 +25,7 @@ class WindowsSetupStep extends StatelessWidget {
           icon: LucideIcons.power,
           title: context.l10n.onboardingStartAtLogin,
           description: setup.launchAtLoginAvailable
-              ? context.l10n.onboardingStartAtLoginDescription
+              ? null
               : context.l10n.onboardingWindowsStartAtLoginUnavailable,
           action: Semantics(
             label: context.l10n.onboardingStartAtLoginSemantics,

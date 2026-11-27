@@ -63,9 +63,7 @@ class _DiagnosticsSettingsViewState extends State<DiagnosticsSettingsView> {
     AppToast.show(
       context,
       title: saved ? l10n.diagnosticsExported : l10n.diagnosticsExportFailed,
-      message: saved
-          ? l10n.diagnosticsExportedMessage
-          : l10n.diagnosticsExportFailedMessage,
+      message: saved ? null : l10n.diagnosticsExportFailedMessage,
       tone: saved ? AppToastTone.success : AppToastTone.error,
     );
   }
@@ -254,12 +252,15 @@ class _DiagnosticsSettingsViewState extends State<DiagnosticsSettingsView> {
         compact: true,
       );
     }
+    final badgeWidth = _severityBadgeWidth(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SettingsGroup(
           key: const ValueKey('diagnostics-list'),
-          children: [for (final entry in entries) _row(context, entry)],
+          children: [
+            for (final entry in entries) _row(context, entry, badgeWidth),
+          ],
         ),
         if (_controller.pageCount > 1) ...[
           const Gap(AppSpacing.lg),
@@ -281,22 +282,57 @@ class _DiagnosticsSettingsViewState extends State<DiagnosticsSettingsView> {
     );
   }
 
-  Widget _row(BuildContext context, DiagnosticEntry entry) {
+  /// The widest severity badge, so every row's message starts at one offset.
+  double _severityBadgeWidth(BuildContext context) {
+    final style = AppTheme.statusBadgeStyle(context, AppStatusTone.muted);
+    final textStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(style.textStyle(context, const {}));
+    var widestLabel = 0.0;
+    for (final severity in DiagnosticSeverity.values) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: _severityLabel(context, severity),
+          style: textStyle,
+        ),
+        maxLines: 1,
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      if (painter.width > widestLabel) widestLabel = painter.width;
+      painter.dispose();
+    }
+    return widestLabel.ceilToDouble() +
+        style.padding(context, const {}).horizontal;
+  }
+
+  Widget _row(BuildContext context, DiagnosticEntry entry, double badgeWidth) {
     final label = Text(_severityLabel(context, entry.severity));
     return Padding(
       padding: AppTheme.settingsRowPadding,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SecondaryBadge(
-            style: AppTheme.statusBadgeStyle(context, switch (entry.severity) {
-              DiagnosticSeverity.error => AppStatusTone.error,
-              DiagnosticSeverity.warn => AppStatusTone.warning,
-              DiagnosticSeverity.info => AppStatusTone.info,
-              DiagnosticSeverity.debug ||
-              DiagnosticSeverity.trace => AppStatusTone.muted,
-            }),
-            child: label,
+          ConstrainedBox(
+            constraints: BoxConstraints(minWidth: badgeWidth),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              widthFactor: 1,
+              heightFactor: 1,
+              child: SecondaryBadge(
+                style: AppTheme.statusBadgeStyle(
+                  context,
+                  switch (entry.severity) {
+                    DiagnosticSeverity.error => AppStatusTone.error,
+                    DiagnosticSeverity.warn => AppStatusTone.warning,
+                    DiagnosticSeverity.info => AppStatusTone.info,
+                    DiagnosticSeverity.debug ||
+                    DiagnosticSeverity.trace => AppStatusTone.muted,
+                  },
+                ),
+                child: label,
+              ),
+            ),
           ),
           const Gap(AppSpacing.md),
           Expanded(

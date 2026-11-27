@@ -57,6 +57,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonEnable => 'Activer';
 
   @override
+  String get commonChoose => 'Choisir';
+
+  @override
   String get settingsLanguageTitle => 'Langue';
 
   @override
@@ -83,12 +86,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible d’actualiser les paramètres. Réessayez.';
 
   @override
-  String get settingsRuntimeLoadFailed =>
-      'Impossible de charger les paramètres.';
-
-  @override
-  String get settingsRuntimeAppAlreadyExcluded =>
-      'Cette application est déjà exclue.';
+  String get settingsRuntimeAppAlreadyExcluded => 'Cette app est déjà exclue.';
 
   @override
   String get settingsRuntimeChangeFailed =>
@@ -116,11 +114,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsRuntimeExcludedAppIdInvalid =>
-      'Les identifiants d’application ne doivent pas être vides et ne doivent pas dépasser 256 octets.';
+      'Les identifiants d’app ne doivent pas être vides et ne doivent pas dépasser 256 octets.';
 
   @override
   String get settingsRuntimeExcludedAppsLimit =>
-      'Vous pouvez exclure jusqu’à 256 applications.';
+      'Vous pouvez exclure jusqu’à 256 apps.';
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -384,10 +382,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get quickPasteSearchPlaceholder => 'Tapez pour rechercher…';
 
   @override
-  String get quickPasteLoadingHistory =>
-      'Chargement de l’historique du presse-papiers.';
-
-  @override
   String get quickPasteHistoryUnavailable =>
       'L’historique n’est pas disponible';
 
@@ -437,7 +431,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Historique privé du presse-papiers sur macOS, Android, Windows et Linux.';
 
   @override
-  String get transfersTitle => 'Téléchargements et transferts';
+  String get transfersTitle => 'Transferts';
 
   @override
   String transfersActiveTooltip(int count, String written, String total) {
@@ -470,11 +464,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get transfersShowEarlier => 'Plus anciens';
 
   @override
-  String get transfersClearCompletedHistory =>
-      'Effacer les transferts terminés';
-
-  @override
-  String get transfersErrorTitle => 'Transferts';
+  String get transfersClearCompletedHistory => 'Effacer l’historique';
 
   @override
   String get transfersEmptyTitle => 'Aucun transfert';
@@ -550,10 +540,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get transfersUpdatesUnavailable =>
       'La progression des transferts n’est plus disponible. Rouvrez pour actualiser.';
-
-  @override
-  String get transfersLoadFailed =>
-      'Impossible de charger les transferts. Réessayez.';
 
   @override
   String get transfersUpdatesLoadFailed =>
@@ -669,9 +655,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Reprendre la capture (à l’arrêt)';
 
   @override
-  String get platformTrayOpen => 'Ouvrir';
-
-  @override
   String get platformTraySettings => 'Paramètres';
 
   @override
@@ -686,11 +669,11 @@ class AppLocalizationsFr extends AppLocalizations {
       'La zone de notification n’est pas disponible. Laissez CopyPaste ouvert, puis réessayez ou quittez.';
 
   @override
-  String get platformQuitFailed => 'CopyPaste n’a pas pu quitter. Réessayez.';
+  String get platformQuitFailed => 'CopyPaste n’a pas pu quitter.';
 
   @override
   String get platformVisibilityChangeFailed =>
-      'Impossible de modifier la visibilité de l’application. Réessayez.';
+      'Impossible de modifier la visibilité de l’app. Réessayez.';
 
   @override
   String get platformCaptureNotificationTitle => 'Presse-papiers enregistré';
@@ -740,7 +723,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get platformUpdatesUnavailableHere =>
-      'Les mises à jour de l’application ne sont pas disponibles ici.';
+      'Les mises à jour de l’app ne sont pas disponibles ici.';
 
   @override
   String get platformUpdateVersionUnavailable =>
@@ -748,7 +731,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get platformUpdatesUnavailableInstallation =>
-      'Les mises à jour de l’application ne sont pas disponibles pour cette installation.';
+      'Les mises à jour de l’app ne sont pas disponibles pour cette installation.';
 
   @override
   String get platformUpdateLinuxUnsupported =>
@@ -773,19 +756,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsSectionGeneral => 'Général';
 
   @override
-  String get settingsSectionGeneralSummary =>
-      'Langue et visibilité de l’application.';
-
-  @override
   String get settingsSectionAppearance => 'Apparence';
-
-  @override
-  String get settingsSectionAppearanceSummary =>
-      'Thème et matériau de la fenêtre.';
-
-  @override
-  String get settingsAppearanceDescription =>
-      'Thème et apparence des fenêtres.';
 
   @override
   String get settingsThemeTitle => 'Thème';
@@ -849,50 +820,22 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsSectionClipboard => 'Presse-papiers';
 
   @override
-  String get settingsSectionClipboardSummary =>
-      'Capture et limites de l’historique.';
-
-  @override
   String get settingsSectionPrivacy => 'Confidentialité';
-
-  @override
-  String get settingsSectionPrivacySummary =>
-      'Exclusions d’applications et protection de l’écran.';
 
   @override
   String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
-  String get settingsSectionQuickPasteSummary =>
-      'Raccourci et collage automatique.';
-
-  @override
   String get settingsSectionSync => 'Synchronisation';
-
-  @override
-  String get settingsSectionSyncSummary =>
-      'Synchronisation et détection des appareils à proximité.';
 
   @override
   String get settingsSectionNotifications => 'Notifications';
 
   @override
-  String get settingsSectionNotificationsSummary =>
-      'Notifications et sons de capture.';
-
-  @override
   String get settingsSectionData => 'Données';
 
   @override
-  String get settingsSectionDataSummary =>
-      'Exportation, sauvegarde et restauration.';
-
-  @override
   String get settingsSectionModules => 'Modules';
-
-  @override
-  String get settingsSectionModulesSummary =>
-      'Installer et gérer les modules facultatifs.';
 
   @override
   String get settingsSectionRules => 'Règles de contenu';
@@ -905,15 +848,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsSectionQuickAccess => 'Accès rapide';
 
   @override
-  String get settingsSectionQuickAccessSummary =>
-      'Clavier, tuiles et widget d’écran d’accueil.';
-
-  @override
   String get settingsSectionTransforms => 'Transformations de texte';
-
-  @override
-  String get settingsSectionTransformsSummary =>
-      'Favoris, enchaînements et transformations par défaut au collage.';
 
   @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
@@ -1067,17 +1002,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Copiez des éléments pour les ajouter';
 
   @override
-  String get pasteQueueCollectingEmptyMessage =>
-      'Chaque copie rejoint la file jusqu\'à ce que vous arrêtiez la collecte.';
-
-  @override
   String get pasteQueueStartCollecting => 'Commencer la collecte';
 
   @override
   String get pasteQueueStopCollecting => 'Arrêter la collecte';
-
-  @override
-  String get pasteQueueLoading => 'Chargement de la file…';
 
   @override
   String get pasteQueueLoadFailed => 'Impossible de charger la file';
@@ -1256,10 +1184,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pasteQueuePasteNextStyleTitle => 'Coller le suivant';
 
   @override
-  String get pasteQueuePasteNextStyleDescription =>
-      'Coller automatiquement ou seulement copier dans le presse-papiers.';
-
-  @override
   String get pasteQueuePasteIntoApp => 'Coller dans l\'app au premier plan';
 
   @override
@@ -1269,10 +1193,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pasteQueueInsertTitle => 'Les nouveaux éléments vont';
 
   @override
-  String get pasteQueueInsertDescription =>
-      'Où les éléments collectés et ajoutés rejoignent la file.';
-
-  @override
   String get pasteQueueInsertEnd => 'À la fin (premier entré, premier sorti)';
 
   @override
@@ -1280,10 +1200,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pasteQueueEndBehaviorTitle => 'Après le dernier élément';
-
-  @override
-  String get pasteQueueEndBehaviorDescription =>
-      'Ce que fait Coller le suivant une fois tous les éléments collés.';
 
   @override
   String get pasteQueueEndStop => 'Arrêter';
@@ -1333,15 +1249,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pasteQueuePlainTextTitle => 'Toujours coller en texte brut';
 
   @override
-  String get pasteQueuePlainTextDescription =>
-      'Supprime la mise en forme des éléments de la file.';
-
-  @override
   String get pasteQueueIdleStopTitle => 'Arrêter la collecte après';
 
   @override
-  String get pasteQueueIdleStopDescription =>
-      'Arrêter la collecte après cette durée sans copie.';
+  String get pasteQueueIdleStopDescription => 'Durée sans nouvelle copie.';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1363,10 +1274,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Restaurer le presse-papiers précédent à la fin';
 
   @override
-  String get pasteQueueRestoreDescription =>
-      'Rétablit ce que vous aviez copié avant de coller.';
-
-  @override
   String get pasteQueueSettingsKeywords =>
       'paste queue file collecter ordre raccourci séparateur';
 
@@ -1374,47 +1281,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsSectionAbout => 'À propos';
 
   @override
-  String get settingsSectionAboutSummary =>
-      'Version et mises à jour de l’application.';
-
-  @override
-  String get settingsGeneralDescription =>
-      'Langue, lancement automatique et visibilité de l’application.';
-
-  @override
   String get settingsModulesDescription =>
       'Fonctionnalités facultatives pour CopyPaste.';
 
   @override
-  String get settingsClipboardDescription =>
-      'Capturez les modifications du presse-papiers et gérez les limites de l’historique.';
-
-  @override
-  String get settingsDataDescription =>
-      'Exportez, sauvegardez et restaurez l’historique du presse-papiers.';
-
-  @override
-  String get settingsSyncDescription =>
-      'Gérez la synchronisation avec les appareils associés.';
-
-  @override
-  String get settingsPrivacyDescription =>
-      'Choisissez les apps capturées et protégez le contenu du presse-papiers.';
-
-  @override
-  String get settingsNotificationsDescription =>
-      'Choisissez les notifications et les sons des éléments capturés.';
-
-  @override
-  String get settingsAboutDescription =>
-      'Version de CopyPaste et mises à jour de l’application.';
-
-  @override
   String get settingsQuickPasteDescription =>
       'Ouvrez l’historique du presse-papiers depuis n’importe où sans changer de fenêtre.';
-
-  @override
-  String get settingsLoadingMessage => 'Chargement des paramètres.';
 
   @override
   String get settingsUnavailableTitle =>
@@ -1467,10 +1339,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Reprendre les services en arrière-plan après un redémarrage.';
 
   @override
-  String get settingsStartupDesktopDescription =>
-      'Ouvrir CopyPaste automatiquement à l’ouverture de session.';
-
-  @override
   String get settingsShowInDock => 'Afficher dans le Dock';
 
   @override
@@ -1478,7 +1346,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsTaskbarVisibilityDescription =>
-      'Afficher l’icône de l’application pour passer d’une fenêtre à l’autre.';
+      'Afficher l’icône de l’app pour passer d’une fenêtre à l’autre.';
 
   @override
   String get settingsTaskbarVisibilityKeywords =>
@@ -1509,10 +1377,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsLightweightModeKeywords =>
       'léger fermer quitter arrière-plan mémoire lightweight close quit background memory';
-
-  @override
-  String get settingsVisibilityErrorTitle =>
-      'Impossible de modifier la visibilité';
 
   @override
   String get settingsModulesSearchDescription =>
@@ -1598,7 +1462,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsRetentionDescription =>
-      'Supprimer automatiquement les anciens éléments non épinglés du presse-papiers.';
+      'Supprimer automatiquement les anciens éléments non épinglés.';
 
   @override
   String get settingsRetentionForever => 'Conserver indéfiniment';
@@ -1697,7 +1561,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsExportTextDescription =>
-      'Enregistrer les éléments texte dans un fichier portable.';
+      'Enregistrer les éléments texte dans un fichier JSON.';
 
   @override
   String get settingsExportAction => 'Exporter';
@@ -1808,11 +1672,11 @@ class AppLocalizationsFr extends AppLocalizations {
       'routeur port redirection directe router port mapping upnp nat forwarding direct';
 
   @override
-  String get settingsExcludedAppsTitle => 'Applications exclues';
+  String get settingsExcludedAppsTitle => 'Apps exclues';
 
   @override
   String get settingsExcludedAppsSearchDescription =>
-      'Ignorer la capture automatique depuis les applications exclues.';
+      'Ignorer la capture automatique depuis les apps exclues.';
 
   @override
   String get settingsExcludedAppsKeywords =>
@@ -1828,13 +1692,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
-      'Les exclusions d’applications sont prises en charge sur macOS, Windows, Android et Linux.';
+      'Les exclusions d’apps sont prises en charge sur macOS, Windows, Android et Linux.';
 
   @override
   String get settingsExcludedAppsAdd => 'Ajouter';
 
   @override
-  String get settingsExcludedAppsEmpty => 'Aucune application n’est exclue.';
+  String get settingsExcludedAppsEmpty => 'Aucune app n’est exclue.';
 
   @override
   String settingsExcludedAppsRemove(String app) {
@@ -1842,14 +1706,13 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get applicationPickerSearch => 'Rechercher des applications';
+  String get applicationPickerSearch => 'Rechercher des apps';
 
   @override
-  String get applicationPickerEmpty => 'Aucune application trouvée';
+  String get applicationPickerEmpty => 'Aucune app trouvée';
 
   @override
-  String get settingsSkipSecretTitle =>
-      'Ignorer le presse-papiers confidentiel';
+  String get settingsSkipSecretTitle => 'Ignorer le presse-papiers secret';
 
   @override
   String get settingsSkipSecretDescription =>
@@ -1916,13 +1779,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsVersionTitle => 'Version';
 
   @override
-  String get settingsVersionDescription => 'Version de CopyPaste installée.';
-
-  @override
   String get settingsVersionUnavailable => 'Indisponible';
 
   @override
-  String get settingsUpdatesTitle => 'Mises à jour de l’application';
+  String get settingsUpdatesTitle => 'Mises à jour de l’app';
 
   @override
   String get settingsUpdatesSearchDescription =>
@@ -1933,10 +1793,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'version github publication version github release';
 
   @override
-  String get settingsUpdateIdle =>
-      'Rechercher une version plus récente de CopyPaste.';
-
-  @override
   String get settingsUpdateChecking => 'Recherche de mises à jour.';
 
   @override
@@ -1945,6 +1801,11 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String settingsUpdateVersionUpToDate(String version) {
     return 'La version $version est à jour.';
+  }
+
+  @override
+  String settingsUpdateVersion(String version) {
+    return 'Version $version';
   }
 
   @override
@@ -1968,7 +1829,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsUpdateNeedsAttention =>
-      'Les mises à jour de l’application requièrent votre attention.';
+      'Les mises à jour de l’app requièrent votre attention.';
 
   @override
   String get settingsUpdateNowAction => 'Mettre à jour';
@@ -1992,28 +1853,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsUpdateCheckAgainAction => 'Rechercher à nouveau';
 
   @override
+  String get settingsUpdateCheckAction => 'Rechercher';
+
+  @override
   String get settingsUpdateNoneTitle => 'Aucune mise à jour disponible';
 
   @override
-  String get settingsUpdateLatest =>
-      'Vous disposez de la dernière version de CopyPaste.';
-
-  @override
-  String settingsUpdateVersionLatest(String version) {
-    return 'CopyPaste $version est la dernière version.';
-  }
-
-  @override
   String get settingsUpdateAvailableTitle => 'Mise à jour disponible';
-
-  @override
-  String get settingsUpdateReady =>
-      'Une version plus récente de CopyPaste est prête à être installée.';
-
-  @override
-  String settingsUpdateVersionReady(String version) {
-    return 'CopyPaste $version est prêt à être installé.';
-  }
 
   @override
   String get settingsUpdateUnavailableTitle => 'Mise à jour indisponible';
@@ -2025,10 +1871,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsUpdateCheckFailedTitle =>
       'Échec de la recherche de mises à jour';
-
-  @override
-  String get settingsUpdateCheckFailedMessage =>
-      'CopyPaste n’a pas pu rechercher de mises à jour.';
 
   @override
   String get settingsQuickPasteSetupTitle => 'Configurer Quick Paste';
@@ -2046,10 +1888,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsQuickPasteCheckAgain => 'Vérifier à nouveau';
-
-  @override
-  String get settingsQuickPasteLoading =>
-      'Chargement des paramètres de Quick Paste.';
 
   @override
   String get settingsQuickPasteUnavailableTitle =>
@@ -2143,9 +1981,6 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get devicesLoading => 'Chargement des appareils…';
-
-  @override
   String get devicesUnavailableTitle => 'Les appareils ne sont pas disponibles';
 
   @override
@@ -2153,6 +1988,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get devicesScan => 'Rechercher';
+
+  @override
+  String get devicesScanInvalidTitle => 'Mauvais code QR';
 
   @override
   String get devicesScanning => 'Recherche…';
@@ -2313,15 +2151,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get devicesConnectionUnknown => 'Inconnu';
 
   @override
-  String get devicesPeerAvailable => 'Disponible';
-
-  @override
-  String get devicesPeerVisibleNow => 'Visible actuellement';
-
-  @override
-  String get devicesPeerStatusUnknown => 'État inconnu';
-
-  @override
   String get devicesPingUnavailable => '— ms';
 
   @override
@@ -2396,13 +2225,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pairingSendingRequest => 'Envoi de la demande de connexion…';
 
   @override
-  String get pairingEmptyTitle => 'Choisissez une méthode d’association';
-
-  @override
-  String get pairingEmptyMessage =>
-      'Les commandes d’association s’affichent ici.';
-
-  @override
   String get pairingCreatingInvitation =>
       'Création d’une invitation d’association.';
 
@@ -2410,15 +2232,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pairingCode => 'Code d’association';
 
   @override
-  String get pairingCodeHint =>
-      'Saisissez le code à 8 caractères affiché sur l’autre appareil.';
+  String get pairingCodeHint => 'Affiché sur l’autre appareil.';
 
   @override
   String get pairingDeviceAddress => 'Adresse de l’appareil';
 
   @override
   String get pairingDeviceAddressHint =>
-      'Utilisez l’adresse host:port indiquée par l’autre appareil.';
+      'Utilisez l’adresse host:port affichée sur l’autre appareil.';
 
   @override
   String get pairingCheckDetailsTitle =>
@@ -2431,15 +2252,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pairingConnectingDevice => 'Connexion de l’appareil…';
 
   @override
-  String get pairingQrScannerTitle => 'Scanner de code QR';
-
-  @override
   String get pairingCameraPreviewPlaceholder =>
       'L’aperçu de la caméra s’affiche ici.';
-
-  @override
-  String get pairingScannerNeedsAttention =>
-      'Le scanner requiert votre attention';
 
   @override
   String get pairingCodeIncomplete =>
@@ -2454,10 +2268,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pairingInviteInstructions =>
-      'Sur l’autre appareil, choisissez « Ajouter un appareil » → « Saisir un code », ou scannez le code QR.';
-
-  @override
-  String get pairingDetailsTitle => 'Informations d’association';
+      'Sur l’autre appareil, choisissez « Saisir un code » ou « Scanner un code QR ».';
 
   @override
   String get pairingAddress => 'Adresse';
@@ -2483,10 +2294,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pairingStartScanner => 'Lancer le scanner';
-
-  @override
-  String get pairingActionNotStarted =>
-      'Impossible de lancer l’action d’association.';
 
   @override
   String get pairingStateHandshaking => 'Vérification de l’appareil';
@@ -2515,12 +2322,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'Les appareils établissent un canal sécurisé.';
 
   @override
-  String get pairingAwaitingConfirmationDescription =>
-      'Comparez le code de vérification protégé, puis confirmez sur les deux appareils.';
-
-  @override
   String get pairingConfirmedDescription =>
-      'L’appareil est connecté. L’appartenance à votre groupe sera synchronisée automatiquement.';
+      'Les autres appareils de votre espace se connectent automatiquement.';
 
   @override
   String get pairingNoDeviceAdded => 'Aucun appareil n’a été ajouté.';
@@ -2839,10 +2642,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible d’actualiser l’historique. Réessayez.';
 
   @override
-  String get historyErrorLoad =>
-      'Impossible de charger l’historique. Réessayez.';
-
-  @override
   String get historyErrorLoadMore =>
       'Impossible de charger les éléments plus anciens.';
 
@@ -2900,7 +2699,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get historyErrorSecrecyUpdate =>
-      'Impossible de modifier la confidentialité de l’élément.';
+      'Impossible de modifier le masquage du contenu.';
 
   @override
   String get historyErrorPinUpdate => 'Impossible de modifier l’épinglage.';
@@ -2928,11 +2727,11 @@ class AppLocalizationsFr extends AppLocalizations {
       'L’OCR n’est pas disponible. Vérifiez le module dans Paramètres et réessayez.';
 
   @override
-  String get historyOcrErrorStart => 'Impossible de lancer l’OCR. Réessayez.';
+  String get historyOcrErrorStart => 'Impossible de lancer l’OCR.';
 
   @override
   String get historyOcrErrorRecognize =>
-      'Impossible de reconnaître le texte de l’image. Réessayez.';
+      'Impossible de reconnaître le texte de l’image.';
 
   @override
   String get historyOcrRecognizing => 'Reconnaissance du texte de l’image.';
@@ -2945,9 +2744,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get historyOcrTitle => 'Texte de l’image';
-
-  @override
-  String get historyOcrTextCopied => 'Texte reconnu copié.';
 
   @override
   String get historyOcrCopyError => 'Impossible de copier le texte. Réessayez.';
@@ -3036,10 +2832,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyActionFailedTitle => 'Échec de l’action';
 
   @override
-  String get historyLoadingMessage =>
-      'Chargement de l’historique du presse-papiers.';
-
-  @override
   String get historyUnavailableTitle => 'L’historique n’est pas disponible';
 
   @override
@@ -3069,16 +2861,16 @@ class AppLocalizationsFr extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count lignes du presse-papiers ignorées',
-      many: '$count lignes du presse-papiers ignorées',
-      one: '$count ligne du presse-papiers ignorée',
+      other: '$count éléments ignorés',
+      many: '$count éléments ignorés',
+      one: '$count élément ignoré',
     );
     return '$_temp0';
   }
 
   @override
   String get historySkippedRowsMessage =>
-      'Certains éléments conservés n’ont pas pu être lus et ne figurent pas dans cette liste.';
+      'Certains éléments n’ont pas pu être lus et ne figurent pas dans cette liste.';
 
   @override
   String get historySearch => 'Rechercher dans l’historique';
@@ -3166,9 +2958,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyCopyPlainText => 'Copier en texte brut';
 
   @override
-  String get historyManageClipTags => 'Gérer les étiquettes de l’élément';
-
-  @override
   String get historyPinnedButton => 'Épinglé';
 
   @override
@@ -3190,16 +2979,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyCopyFailedTitle => 'Échec de la copie';
 
   @override
-  String get historyPlainTextCopied => 'Texte brut copié.';
-
-  @override
-  String get historyClipCopied => 'Élément copié.';
+  String get historyPlainTextCopied => 'En texte brut.';
 
   @override
   String get historyDownloadedTitle => 'Téléchargé';
-
-  @override
-  String get historyFileSaved => 'Fichier enregistré.';
 
   @override
   String get historyShare => 'Partager';
@@ -3262,16 +3045,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyRetryDownload => 'Relancer le téléchargement';
 
   @override
-  String get historyDownloadFailedTitle => 'Échec du téléchargement';
-
-  @override
   String get historyShowFile => 'Afficher le fichier';
-
-  @override
-  String get historyMetadataPrivacy => 'Confidentialité';
-
-  @override
-  String get historyMetadataConfidential => 'Confidentiel';
 
   @override
   String get historyMetadataCaptured => 'Date de capture';
@@ -3281,9 +3055,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get historyMetadataDevice => 'Appareil';
-
-  @override
-  String get historyMetadataClipType => 'Type d’élément';
 
   @override
   String get historyMetadataType => 'Type';
@@ -3307,8 +3078,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyMetadataSync => 'Synchronisation';
 
   @override
-  String get historyMetadataTooLargeToSync =>
-      'Trop volumineux pour être synchronisé';
+  String get historyMetadataTooLargeToSync => 'Trop volumineux';
 
   @override
   String historyBulkDeleteTitle(int count) {
@@ -3379,26 +3149,22 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get appRuntimeStartFailed =>
-      'CopyPaste n’a pas pu démarrer son environnement d’exécution.';
-
-  @override
-  String get appPreparing => 'Préparation de CopyPaste.';
+      'CopyPaste n’a pas pu démarrer son service en arrière-plan.';
 
   @override
   String get appRuntimeWaiting =>
       'CopyPaste attend l’accès à l’historique protégé.';
 
   @override
-  String get appHistoryUnavailableTitle =>
-      'Le service Historique n’est pas disponible';
+  String get appHistoryUnavailableTitle => 'L’historique n’est pas disponible';
 
   @override
   String get appDevicesUnavailableTitle =>
-      'Le service Appareils n’est pas disponible';
+      'Les appareils ne sont pas disponibles';
 
   @override
   String get appSettingsUnavailableTitle =>
-      'Le service Paramètres n’est pas disponible';
+      'Les paramètres ne sont pas disponibles';
 
   @override
   String get appQuit => 'Quitter CopyPaste';
@@ -3418,11 +3184,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get appDestinationSettings => 'Paramètres';
-
-  @override
-  String appDestinationSelected(String destination) {
-    return '$destination, sélectionné';
-  }
 
   @override
   String get appActiveFilter => 'Filtre actif';
@@ -3453,8 +3214,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get sharedShizukuNoLongerNeeded => 'Shizuku n’est plus nécessaire.';
 
   @override
-  String get sharedGetShizukuDescription =>
-      'Installez Shizuku pour appliquer l’accès unique.';
+  String get sharedGetShizukuDescription => 'Shizuku applique l’accès unique.';
 
   @override
   String get sharedShizukuWirelessDebugging =>
@@ -3482,6 +3242,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get sharedAllow => 'Autoriser';
+
+  @override
+  String get sharedApply => 'Appliquer';
 
   @override
   String get sharedSetupCommandsCopyFailed =>
@@ -3533,10 +3296,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingStartAtLogin => 'Lancer à l’ouverture de session';
-
-  @override
-  String get onboardingStartAtLoginDescription =>
-      'Ouvrir CopyPaste à l’ouverture de session';
 
   @override
   String get onboardingStartAtLoginSemantics =>
@@ -3666,8 +3425,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingLinuxCompanion => 'Compagnon GNOME ou KDE';
 
   @override
-  String get onboardingLinuxCompanionReady =>
-      'Le pont Clipboard v2 authentifié est prêt.';
+  String get onboardingLinuxCompanionReady => 'Prêt.';
 
   @override
   String get onboardingLinuxCompanionCapturePaused =>
@@ -3684,33 +3442,27 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingLinuxKeyboardControl => 'Contrôle du clavier';
 
   @override
-  String get onboardingLinuxKeyboardAllowed =>
-      'Le contrôle du clavier est autorisé pour Quick Paste.';
+  String get onboardingLinuxKeyboardAllowed => 'Autorisé pour Quick Paste.';
 
   @override
   String get onboardingLinuxKeyboardUnsupported =>
-      'Le contrôle du clavier n’est pas disponible dans cette session de bureau.';
+      'Indisponible dans cette session de bureau.';
 
   @override
   String get onboardingLinuxAllowKeyboard => 'Autoriser le contrôle du clavier';
 
   @override
-  String get onboardingLinuxQuickPasteReady => 'Quick Paste est prêt.';
+  String get onboardingLinuxQuickPasteReady => 'Prêt.';
 
   @override
   String get onboardingLinuxQuickPastePending =>
-      'Quick Paste sera prêt une fois l’intégration au bureau requise activée.';
-
-  @override
-  String get onboardingLinuxStartAtLoginDescription =>
-      'Ouvrir CopyPaste à l’ouverture de session.';
+      'Prêt une fois l’intégration au bureau requise activée.';
 
   @override
   String get onboardingLinuxLinks => 'Liens CopyPaste';
 
   @override
-  String get onboardingLinuxLinksRegistered =>
-      'Les liens CopyPaste s’ouvrent dans cette app.';
+  String get onboardingLinuxLinksRegistered => 'S’ouvrent dans cette app.';
 
   @override
   String get onboardingLinuxLinksUnregistered =>
@@ -3725,7 +3477,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingLinuxScreenshotBlockingUnavailable =>
-      'Le blocage des captures d’écran n’est pas disponible sur Linux. Les données stockées protégées restent chiffrées.';
+      'Indisponible sur Linux. Les données stockées restent chiffrées.';
 
   @override
   String get onboardingLinuxCheckAgain => 'Vérifier à nouveau';
@@ -3801,7 +3553,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingAndroidApplyAccessDescription =>
-      'Appliquer un accès de capture unique.';
+      'Une seule fois. Shizuku n’est plus nécessaire ensuite.';
 
   @override
   String get onboardingAndroidFullCaptureLater =>
@@ -3839,7 +3591,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingAndroidIntakeFailed =>
-      'Impossible d’activer la réception du presse-papiers.';
+      'Impossible d’activer la capture du presse-papiers.';
 
   @override
   String get onboardingAndroidStopCaptureFailed =>
@@ -3851,11 +3603,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingAndroidGrantsFailed =>
-      'CopyPaste est autorisé dans Shizuku, mais les autorisations de capture Android n’ont pas pu être appliquées.';
+      'CopyPaste est autorisé dans Shizuku, mais l’accès de capture n’a pas pu être appliqué.';
 
   @override
   String get onboardingAndroidAllowInShizuku =>
-      'Autorisez CopyPaste dans Shizuku pour appliquer les autorisations de capture.';
+      'Autorisez CopyPaste dans Shizuku pour appliquer l’accès de capture.';
 
   @override
   String get onboardingAndroidGrantAccessFirst =>
@@ -3899,13 +3651,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get modulesOperationFailed => 'Échec de l’opération sur le module';
 
   @override
-  String get modulesLoading => 'Chargement des modules.';
-
-  @override
   String get modulesUnavailableTitle => 'Les modules ne sont pas disponibles';
-
-  @override
-  String get modulesUnavailableMessage => 'Essayez de recharger les modules.';
 
   @override
   String get modulesNoneInstalled => 'Aucun module installé';
@@ -3921,15 +3667,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get modulesTryDifferentSearch => 'Essayez une autre recherche.';
 
   @override
-  String get modulesMarketplaceLoading => 'Chargement du catalogue.';
-
-  @override
   String get modulesMarketplaceUnavailableTitle =>
       'Le catalogue n’est pas disponible';
-
-  @override
-  String get modulesMarketplaceUnavailableMessage =>
-      'Essayez de recharger le catalogue.';
 
   @override
   String get modulesNoneAvailable => 'Aucun module disponible';
@@ -3993,10 +3732,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get modulesNoSettingsTitle => 'Aucun paramètre supplémentaire';
 
   @override
-  String get modulesNoSettingsMessage =>
-      'Ce module ne nécessite aucune configuration supplémentaire.';
-
-  @override
   String get modulesSetUpSmsAccess => 'Configurer l’accès aux SMS';
 
   @override
@@ -4007,9 +3742,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get modulesCloseSmsAccess => 'Fermer l’accès aux SMS';
-
-  @override
-  String get modulesSmsChecking => 'Vérification de l’accès aux SMS.';
 
   @override
   String get modulesSmsReady =>
@@ -4036,17 +3768,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get modulesSmsApplyAccess => 'Appliquer l’accès aux SMS';
 
   @override
-  String get modulesSmsApplyAccessDescription =>
-      'Appliquer un accès unique aux SMS.';
+  String get modulesSmsApplyAccessDescription => 'Nécessaire une seule fois.';
 
   @override
   String get modulesSmsSetupFailed => 'Échec de la configuration des SMS';
 
   @override
   String get modulesFileSelectionFailed => 'Échec de la sélection du fichier';
-
-  @override
-  String get modulesChooseLanguages => 'Choisir les langues';
 
   @override
   String get modulesChooseFile => 'Choisir un fichier';
@@ -4156,10 +3884,6 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get modulesMarketplaceLoadFailed =>
-      'Impossible de charger le catalogue de modules.';
-
-  @override
   String get modulesSmsSetupRequired =>
       'Configurez l’accès aux SMS avant d’activer ce module.';
 
@@ -4211,12 +3935,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get modulesResponseInvalid => 'La réponse du module n’est pas valide.';
 
   @override
-  String get modulesFileSelectionUnavailable =>
-      'La sélection de fichiers n’est pas disponible.';
-
-  @override
-  String get modulesFileSelectFailed =>
-      'Impossible de sélectionner le fichier.';
+  String get modulesFileSelectionUnavailable => 'Indisponible ici.';
 
   @override
   String modulesFileNotAccepted(String field) {
@@ -4277,13 +3996,6 @@ class AppLocalizationsFr extends AppLocalizations {
     });
     return '$_temp0';
   }
-
-  @override
-  String get deviceAuthUnavailable => 'Non disponible sur ce système';
-
-  @override
-  String get deviceAuthNotConfigured =>
-      'Configurez d’abord un mot de passe, un code PIN ou la biométrie de l’appareil';
 
   @override
   String get commonOn => 'Activé';
@@ -4458,9 +4170,9 @@ class AppLocalizationsFr extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count éléments texte exportés',
-      many: '$count éléments texte exportés',
-      one: '$count élément texte exporté',
+      other: '$count éléments texte',
+      many: '$count éléments texte',
+      one: '$count élément texte',
     );
     return '$_temp0';
   }
@@ -4481,15 +4193,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String settingsOutcomeDetail(String outcome, String detail) {
     return '$outcome · $detail';
   }
-
-  @override
-  String settingsBackupDoneMessage(String size) {
-    return 'Sauvegarde chiffrée enregistrée · $size';
-  }
-
-  @override
-  String get settingsRestoreDoneMessage =>
-      'L’historique du presse-papiers de cet appareil correspond maintenant à la sauvegarde.';
 
   @override
   String sharedSizeKibibytes(String size) {
@@ -4737,9 +4440,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get transformsCategoryOther => 'Autres';
 
   @override
-  String get transformsChainEmpty => 'Aucune étape';
-
-  @override
   String transformsStepLabel(int step, String name) {
     return '$step · $name';
   }
@@ -4798,7 +4498,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String transformsPipelineSavedMessage(String name) {
-    return '$name est disponible dans chaque palette de transformation.';
+    return '$name est maintenant dans Chaînes.';
   }
 
   @override
@@ -4900,14 +4600,14 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get transformsCopiedMessage =>
-      'Le résultat est dans le presse-papiers et l\'historique.';
+      'Le résultat est aussi dans l’historique.';
 
   @override
   String get transformsSavedTitle => 'Enregistré';
 
   @override
   String get transformsSavedMessage =>
-      'Enregistré comme nouvel élément de l’historique.';
+      'Le résultat est un nouvel élément de l’historique.';
 
   @override
   String get transformsPasteFailedTitle => 'Collage impossible';
@@ -4944,6 +4644,9 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get transformsErrorTimestampUnit =>
       'Indiquez si le nombre est en secondes ou en millisecondes';
+
+  @override
+  String get transformsErrorTimeLimit => 'Délai dépassé';
 
   @override
   String get transformsErrorExternalEntity =>
@@ -5062,11 +4765,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get transformsFavoritesDescription =>
-      'Affichés en premier dans chaque palette.';
+      'Affichés parmi les premiers quand vous transformez du texte.';
 
   @override
   String transformsFavoriteShortcut(String shortcut) {
-    return '$shortcut dans la palette';
+    return '$shortcut dans « Transformer le texte »';
   }
 
   @override
@@ -5111,8 +4814,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get transformsHiddenTitle => 'Transformations masquées';
 
   @override
-  String get transformsHiddenDescription =>
-      'Absentes des palettes et des suggestions.';
+  String get transformsHiddenDescription => 'Ni affichées ni suggérées.';
 
   @override
   String get transformsHideTransform => 'Masquer une transformation';
@@ -5169,10 +4871,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'État de l\'accès rapide indisponible';
 
   @override
-  String get quickAccessUnavailableMessage =>
-      'CopyPaste n\'a pas pu lire l\'état du clavier, des vignettes et du widget. Réessayez.';
-
-  @override
   String get quickAccessActionFailedTitle => 'Action impossible';
 
   @override
@@ -5198,7 +4896,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get quickAccessKeyboardSearchDescription =>
-      'Activer le panneau de clavier Éléments CopyPaste.';
+      'Activer le clavier Éléments CopyPaste.';
 
   @override
   String get quickAccessKeyboardKeywords =>
@@ -5208,10 +4906,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get quickAccessSwitchKeyboardTitle => 'Passer au clavier d\'éléments';
 
   @override
-  String get quickAccessSwitchKeyboardDescription =>
-      'Choisissez Éléments CopyPaste comme clavier actuel.';
-
-  @override
   String get quickAccessSwitchKeyboardAction => 'Choisir le clavier';
 
   @override
@@ -5219,10 +4913,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierTitle => 'Mode de capture';
-
-  @override
-  String get quickAccessCaptureTierDescription =>
-      'Comment les copies des autres apps sont enregistrées.';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -5237,11 +4927,12 @@ class AppLocalizationsFr extends AppLocalizations {
       'Complet : chaque copie est enregistrée en arrière-plan';
 
   @override
-  String get quickAccessTierPanelCollecting => 'Panneau sélectionné : collecte';
+  String get quickAccessTierPanelCollecting =>
+      'Clavier d’éléments : enregistre chaque copie tant qu’il est sélectionné';
 
   @override
   String get quickAccessTierPanelCatchUp =>
-      'Mode panneau : rattrapage à l\'ouverture';
+      'Clavier d’éléments : enregistre le presse-papiers à l’ouverture';
 
   @override
   String get quickAccessTierManual =>
@@ -5264,11 +4955,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get quickAccessFocusSearchTitle =>
-      'Activer la recherche à l\'ouverture du panneau';
-
-  @override
-  String get quickAccessFocusSearchDescription =>
-      'Ouvrir le panneau avec la recherche prête.';
+      'Activer la recherche à l’ouverture du clavier d’éléments';
 
   @override
   String get quickAccessTilesTitle => 'Vignettes des Réglages rapides';
@@ -5413,11 +5100,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'L\'original a été utilisé à la place.';
 
   @override
-  String get quickPastePasteManually =>
-      'Le contenu est dans le presse-papiers. Collez-le manuellement.';
-
-  @override
-  String get quickPastePaste => 'Coller';
+  String get quickPastePasteManually => 'Collez-le manuellement.';
 
   @override
   String get rulesLoadFailed => 'Impossible de charger les règles de contenu.';
@@ -5469,10 +5152,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get rulesEmptyTitle => 'Aucune règle pour l’instant';
-
-  @override
-  String get rulesEmptyMessage =>
-      'Les règles étiquettent, protègent, font expirer ou ignorent les nouvelles copies.';
 
   @override
   String get rulesDeletedTitle => 'Supprimées récemment';
@@ -5795,13 +5474,10 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get rulesPatternHint =>
-      'Les assertions de contexte et les références arrière ne sont pas prises en charge.';
+      'Les assertions avant et arrière ainsi que les références arrière ne sont pas prises en charge.';
 
   @override
   String get rulesCaseSensitive => 'Respecter la casse';
-
-  @override
-  String get rulesChooseValues => 'Choisir';
 
   @override
   String get rulesUnknownConditionNotice =>
@@ -5928,10 +5604,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get rulesTestTitle => 'Tester';
-
-  @override
-  String get rulesTestDescription =>
-      'Essayez la règle sur un exemple de texte.';
 
   @override
   String get rulesSamplePlaceholder =>
@@ -6145,11 +5817,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get rulesSecretItem => 'Élément secret';
 
   @override
-  String rulesSecretItemFrom(String app) {
-    return 'Élément secret de $app';
-  }
-
-  @override
   String get rulesPreviewCancelled => 'L’aperçu a été arrêté. Rien n’a changé.';
 
   @override
@@ -6168,7 +5835,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get rulesApplyDeleteMessage =>
-      'Les clips correspondants sont supprimés sur tous vos appareils. Action irréversible.';
+      'Les éléments correspondants sont supprimés sur tous vos appareils. Action irréversible.';
 
   @override
   String get rulesApplyDeleteConfirm => 'Supprimer et appliquer';
@@ -6242,11 +5909,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historySentTitle => 'Envoyé';
 
   @override
-  String historySentTo(String devices) {
-    return 'Envoyé à $devices.';
-  }
-
-  @override
   String get historySendFailedTitle => 'Non envoyé';
 
   @override
@@ -6281,9 +5943,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get historyEditSaved =>
       'Le texte modifié est un nouvel élément en haut de l\'historique.';
-
-  @override
-  String get historyNewClipSaved => 'Votre texte a été enregistré.';
 
   @override
   String historyQueueAddedInOrder(int count) {
@@ -6471,10 +6130,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get diagnosticsExported => 'Diagnostic exporté';
 
   @override
-  String get diagnosticsExportedMessage =>
-      'Le fichier journal est prêt à être envoyé au support.';
-
-  @override
   String get diagnosticsExportFailed => 'Échec de l’exportation';
 
   @override
@@ -6492,7 +6147,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get diagnosticsLogLevelDescription =>
-      'Quantité de détails enregistrés sur cet appareil. Les journaux n’incluent jamais le contenu du presse-papiers.';
+      'Quantité de détails enregistrés sur cet appareil.';
 
   @override
   String get onboardingAndroidCaptureMethod => 'Méthode de détection';
@@ -6582,9 +6237,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get fileSetShowFolder => 'Afficher le dossier';
 
   @override
-  String get historyFilesSaved => 'Fichiers enregistrés.';
-
-  @override
   String get transfersResume => 'Reprendre';
 
   @override
@@ -6669,10 +6321,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsLogsFolderTitle => 'Dossier des journaux';
 
   @override
-  String get settingsLogsFolderDescription =>
-      'Montre les journaux de diagnostic de cet appareil.';
-
-  @override
   String get settingsOpenFolderAction => 'Ouvrir';
 
   @override
@@ -6752,7 +6400,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get devicesSpaceRemovedMessage =>
-      'Cet appareil a été retiré ou a quitté l\'espace. Son historique reste ici. Rejoignez un espace pour synchroniser à nouveau.';
+      'Cet appareil a été retiré ou a quitté l’espace. Son historique reste ici.';
 
   @override
   String get devicesSpaceJoin => 'Rejoindre un espace';
@@ -6823,7 +6471,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingReadySpaceCreated =>
-      'Votre espace est prêt. Ajoutez vos autres appareils maintenant ou plus tard dans Appareils.';
+      'Ajoutez vos autres appareils maintenant ou plus tard dans Appareils.';
 
   @override
   String get onboardingReadyJoin =>
@@ -6851,15 +6499,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get onboardingPairJoinTitle => 'Rejoindre votre espace';
 
   @override
-  String get onboardingPairJoinSubtitle =>
-      'Saisissez le code ou scannez le code QR de votre autre appareil. Vérifiez ensuite que les deux appareils affichent le même code de vérification.';
-
-  @override
   String get onboardingPairAddDeviceSubtitle =>
-      'Sur votre autre appareil, ouvrez CopyPaste et rejoignez avec ce code QR ou ce code. Vérifiez ensuite que les deux appareils affichent le même code de vérification.';
+      'Sur votre autre appareil, ouvrez CopyPaste et rejoignez avec ce code ou ce code QR.';
 
   @override
-  String get onboardingPairSkip => 'Passer pour l’instant';
+  String get onboardingPairSkip => 'Plus tard';
 
   @override
   String get onboardingPairInterruptedTitle => 'L’association n’a pas abouti';
@@ -6869,13 +6513,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'Réessayez, ou continuez et associez plus tard dans Appareils.';
 
   @override
-  String onboardingReadyPaired(String device) {
-    return 'Associé à $device. Votre presse-papiers se synchronise désormais entre eux.';
-  }
-
-  @override
-  String get onboardingReadyPairedUnnamed =>
-      'Vos appareils sont associés. Votre presse-papiers se synchronise désormais entre eux.';
+  String get onboardingReadyPaired =>
+      'Votre presse-papiers se synchronise désormais entre vos appareils.';
 
   @override
   String get onboardingReadyPairLater =>
@@ -6919,8 +6558,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Affichées après l’installation. Vous les confirmez en activant le module.';
 
   @override
-  String get modulesDetailsNoPermissions =>
-      'N’utilise aucun service CopyPaste.';
+  String get modulesDetailsNoPermissions => 'Aucune autorisation requise.';
 
   @override
   String get modulesDetailsInformation => 'Informations';

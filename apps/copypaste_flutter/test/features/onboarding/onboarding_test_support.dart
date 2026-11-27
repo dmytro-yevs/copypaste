@@ -13,19 +13,23 @@ import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 OnboardingController macosOnboarding({
   required OnboardingStore store,
   required MacosSetupGateway setup,
+  bool offersSpace = false,
 }) => OnboardingController(
   setup: MacosOnboardingSetup(
     store: store,
     setup: setup,
     startup: MacosLaunchAtLoginGateway(setup),
   ),
+  offersSpace: offersSpace,
 );
 
 OnboardingController windowsOnboarding({
   required OnboardingStore store,
   required LaunchAtLoginGateway startup,
+  bool offersSpace = false,
 }) => OnboardingController(
   setup: WindowsOnboardingSetup(store: store, startup: startup),
+  offersSpace: offersSpace,
 );
 
 OnboardingController linuxOnboarding({

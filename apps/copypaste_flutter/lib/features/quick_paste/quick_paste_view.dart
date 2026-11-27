@@ -233,8 +233,10 @@ class _QuickPasteViewState extends State<QuickPasteView>
         AppToastTone.success,
       ),
       QuickPasteNoticeKind.failed => (
-        l10n.quickPasteActionFailedTitle,
-        notice.message ?? l10n.pasteQueueFailed,
+        notice.message == null
+            ? l10n.pasteQueueFailed
+            : l10n.quickPasteActionFailedTitle,
+        notice.message,
         AppToastTone.error,
       ),
     };
@@ -629,7 +631,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
     _retainResultKeys(rows);
     if (rows.isEmpty) {
       if (controller.moduleResultsLoading) {
-        return StateView.loading(message: l10n.commonLoading);
+        return const StateView.loading();
       }
       if (controller.moduleResultsFailed) {
         return StateView.error(title: l10n.modulesOperationFailed);
@@ -870,7 +872,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
     final history = controller.history;
     if (history.window.state == HistoryLoadState.loading &&
         controller.items.isEmpty) {
-      return StateView.loading(message: context.l10n.quickPasteLoadingHistory);
+      return const StateView.loading();
     }
     if (history.window.state == HistoryLoadState.error) {
       return StateView.error(
@@ -1517,7 +1519,7 @@ class _Notice extends StatelessWidget {
             size: AppIconSize.sm,
             child: Icon(icon, size: AppIconSize.sm),
           ),
-          const Gap(AppSpacing.xs),
+          const Gap(AppSpacing.sm),
           Flexible(
             child: Text(
               text,

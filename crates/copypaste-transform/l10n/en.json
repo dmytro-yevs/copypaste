@@ -25,11 +25,12 @@
     },
     "structure.json_minify": {
       "name": "Minify JSON",
-      "description": "Removes all insignificant whitespace from JSON.",
+      "description": "",
       "keywords": [
         "compact",
         "compress",
-        "one line"
+        "one line",
+        "remove whitespace"
       ]
     },
     "structure.json_validate": {
@@ -99,7 +100,7 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON to YAML",
-      "description": "Converts JSON to block-style YAML.",
+      "description": "",
       "keywords": [
         "convert",
         "yml"
@@ -150,17 +151,18 @@
     },
     "structure.xml_minify": {
       "name": "Minify XML",
-      "description": "Removes whitespace between XML elements.",
+      "description": "",
       "keywords": [
         "compact",
-        "compress"
+        "compress",
+        "remove whitespace"
       ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 encode",
-      "description": "Encodes the UTF-8 bytes of the text as Base64.",
+      "description": "",
       "keywords": [
         "base64",
         "b64",
@@ -252,7 +254,7 @@
     },
     "encode.hex_encode": {
       "name": "Hex encode",
-      "description": "Writes the UTF-8 bytes of the text as hexadecimal digits.",
+      "description": "",
       "keywords": [
         "hex",
         "hexadecimal",
@@ -375,11 +377,12 @@
   "case": {
     "case.upper": {
       "name": "UPPERCASE",
-      "description": "Converts all letters to capitals with full Unicode rules.",
+      "description": "",
       "keywords": [
         "caps",
         "capital",
-        "uppercase"
+        "uppercase",
+        "letters"
       ],
       "params": {
         "locale": {
@@ -393,10 +396,11 @@
     },
     "case.lower": {
       "name": "lowercase",
-      "description": "Converts all letters to lowercase with full Unicode rules.",
+      "description": "",
       "keywords": [
         "small",
-        "lowercase"
+        "lowercase",
+        "letters"
       ],
       "params": {
         "locale": {
@@ -431,7 +435,7 @@
     },
     "case.sentence": {
       "name": "Sentence case",
-      "description": "Capitalizes the first word of each sentence and lowercases the rest.",
+      "description": "",
       "keywords": [
         "capitalize",
         "sentence"
@@ -444,7 +448,7 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Joins words into an identifier that starts lowercase.",
+      "description": "",
       "keywords": [
         "identifier",
         "variable",
@@ -461,7 +465,7 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Joins words into an identifier with every word capitalized.",
+      "description": "",
       "keywords": [
         "identifier",
         "class",
@@ -478,7 +482,7 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Joins lowercase words with underscores.",
+      "description": "",
       "keywords": [
         "identifier",
         "underscore",
@@ -492,7 +496,7 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Joins lowercase words with hyphens.",
+      "description": "",
       "keywords": [
         "identifier",
         "hyphen",
@@ -506,11 +510,12 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Joins uppercase words with underscores.",
+      "description": "",
       "keywords": [
         "identifier",
         "screaming",
-        "upper snake"
+        "upper snake",
+        "underscore"
       ],
       "params": {
         "per_line": {
@@ -520,7 +525,7 @@
     },
     "case.swap": {
       "name": "Swap case",
-      "description": "Turns uppercase letters lowercase and lowercase letters uppercase.",
+      "description": "",
       "keywords": [
         "invert",
         "toggle",
@@ -531,7 +536,7 @@
   "hash": {
     "hash.md5": {
       "name": "MD5 hash",
-      "description": "MD5 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "description": "Not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
       "keywords": [
         "md5",
         "hash",
@@ -551,7 +556,7 @@
     },
     "hash.sha1": {
       "name": "SHA-1 hash",
-      "description": "SHA-1 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "description": "Not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
       "keywords": [
         "sha1",
         "sha-1",
@@ -572,7 +577,7 @@
     },
     "hash.sha256": {
       "name": "SHA-256 hash",
-      "description": "SHA-256 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "description": "Hashes the text as UTF-8 exactly as shown, with no newline added.",
       "keywords": [
         "sha256",
         "sha-256",
@@ -594,7 +599,7 @@
     },
     "hash.sha512": {
       "name": "SHA-512 hash",
-      "description": "SHA-512 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "description": "Hashes the text as UTF-8 exactly as shown, with no newline added.",
       "keywords": [
         "sha512",
         "sha-512",
@@ -616,7 +621,7 @@
     },
     "hash.crc32": {
       "name": "CRC-32 checksum",
-      "description": "CRC-32 with the IEEE polynomial used by zip and PNG. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "description": "With the IEEE polynomial used by zip and PNG. Hashes the text as UTF-8 exactly as shown, with no newline added.",
       "keywords": [
         "crc",
         "crc32",
@@ -680,10 +685,11 @@
     },
     "lines.remove_empty": {
       "name": "Remove empty lines",
-      "description": "Deletes lines that are empty or hold only spaces.",
+      "description": "",
       "keywords": [
         "blank lines",
-        "empty"
+        "empty",
+        "delete"
       ],
       "params": {
         "whitespace_only": {
@@ -738,7 +744,7 @@
     },
     "lines.reverse": {
       "name": "Reverse lines",
-      "description": "Puts the lines in the opposite order.",
+      "description": "",
       "keywords": [
         "flip",
         "invert",
@@ -747,11 +753,13 @@
     },
     "lines.join": {
       "name": "Join lines",
-      "description": "Combines all lines into one with a separator.",
+      "description": "",
       "keywords": [
         "merge",
         "single line",
-        "concatenate"
+        "concatenate",
+        "combine",
+        "separator"
       ],
       "params": {
         "separator": {
@@ -913,7 +921,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Decode",
+      "name": "JWT decode",
       "description": "Shows the token header and payload as JSON. The signature is not verified.",
       "keywords": [
         "jwt",

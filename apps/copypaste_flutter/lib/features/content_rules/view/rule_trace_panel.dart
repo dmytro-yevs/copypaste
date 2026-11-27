@@ -30,6 +30,10 @@ class RuleTracePanel extends StatelessWidget {
   /// The sample after the rules' transforms, when it can be shown.
   final String? transformedOutput;
 
+  /// Where a rule's name starts, past its result icon; the lines nested
+  /// under the rule start there too.
+  static const _nestedInset = AppIconSize.sm + AppSpacing.sm;
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -113,7 +117,7 @@ class RuleTracePanel extends StatelessWidget {
           for (final condition in step.conditions)
             Padding(
               padding: const EdgeInsetsDirectional.only(
-                start: AppSpacing.xl,
+                start: _nestedInset,
                 top: AppSpacing.xs,
               ),
               child: _resultLine(
@@ -129,7 +133,7 @@ class RuleTracePanel extends StatelessWidget {
           if (step.actions.isNotEmpty) ...[
             const Gap(AppSpacing.xs),
             Padding(
-              padding: const EdgeInsetsDirectional.only(start: AppSpacing.xl),
+              padding: const EdgeInsetsDirectional.only(start: _nestedInset),
               child: Text(
                 step.actions.map(l10n.rulesActionType).join(', '),
               ).xSmall().muted(),
@@ -138,7 +142,7 @@ class RuleTracePanel extends StatelessWidget {
           if (step.stopped) ...[
             const Gap(AppSpacing.xs),
             Padding(
-              padding: const EdgeInsetsDirectional.only(start: AppSpacing.xl),
+              padding: const EdgeInsetsDirectional.only(start: _nestedInset),
               child: Text(l10n.rulesTraceStopped).xSmall().muted(),
             ),
           ],

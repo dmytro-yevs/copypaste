@@ -930,16 +930,6 @@ void main() {
         final address = find.byKey(const ValueKey('pairing-invite-address'));
         expect(qr, findsOneWidget);
         expect(controller.invitation!.code.length, 8);
-        final detailsTitle = find.text('Pairing details');
-        expect(detailsTitle, findsOneWidget);
-        expect(
-          tester.getTopLeft(detailsTitle).dy,
-          lessThan(tester.getTopLeft(qr).dy),
-        );
-        expect(
-          tester.getBottomLeft(detailsTitle).dy,
-          lessThan(tester.getTopLeft(code).dy),
-        );
         expect(
           tester.widget<SelectableText>(code).data,
           controller.invitation!.code,
@@ -1150,7 +1140,12 @@ void main() {
             controller.closeDeviceDetails();
             await tester.pumpAndSettle();
           } else {
-            expect(find.text('Scanner unavailable'), findsOneWidget);
+            expect(
+              find.text(
+                outcome == 'invalid' ? 'Wrong QR code' : 'Scanner unavailable',
+              ),
+              findsOneWidget,
+            );
             expect(controller.canChangePairingMode, isTrue);
           }
         }
@@ -1403,7 +1398,7 @@ void main() {
     expect(find.text('Phone · Android 16'), findsOneWidget);
     expect(find.text('This device'), findsNothing);
     expect(find.text('Trusted'), findsNothing);
-    expect(find.text('Available'), findsNothing);
+    expect(find.text('Online'), findsNothing);
     expect(find.text('24 ms'), findsNothing);
     expect(find.text('Tablet'), findsNothing);
     expect(find.text('Already paired'), findsNothing);
@@ -1466,6 +1461,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Android 16'), findsOneWidget);
+    // Only the card carries the summary; the details rows say the rest.
+    expect(find.text('Phone · Android 16'), findsOneWidget);
     expect(find.text('192.0.2.20:47654'), findsOneWidget);
     expect(find.text('Sync now'), findsOneWidget);
     expect(find.text('Remove from space'), findsOneWidget);
@@ -1890,7 +1887,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await _pumpDevices(tester, controller);
-    expect(find.text('Loading devices…'), findsOneWidget);
+    expect(find.text('Loading'), findsOneWidget);
     expect(emptyState, findsNothing);
 
     gateway.loadPending!.complete();

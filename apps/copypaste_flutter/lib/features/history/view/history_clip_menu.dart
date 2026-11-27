@@ -35,9 +35,7 @@ Future<void> copyHistoryClip(
   AppToast.show(
     context,
     title: context.l10n.historyCopiedTitle,
-    message: plainText
-        ? context.l10n.historyPlainTextCopied
-        : context.l10n.historyClipCopied,
+    message: plainText ? context.l10n.historyPlainTextCopied : null,
     tone: AppToastTone.success,
   );
 }
@@ -345,9 +343,7 @@ Future<void> showHistoryNewClipDrawer(
     clips: edits.clipEdits,
     preferences: edits.clipEditPreferences,
   );
-  if (id != null && context.mounted) {
-    _toast(context, true, success: context.l10n.historyNewClipSaved);
-  }
+  if (id != null && context.mounted) _toast(context, true);
 }
 
 /// Appends [clipIds] to the paste queue in the given order, which is the
@@ -366,7 +362,9 @@ Future<void> addHistoryClipsToQueue(
   AppToast.show(
     context,
     title: context.l10n.pasteQueueAdded(pending),
-    message: context.l10n.historyQueueAddedInOrder(clipIds.length),
+    message: clipIds.length > 1
+        ? context.l10n.historyQueueAddedInOrder(clipIds.length)
+        : null,
     tone: AppToastTone.success,
   );
 }
@@ -453,7 +451,7 @@ Future<void> _showRuleTraceDialog(
 void _toast(
   BuildContext context,
   bool succeeded, {
-  required String success,
+  String? success,
   String? failure,
 }) {
   if (!succeeded) {

@@ -176,10 +176,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('OCR settings'), findsOneWidget);
       expect(find.text('No additional settings'), findsOneWidget);
-      expect(
-        find.text('This module does not need extra configuration.'),
-        findsOneWidget,
-      );
       final drawer = find.byKey(
         const ValueKey('module-settings-drawer-copypaste.ocr'),
       );

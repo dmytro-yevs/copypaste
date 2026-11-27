@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "JSON を圧縮",
-      "description": "JSON から不要な空白をすべて削除します。"
+      "description": "",
+      "keywords": [
+        "空白を削除"
+      ]
     },
     "structure.json_validate": {
       "name": "JSON を検証",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON から YAML",
-      "description": "JSON をブロックスタイルの YAML に変換します。"
+      "description": "",
+      "keywords": [
+        "変換"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV から JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "XML を圧縮",
-      "description": "XML 要素間の空白を削除します。"
+      "description": "",
+      "keywords": [
+        "空白を削除"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 エンコード",
-      "description": "テキストの UTF-8 バイト列を Base64 にエンコードします。",
+      "description": "",
       "params": {
         "variant": {
           "label": "アルファベット",
@@ -163,7 +172,11 @@
     },
     "encode.hex_encode": {
       "name": "16 進エンコード",
-      "description": "テキストの UTF-8 バイト列を 16 進数で書き出します。",
+      "description": "",
+      "keywords": [
+        "16 進数",
+        "バイト"
+      ],
       "params": {
         "separator": {
           "label": "区切り",
@@ -231,7 +244,7 @@
   "case": {
     "case.upper": {
       "name": "大文字",
-      "description": "Unicodeの完全な規則ですべての文字を大文字にします。",
+      "description": "",
       "params": {
         "locale": {
           "label": "言語の規則",
@@ -244,7 +257,7 @@
     },
     "case.lower": {
       "name": "小文字",
-      "description": "Unicodeの完全な規則ですべての文字を小文字にします。",
+      "description": "",
       "params": {
         "locale": {
           "label": "言語の規則",
@@ -273,7 +286,7 @@
     },
     "case.sentence": {
       "name": "文頭のみ大文字",
-      "description": "各文の最初の単語を大文字で始め、残りを小文字にします。",
+      "description": "",
       "params": {
         "keep_acronyms": {
           "label": "略語を保持"
@@ -282,7 +295,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "単語を小文字で始まる識別子にまとめます。",
+      "description": "",
+      "keywords": [
+        "識別子"
+      ],
       "params": {
         "per_line": {
           "label": "行ごとに変換"
@@ -294,7 +310,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "各単語を大文字で始める識別子にまとめます。",
+      "description": "",
+      "keywords": [
+        "識別子"
+      ],
       "params": {
         "per_line": {
           "label": "行ごとに変換"
@@ -306,7 +325,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "小文字の単語をアンダースコアでつなぎます。",
+      "description": "",
+      "keywords": [
+        "アンダースコア"
+      ],
       "params": {
         "per_line": {
           "label": "行ごとに変換"
@@ -315,7 +337,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "小文字の単語をハイフンでつなぎます。",
+      "description": "",
+      "keywords": [
+        "ハイフン"
+      ],
       "params": {
         "per_line": {
           "label": "行ごとに変換"
@@ -324,7 +349,10 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "大文字の単語をアンダースコアでつなぎます。",
+      "description": "",
+      "keywords": [
+        "アンダースコア"
+      ],
       "params": {
         "per_line": {
           "label": "行ごとに変換"
@@ -333,13 +361,16 @@
     },
     "case.swap": {
       "name": "大文字と小文字を反転",
-      "description": "大文字を小文字に、小文字を大文字にします。"
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "MD5 ハッシュ",
-      "description": "MD5 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "description": "セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "keywords": [
+        "ダイジェスト"
+      ],
       "params": {
         "output": {
           "label": "出力",
@@ -353,7 +384,10 @@
     },
     "hash.sha1": {
       "name": "SHA-1 ハッシュ",
-      "description": "SHA-1 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "description": "セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "keywords": [
+        "ダイジェスト"
+      ],
       "params": {
         "output": {
           "label": "出力",
@@ -367,7 +401,10 @@
     },
     "hash.sha256": {
       "name": "SHA-256 ハッシュ",
-      "description": "SHA-256 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "description": "表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "keywords": [
+        "ダイジェスト"
+      ],
       "params": {
         "output": {
           "label": "出力",
@@ -381,7 +418,10 @@
     },
     "hash.sha512": {
       "name": "SHA-512 ハッシュ",
-      "description": "SHA-512 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "description": "表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "keywords": [
+        "ダイジェスト"
+      ],
       "params": {
         "output": {
           "label": "出力",
@@ -395,7 +435,7 @@
     },
     "hash.crc32": {
       "name": "CRC-32 チェックサム",
-      "description": "ZIP や PNG で使われる IEEE 多項式の CRC-32 です。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "description": "ZIP や PNG で使われる IEEE 多項式を使います。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
       "params": {
         "output": {
           "label": "出力",
@@ -437,7 +477,7 @@
     },
     "lines.remove_empty": {
       "name": "空行を削除",
-      "description": "空の行や空白だけの行を削除します。",
+      "description": "",
       "params": {
         "whitespace_only": {
           "label": "空白だけの行を空行とみなす"
@@ -481,11 +521,18 @@
     },
     "lines.reverse": {
       "name": "行を逆順にする",
-      "description": "行の順序を逆にします。"
+      "description": "",
+      "keywords": [
+        "順序"
+      ]
     },
     "lines.join": {
       "name": "行を結合",
-      "description": "すべての行を区切り文字で1行に結合します。",
+      "description": "",
+      "keywords": [
+        "区切り文字",
+        "1行"
+      ],
       "params": {
         "separator": {
           "label": "区切り文字",
@@ -607,7 +654,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: デコード",
+      "name": "JWT デコード",
       "description": "トークンのヘッダーとペイロードを JSON で表示します。署名は検証しません。",
       "keywords": [
         "トークン"

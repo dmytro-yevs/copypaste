@@ -77,7 +77,7 @@ class _SpaceChoice extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title).medium(),
-              const Gap(AppSpacing.xxs),
+              const Gap(AppSpacing.xs),
               Text(
                 description,
                 style: Theme.of(context).typography.xSmall,

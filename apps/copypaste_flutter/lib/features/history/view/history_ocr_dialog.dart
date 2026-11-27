@@ -77,7 +77,7 @@ Future<void> showHistoryOcrDialog(
                             ? context.l10n.historyCopiedTitle
                             : context.l10n.historyCopyFailedTitle,
                         message: copied
-                            ? context.l10n.historyOcrTextCopied
+                            ? null
                             : context.l10n.historyOcrCopyError,
                         tone: copied
                             ? AppToastTone.success

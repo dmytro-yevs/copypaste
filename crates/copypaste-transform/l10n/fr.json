@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "Minifier le JSON",
-      "description": "Supprime tous les espaces non significatifs du JSON."
+      "description": "",
+      "keywords": [
+        "supprimer les espaces"
+      ]
     },
     "structure.json_validate": {
       "name": "Valider le JSON",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON vers YAML",
-      "description": "Convertit le JSON en YAML de style bloc."
+      "description": "",
+      "keywords": [
+        "convertir"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV vers JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "Minifier le XML",
-      "description": "Supprime les espaces entre les éléments XML."
+      "description": "",
+      "keywords": [
+        "supprimer les espaces"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Encoder en Base64",
-      "description": "Encode les octets UTF-8 du texte en Base64.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Alphabet",
@@ -163,7 +172,11 @@
     },
     "encode.hex_encode": {
       "name": "Encoder en hex",
-      "description": "Écrit les octets UTF-8 du texte en chiffres hexadécimaux.",
+      "description": "",
+      "keywords": [
+        "hexadécimal",
+        "octets"
+      ],
       "params": {
         "separator": {
           "label": "Séparateur",
@@ -231,7 +244,10 @@
   "case": {
     "case.upper": {
       "name": "MAJUSCULES",
-      "description": "Met toutes les lettres en majuscules selon les règles Unicode complètes.",
+      "description": "",
+      "keywords": [
+        "lettres"
+      ],
       "params": {
         "locale": {
           "label": "Règles de langue",
@@ -244,7 +260,10 @@
     },
     "case.lower": {
       "name": "minuscules",
-      "description": "Met toutes les lettres en minuscules selon les règles Unicode complètes.",
+      "description": "",
+      "keywords": [
+        "lettres"
+      ],
       "params": {
         "locale": {
           "label": "Règles de langue",
@@ -273,7 +292,10 @@
     },
     "case.sentence": {
       "name": "Casse de phrase",
-      "description": "Met une majuscule au premier mot de chaque phrase et le reste en minuscules.",
+      "description": "",
+      "keywords": [
+        "majuscule"
+      ],
       "params": {
         "keep_acronyms": {
           "label": "Conserver les sigles"
@@ -282,7 +304,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Assemble les mots en un identifiant commençant par une minuscule.",
+      "description": "",
+      "keywords": [
+        "identifiant"
+      ],
       "params": {
         "per_line": {
           "label": "Chaque ligne séparément"
@@ -294,7 +319,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Assemble les mots en un identifiant où chaque mot prend une majuscule.",
+      "description": "",
+      "keywords": [
+        "identifiant"
+      ],
       "params": {
         "per_line": {
           "label": "Chaque ligne séparément"
@@ -306,7 +334,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Relie les mots en minuscules par des tirets bas.",
+      "description": "",
+      "keywords": [
+        "tirets bas"
+      ],
       "params": {
         "per_line": {
           "label": "Chaque ligne séparément"
@@ -315,7 +346,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Relie les mots en minuscules par des traits d’union.",
+      "description": "",
+      "keywords": [
+        "traits d’union"
+      ],
       "params": {
         "per_line": {
           "label": "Chaque ligne séparément"
@@ -324,7 +358,11 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Relie les mots en majuscules par des tirets bas.",
+      "description": "",
+      "keywords": [
+        "tirets bas",
+        "majuscules"
+      ],
       "params": {
         "per_line": {
           "label": "Chaque ligne séparément"
@@ -333,13 +371,16 @@
     },
     "case.swap": {
       "name": "Inverser la casse",
-      "description": "Passe les majuscules en minuscules et les minuscules en majuscules."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "Hachage MD5",
-      "description": "Empreinte MD5, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "description": "Pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "keywords": [
+        "empreinte"
+      ],
       "params": {
         "output": {
           "label": "Sortie",
@@ -353,7 +394,10 @@
     },
     "hash.sha1": {
       "name": "Hachage SHA-1",
-      "description": "Empreinte SHA-1, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "description": "Pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "keywords": [
+        "empreinte"
+      ],
       "params": {
         "output": {
           "label": "Sortie",
@@ -367,7 +411,10 @@
     },
     "hash.sha256": {
       "name": "Hachage SHA-256",
-      "description": "Empreinte SHA-256. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "description": "Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "keywords": [
+        "empreinte"
+      ],
       "params": {
         "output": {
           "label": "Sortie",
@@ -381,7 +428,10 @@
     },
     "hash.sha512": {
       "name": "Hachage SHA-512",
-      "description": "Empreinte SHA-512. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "description": "Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "keywords": [
+        "empreinte"
+      ],
       "params": {
         "output": {
           "label": "Sortie",
@@ -395,7 +445,7 @@
     },
     "hash.crc32": {
       "name": "Somme de contrôle CRC-32",
-      "description": "CRC-32 avec le polynôme IEEE utilisé par ZIP et PNG. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "description": "Avec le polynôme IEEE utilisé par ZIP et PNG. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
       "params": {
         "output": {
           "label": "Sortie",
@@ -437,7 +487,7 @@
     },
     "lines.remove_empty": {
       "name": "Supprimer les lignes vides",
-      "description": "Supprime les lignes vides ou ne contenant que des espaces.",
+      "description": "",
       "params": {
         "whitespace_only": {
           "label": "Les lignes d’espaces comptent comme vides"
@@ -481,11 +531,18 @@
     },
     "lines.reverse": {
       "name": "Inverser les lignes",
-      "description": "Inverse l’ordre des lignes."
+      "description": "",
+      "keywords": [
+        "ordre"
+      ]
     },
     "lines.join": {
       "name": "Joindre les lignes",
-      "description": "Réunit toutes les lignes en une seule avec un séparateur.",
+      "description": "",
+      "keywords": [
+        "réunir",
+        "séparateur"
+      ],
       "params": {
         "separator": {
           "label": "Séparateur",
@@ -607,7 +664,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT : Décoder",
+      "name": "Décoder un JWT",
       "description": "Affiche l'en-tête et la charge utile du jeton en JSON. La signature n'est pas vérifiée.",
       "keywords": [
         "jeton"

@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "JSON minimieren",
-      "description": "Entfernt alle unnötigen Leerzeichen aus JSON."
+      "description": "",
+      "keywords": [
+        "leerzeichen entfernen"
+      ]
     },
     "structure.json_validate": {
       "name": "JSON prüfen",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON zu YAML",
-      "description": "Wandelt JSON in YAML im Blockstil um."
+      "description": "",
+      "keywords": [
+        "umwandeln"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV zu JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "XML minimieren",
-      "description": "Entfernt Leerraum zwischen XML-Elementen."
+      "description": "",
+      "keywords": [
+        "leerraum entfernen"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64-Kodierung",
-      "description": "Kodiert die UTF-8-Bytes des Textes als Base64.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Alphabet",
@@ -163,7 +172,10 @@
     },
     "encode.hex_encode": {
       "name": "Hex-Kodierung",
-      "description": "Schreibt die UTF-8-Bytes des Textes als Hexadezimalziffern.",
+      "description": "",
+      "keywords": [
+        "hexadezimal"
+      ],
       "params": {
         "separator": {
           "label": "Trennzeichen",
@@ -231,7 +243,10 @@
   "case": {
     "case.upper": {
       "name": "GROSSBUCHSTABEN",
-      "description": "Wandelt alle Buchstaben nach vollständigen Unicode-Regeln in Großbuchstaben um.",
+      "description": "",
+      "keywords": [
+        "großbuchstaben"
+      ],
       "params": {
         "locale": {
           "label": "Sprachregeln",
@@ -244,7 +259,7 @@
     },
     "case.lower": {
       "name": "kleinbuchstaben",
-      "description": "Wandelt alle Buchstaben nach vollständigen Unicode-Regeln in Kleinbuchstaben um.",
+      "description": "",
       "params": {
         "locale": {
           "label": "Sprachregeln",
@@ -273,7 +288,7 @@
     },
     "case.sentence": {
       "name": "Satzschreibweise",
-      "description": "Schreibt das erste Wort jedes Satzes groß und den Rest klein.",
+      "description": "",
       "params": {
         "keep_acronyms": {
           "label": "Akronyme beibehalten"
@@ -282,7 +297,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Verbindet Wörter zu einem Bezeichner, der klein beginnt.",
+      "description": "",
+      "keywords": [
+        "bezeichner"
+      ],
       "params": {
         "per_line": {
           "label": "Jede Zeile einzeln"
@@ -294,7 +312,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Verbindet Wörter zu einem Bezeichner mit großgeschriebenen Wörtern.",
+      "description": "",
+      "keywords": [
+        "bezeichner"
+      ],
       "params": {
         "per_line": {
           "label": "Jede Zeile einzeln"
@@ -306,7 +327,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Verbindet kleingeschriebene Wörter mit Unterstrichen.",
+      "description": "",
+      "keywords": [
+        "unterstriche"
+      ],
       "params": {
         "per_line": {
           "label": "Jede Zeile einzeln"
@@ -315,7 +339,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Verbindet kleingeschriebene Wörter mit Bindestrichen.",
+      "description": "",
+      "keywords": [
+        "bindestriche"
+      ],
       "params": {
         "per_line": {
           "label": "Jede Zeile einzeln"
@@ -324,7 +351,10 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Verbindet großgeschriebene Wörter mit Unterstrichen.",
+      "description": "",
+      "keywords": [
+        "unterstriche"
+      ],
       "params": {
         "per_line": {
           "label": "Jede Zeile einzeln"
@@ -333,13 +363,16 @@
     },
     "case.swap": {
       "name": "Groß-/Kleinschreibung umkehren",
-      "description": "Macht Großbuchstaben klein und Kleinbuchstaben groß."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "MD5-Hash",
-      "description": "MD5-Prüfsumme, nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "description": "Nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "keywords": [
+        "prüfsumme"
+      ],
       "params": {
         "output": {
           "label": "Ausgabe",
@@ -353,7 +386,10 @@
     },
     "hash.sha1": {
       "name": "SHA-1-Hash",
-      "description": "SHA-1-Prüfsumme, nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "description": "Nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "keywords": [
+        "prüfsumme"
+      ],
       "params": {
         "output": {
           "label": "Ausgabe",
@@ -367,7 +403,10 @@
     },
     "hash.sha256": {
       "name": "SHA-256-Hash",
-      "description": "SHA-256-Prüfsumme. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "description": "Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "keywords": [
+        "prüfsumme"
+      ],
       "params": {
         "output": {
           "label": "Ausgabe",
@@ -381,7 +420,10 @@
     },
     "hash.sha512": {
       "name": "SHA-512-Hash",
-      "description": "SHA-512-Prüfsumme. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "description": "Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "keywords": [
+        "prüfsumme"
+      ],
       "params": {
         "output": {
           "label": "Ausgabe",
@@ -395,7 +437,7 @@
     },
     "hash.crc32": {
       "name": "CRC-32-Prüfsumme",
-      "description": "CRC-32 mit dem IEEE-Polynom von ZIP und PNG. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "description": "Mit dem IEEE-Polynom von ZIP und PNG. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
       "params": {
         "output": {
           "label": "Ausgabe",
@@ -437,7 +479,10 @@
     },
     "lines.remove_empty": {
       "name": "Leere Zeilen entfernen",
-      "description": "Löscht Zeilen, die leer sind oder nur Leerzeichen enthalten.",
+      "description": "",
+      "keywords": [
+        "löschen"
+      ],
       "params": {
         "whitespace_only": {
           "label": "Zeilen nur mit Leerraum gelten als leer"
@@ -481,11 +526,18 @@
     },
     "lines.reverse": {
       "name": "Zeilen umkehren",
-      "description": "Kehrt die Reihenfolge der Zeilen um."
+      "description": "",
+      "keywords": [
+        "reihenfolge"
+      ]
     },
     "lines.join": {
       "name": "Zeilen verbinden",
-      "description": "Fügt alle Zeilen mit einem Trennzeichen zu einer zusammen.",
+      "description": "",
+      "keywords": [
+        "zusammenfügen",
+        "trennzeichen"
+      ],
       "params": {
         "separator": {
           "label": "Trennzeichen",
@@ -608,7 +660,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Dekodieren",
+      "name": "JWT-Dekodierung",
       "description": "Zeigt Header und Payload des Tokens als JSON. Die Signatur wird nicht geprüft.",
       "keywords": [
         "token"

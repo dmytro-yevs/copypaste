@@ -323,7 +323,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _bodyFor(BuildContext context, {required bool wide}) {
     final state = widget.controller.window.state;
     if (state == HistoryLoadState.initial) {
-      return StateView.loading(message: context.l10n.historyLoadingMessage);
+      return const StateView.loading();
     }
     final list = _HistoryList(
       key: _listKey,
@@ -349,7 +349,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return AppOverlays.focusRingOverflow(
       child: ResizablePanel.horizontal(
         dividerBuilder: (context) => null,
-        draggerThickness: 12,
+        draggerThickness: AppSpacing.md,
         children: [
           ResizablePane.flex(
             minSize: 440 + inset,
@@ -655,11 +655,7 @@ class _HistoryListState extends State<_HistoryList> {
             searchController: searchController,
             findRequests: widget.findRequests,
           ),
-          Expanded(
-            child: StateView.loading(
-              message: context.l10n.historyLoadingMessage,
-            ),
-          ),
+          const Expanded(child: StateView.loading()),
         ],
       );
     }
@@ -1751,13 +1747,17 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   SelectPopup<_HistoryFilterOption<T>> _selectPopup<T>(
     List<_HistoryFilterOption<T>> options,
   ) {
+    // Icon options listed with app or device labels take the labels' gap.
+    final iconGap = options.any((option) => option.contentBuilder != null)
+        ? AppSpacing.xs
+        : AppSpacing.sm;
     return SelectPopup<_HistoryFilterOption<T>>.noVirtualization(
       items: SelectItemList(
         children: [
           for (final option in options)
             SelectItemButton<_HistoryFilterOption<T>>(
               value: option,
-              child: option.build(compact: false),
+              child: option.build(compact: false, iconGap: iconGap),
             ),
         ],
       ),
@@ -1780,7 +1780,7 @@ class _HistoryFilterOption<T> {
   final IconData? icon;
   final Widget Function(bool compact)? contentBuilder;
 
-  Widget build({required bool compact}) {
+  Widget build({required bool compact, double iconGap = AppSpacing.sm}) {
     final builder = contentBuilder;
     if (builder != null) return builder(compact);
     final resolvedIcon = icon!;
@@ -1800,7 +1800,7 @@ class _HistoryFilterOption<T> {
           size: AppIconSize.sm,
           child: Icon(resolvedIcon, size: AppIconSize.sm),
         ),
-        const Gap(AppSpacing.sm),
+        Gap(iconGap),
         Text(label, maxLines: 1),
       ],
     );

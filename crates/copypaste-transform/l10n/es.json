@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "Minificar JSON",
-      "description": "Elimina todos los espacios en blanco innecesarios del JSON."
+      "description": "",
+      "keywords": [
+        "eliminar espacios en blanco"
+      ]
     },
     "structure.json_validate": {
       "name": "Validar JSON",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON a YAML",
-      "description": "Convierte JSON a YAML en estilo de bloque."
+      "description": "",
+      "keywords": [
+        "convertir"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV a JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "Minificar XML",
-      "description": "Elimina los espacios en blanco entre elementos XML."
+      "description": "",
+      "keywords": [
+        "eliminar espacios en blanco"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Codificar en Base64",
-      "description": "Codifica los bytes UTF-8 del texto en Base64.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Alfabeto",
@@ -163,7 +172,7 @@
     },
     "encode.hex_encode": {
       "name": "Codificar en hex",
-      "description": "Escribe los bytes UTF-8 del texto como dígitos hexadecimales.",
+      "description": "",
       "params": {
         "separator": {
           "label": "Separador",
@@ -231,7 +240,10 @@
   "case": {
     "case.upper": {
       "name": "MAYÚSCULAS",
-      "description": "Convierte todas las letras a mayúsculas con las reglas completas de Unicode.",
+      "description": "",
+      "keywords": [
+        "letras"
+      ],
       "params": {
         "locale": {
           "label": "Reglas de idioma",
@@ -244,7 +256,10 @@
     },
     "case.lower": {
       "name": "minúsculas",
-      "description": "Convierte todas las letras a minúsculas con las reglas completas de Unicode.",
+      "description": "",
+      "keywords": [
+        "letras"
+      ],
       "params": {
         "locale": {
           "label": "Reglas de idioma",
@@ -273,7 +288,7 @@
     },
     "case.sentence": {
       "name": "Tipo oración",
-      "description": "Pone en mayúscula la primera palabra de cada oración y el resto en minúscula.",
+      "description": "",
       "params": {
         "keep_acronyms": {
           "label": "Mantener siglas"
@@ -282,7 +297,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Une palabras en un identificador que empieza en minúscula.",
+      "description": "",
+      "keywords": [
+        "identificador"
+      ],
       "params": {
         "per_line": {
           "label": "Cada línea por separado"
@@ -294,7 +312,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Une palabras en un identificador con cada palabra en mayúscula.",
+      "description": "",
+      "keywords": [
+        "identificador"
+      ],
       "params": {
         "per_line": {
           "label": "Cada línea por separado"
@@ -306,7 +327,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Une palabras en minúscula con guiones bajos.",
+      "description": "",
+      "keywords": [
+        "guiones bajos"
+      ],
       "params": {
         "per_line": {
           "label": "Cada línea por separado"
@@ -315,7 +339,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Une palabras en minúscula con guiones.",
+      "description": "",
+      "keywords": [
+        "guiones"
+      ],
       "params": {
         "per_line": {
           "label": "Cada línea por separado"
@@ -324,7 +351,10 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Une palabras en mayúscula con guiones bajos.",
+      "description": "",
+      "keywords": [
+        "guiones bajos"
+      ],
       "params": {
         "per_line": {
           "label": "Cada línea por separado"
@@ -333,13 +363,16 @@
     },
     "case.swap": {
       "name": "Invertir mayúsculas",
-      "description": "Cambia mayúsculas por minúsculas y minúsculas por mayúsculas."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "Hash MD5",
-      "description": "Resumen MD5, no apto para seguridad. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "description": "No apto para seguridad. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "keywords": [
+        "resumen"
+      ],
       "params": {
         "output": {
           "label": "Salida",
@@ -353,7 +386,10 @@
     },
     "hash.sha1": {
       "name": "Hash SHA-1",
-      "description": "Resumen SHA-1, no apto para seguridad. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "description": "No apto para seguridad. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "keywords": [
+        "resumen"
+      ],
       "params": {
         "output": {
           "label": "Salida",
@@ -367,7 +403,10 @@
     },
     "hash.sha256": {
       "name": "Hash SHA-256",
-      "description": "Resumen SHA-256. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "description": "Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "keywords": [
+        "resumen"
+      ],
       "params": {
         "output": {
           "label": "Salida",
@@ -381,7 +420,10 @@
     },
     "hash.sha512": {
       "name": "Hash SHA-512",
-      "description": "Resumen SHA-512. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "description": "Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "keywords": [
+        "resumen"
+      ],
       "params": {
         "output": {
           "label": "Salida",
@@ -395,7 +437,7 @@
     },
     "hash.crc32": {
       "name": "Suma de comprobación CRC-32",
-      "description": "CRC-32 con el polinomio IEEE que usan ZIP y PNG. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
+      "description": "Con el polinomio IEEE que usan ZIP y PNG. Calcula el hash del texto en UTF-8 tal como se muestra, sin añadir salto de línea.",
       "params": {
         "output": {
           "label": "Salida",
@@ -437,7 +479,10 @@
     },
     "lines.remove_empty": {
       "name": "Quitar líneas vacías",
-      "description": "Elimina las líneas vacías o que solo contienen espacios.",
+      "description": "",
+      "keywords": [
+        "eliminar"
+      ],
       "params": {
         "whitespace_only": {
           "label": "Las líneas solo con espacios cuentan como vacías"
@@ -481,11 +526,18 @@
     },
     "lines.reverse": {
       "name": "Invertir líneas",
-      "description": "Pone las líneas en orden inverso."
+      "description": "",
+      "keywords": [
+        "orden"
+      ]
     },
     "lines.join": {
       "name": "Unir líneas",
-      "description": "Combina todas las líneas en una con un separador.",
+      "description": "",
+      "keywords": [
+        "combinar",
+        "separador"
+      ],
       "params": {
         "separator": {
           "label": "Separador",
@@ -607,7 +659,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Decodificar",
+      "name": "Decodificar JWT",
       "description": "Muestra la cabecera y la carga del token como JSON. La firma no se verifica.",
       "keywords": [
         "token"

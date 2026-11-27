@@ -228,7 +228,6 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
     key: widget.keys.restore,
     highlighted: _highlighted(TransformsSettingsKeys.restoreId),
     title: context.l10n.transformsRestoreTitle,
-    description: context.l10n.transformsRestoreDescription,
     trailing: Switch(
       key: const ValueKey('transforms-restore'),
       value: _controller.preferences.restoreClipboardAfterPaste,
@@ -294,7 +293,6 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
       key: widget.keys.appDefaults,
       highlighted: _highlighted(TransformsSettingsKeys.appDefaultsId),
       title: l10n.transformsAppDefaultsTitle,
-      description: l10n.transformsAppDefaultsDescription,
       footer: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -671,7 +669,6 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
       key: widget.keys.tracking,
       highlighted: _highlighted(TransformsSettingsKeys.trackingId),
       title: l10n.transformsTrackingTitle,
-      description: l10n.transformsTrackingDescription,
       footer: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

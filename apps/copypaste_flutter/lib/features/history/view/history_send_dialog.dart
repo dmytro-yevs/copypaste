@@ -55,9 +55,7 @@ Future<void> showHistorySendDialog(
     AppToast.show(
       context,
       title: strings.historySentTitle,
-      message: strings.historySentTo(
-        answered.map((result) => result.name).join(', '),
-      ),
+      message: answered.map((result) => result.name).join(', '),
       tone: AppToastTone.success,
     );
     return;

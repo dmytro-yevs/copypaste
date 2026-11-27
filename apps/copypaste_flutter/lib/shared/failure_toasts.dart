@@ -26,7 +26,8 @@ class FailureToasts extends StatefulWidget {
   final Listenable listenable;
   final String? Function() failure;
 
-  /// What failed; defaults to the generic "Action failed".
+  /// What failed; defaults to the generic "Action failed". A failure whose
+  /// text is this title shows as the title alone.
   final String Function(BuildContext context)? title;
 
   /// Also shows a failure already reported before this widget appeared.
@@ -85,10 +86,11 @@ class _FailureToastsState extends State<FailureToasts> {
 
   void _show(String failure) {
     if (!mounted) return;
+    final title = widget.title?.call(context) ?? context.l10n.appActionFailed;
     AppToast.show(
       context,
-      title: widget.title?.call(context) ?? context.l10n.appActionFailed,
-      message: failure,
+      title: title,
+      message: failure == title ? null : failure,
       tone: AppToastTone.error,
       actionLabel: widget.actionLabel?.call(context),
       onAction: widget.onAction,

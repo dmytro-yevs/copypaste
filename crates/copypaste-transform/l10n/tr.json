@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "JSON küçült",
-      "description": "JSON’daki gereksiz tüm boşlukları kaldırır."
+      "description": "",
+      "keywords": [
+        "boşlukları kaldır"
+      ]
     },
     "structure.json_validate": {
       "name": "JSON doğrula",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON’dan YAML’a",
-      "description": "JSON’u blok stilinde YAML’a dönüştürür."
+      "description": "",
+      "keywords": [
+        "dönüştür"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV’den JSON’a",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "XML küçült",
-      "description": "XML öğeleri arasındaki boşlukları kaldırır."
+      "description": "",
+      "keywords": [
+        "boşlukları kaldır"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 kodla",
-      "description": "Metnin UTF-8 baytlarını Base64 olarak kodlar.",
+      "description": "",
       "params": {
         "variant": {
           "label": "Alfabe",
@@ -163,7 +172,10 @@
     },
     "encode.hex_encode": {
       "name": "Onaltılık kodla",
-      "description": "Metnin UTF-8 baytlarını onaltılık rakamlarla yazar.",
+      "description": "",
+      "keywords": [
+        "bayt"
+      ],
       "params": {
         "separator": {
           "label": "Ayırıcı",
@@ -231,7 +243,7 @@
   "case": {
     "case.upper": {
       "name": "BÜYÜK HARF",
-      "description": "Tüm harfleri tam Unicode kurallarıyla büyük harfe çevirir.",
+      "description": "",
       "params": {
         "locale": {
           "label": "Dil kuralları",
@@ -244,7 +256,7 @@
     },
     "case.lower": {
       "name": "küçük harf",
-      "description": "Tüm harfleri tam Unicode kurallarıyla küçük harfe çevirir.",
+      "description": "",
       "params": {
         "locale": {
           "label": "Dil kuralları",
@@ -273,7 +285,7 @@
     },
     "case.sentence": {
       "name": "Cümle biçimi",
-      "description": "Her cümlenin ilk sözcüğünü büyük harfle başlatır, gerisini küçültür.",
+      "description": "",
       "params": {
         "keep_acronyms": {
           "label": "Kısaltmaları koru"
@@ -282,7 +294,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "Sözcükleri küçük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "description": "",
+      "keywords": [
+        "tanımlayıcı"
+      ],
       "params": {
         "per_line": {
           "label": "Her satır ayrı"
@@ -294,7 +309,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "Sözcükleri her biri büyük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "description": "",
+      "keywords": [
+        "tanımlayıcı"
+      ],
       "params": {
         "per_line": {
           "label": "Her satır ayrı"
@@ -306,7 +324,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "Küçük harfli sözcükleri alt çizgiyle birleştirir.",
+      "description": "",
+      "keywords": [
+        "alt çizgi"
+      ],
       "params": {
         "per_line": {
           "label": "Her satır ayrı"
@@ -315,7 +336,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "Küçük harfli sözcükleri kısa çizgiyle birleştirir.",
+      "description": "",
+      "keywords": [
+        "kısa çizgi"
+      ],
       "params": {
         "per_line": {
           "label": "Her satır ayrı"
@@ -324,7 +348,10 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "Büyük harfli sözcükleri alt çizgiyle birleştirir.",
+      "description": "",
+      "keywords": [
+        "alt çizgi"
+      ],
       "params": {
         "per_line": {
           "label": "Her satır ayrı"
@@ -333,13 +360,13 @@
     },
     "case.swap": {
       "name": "Harf büyüklüğünü değiştir",
-      "description": "Büyük harfleri küçük, küçük harfleri büyük yapar."
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "MD5 özeti",
-      "description": "MD5 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "description": "Güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
       "params": {
         "output": {
           "label": "Çıktı",
@@ -353,7 +380,7 @@
     },
     "hash.sha1": {
       "name": "SHA-1 özeti",
-      "description": "SHA-1 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "description": "Güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
       "params": {
         "output": {
           "label": "Çıktı",
@@ -367,7 +394,7 @@
     },
     "hash.sha256": {
       "name": "SHA-256 özeti",
-      "description": "SHA-256 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "description": "Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
       "params": {
         "output": {
           "label": "Çıktı",
@@ -381,7 +408,7 @@
     },
     "hash.sha512": {
       "name": "SHA-512 özeti",
-      "description": "SHA-512 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "description": "Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
       "params": {
         "output": {
           "label": "Çıktı",
@@ -395,7 +422,7 @@
     },
     "hash.crc32": {
       "name": "CRC-32 sağlama toplamı",
-      "description": "ZIP ve PNG'nin kullandığı IEEE polinomuyla CRC-32. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "description": "ZIP ve PNG'nin kullandığı IEEE polinomunu kullanır. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
       "params": {
         "output": {
           "label": "Çıktı",
@@ -437,7 +464,10 @@
     },
     "lines.remove_empty": {
       "name": "Boş satırları kaldır",
-      "description": "Boş ya da yalnızca boşluk içeren satırları siler.",
+      "description": "",
+      "keywords": [
+        "sil"
+      ],
       "params": {
         "whitespace_only": {
           "label": "Yalnızca boşluk içeren satırlar boş sayılır"
@@ -481,11 +511,18 @@
     },
     "lines.reverse": {
       "name": "Satırları ters çevir",
-      "description": "Satırları ters sıraya koyar."
+      "description": "",
+      "keywords": [
+        "sıra"
+      ]
     },
     "lines.join": {
       "name": "Satırları birleştir",
-      "description": "Tüm satırları bir ayırıcıyla tek satırda birleştirir.",
+      "description": "",
+      "keywords": [
+        "ayırıcı",
+        "tek satır"
+      ],
       "params": {
         "separator": {
           "label": "Ayırıcı",
@@ -607,7 +644,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT: Çöz",
+      "name": "JWT çöz",
       "description": "Belirtecin başlığını ve yükünü JSON olarak gösterir. İmza doğrulanmaz.",
       "keywords": [
         "belirteç"

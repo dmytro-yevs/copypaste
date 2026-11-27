@@ -28,15 +28,13 @@ void main() {
     },
   );
 
-  test('shares labels, icons, and selected semantics', () {
+  test('shares labels and icons', () {
     final AppNavigationDestination history =
         AppDestination.history.navigationDestination;
 
     expect(appNavigationDestinations, hasLength(3));
     expect(history.label, 'History');
     expect(history.icon, isNotNull);
-    expect(history.semanticsLabel(selected: true), 'History, selected');
-    expect(history.semanticsLabel(selected: false), 'History');
   });
 
   test('tracks bottom overlay visibility without duplicate notifications', () {

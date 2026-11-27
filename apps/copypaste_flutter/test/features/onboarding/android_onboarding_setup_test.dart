@@ -189,7 +189,7 @@ void main() {
     expect(controller.android.setupState!.shizuku.permission, isTrue);
     expect(
       controller.errorMessage,
-      contains('capture grants could not be applied'),
+      contains('capture access could not be applied'),
     );
 
     setup.events.add(setup.current);

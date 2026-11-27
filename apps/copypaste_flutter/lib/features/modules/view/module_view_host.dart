@@ -300,9 +300,7 @@ Future<void> presentModuleResult(
     AppToast.show(
       context,
       title: context.l10n.appActionFailed,
-      message:
-          ErrorText.reason(error) ??
-          AppStrings.current.modulesOperationIncomplete,
+      message: ErrorText.reason(error),
       tone: AppToastTone.error,
     );
   }

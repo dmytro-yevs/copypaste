@@ -197,7 +197,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.syncStatus.phase, SyncPhase.synced);
       expect(
-        find.text('Partially synchronized', findRichText: true),
+        find.text('Partially synced', findRichText: true),
         findsNWidgets(2),
       );
       expect(find.text('Up to date'), findsNothing);

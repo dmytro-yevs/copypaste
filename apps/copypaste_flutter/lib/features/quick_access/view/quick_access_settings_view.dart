@@ -139,7 +139,6 @@ class _QuickAccessSettingsViewState extends State<QuickAccessSettingsView>
       ),
       SettingRow(
         title: l10n.quickAccessSwitchKeyboardTitle,
-        description: l10n.quickAccessSwitchKeyboardDescription,
         status: state.keyboardSelected
             ? _status(l10n.quickAccessKeyboardCurrent)
             : null,
@@ -155,7 +154,6 @@ class _QuickAccessSettingsViewState extends State<QuickAccessSettingsView>
         key: targets.captureTier,
         highlighted: _highlighted(QuickAccessSettingsTargets.captureTierId),
         title: l10n.quickAccessCaptureTierTitle,
-        description: l10n.quickAccessCaptureTierDescription,
         status: _status(
           widget.capturePaused
               ? l10n.quickAccessTierPaused
@@ -174,12 +172,10 @@ class _QuickAccessSettingsViewState extends State<QuickAccessSettingsView>
         key: targets.autoReturn,
         highlighted: _highlighted(QuickAccessSettingsTargets.autoReturnId),
         title: l10n.quickAccessAutoReturnTitle,
-        description: l10n.quickAccessAutoReturnDescription,
         trailing: _optionSwitch(state, AndroidPanelOption.autoReturn),
       ),
       SettingRow(
         title: l10n.quickAccessFocusSearchTitle,
-        description: l10n.quickAccessFocusSearchDescription,
         trailing: _optionSwitch(state, AndroidPanelOption.focusSearchOnOpen),
       ),
     ];

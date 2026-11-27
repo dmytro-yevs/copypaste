@@ -11,16 +11,16 @@ void main() {
     addTearDown(navigation.dispose);
     await tester.pumpWidget(CopyPasteApp(navigation: navigation));
     await tester.pump();
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
 
     navigation.selectDestination(AppDestination.devices);
     await tester.pump();
-    expect(find.text('Devices runtime is unavailable'), findsOneWidget);
-    expect(find.text('History runtime is unavailable'), findsNothing);
+    expect(find.text('Devices are unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsNothing);
 
     navigation.selectDestination(AppDestination.settings);
     await tester.pump();
-    expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+    expect(find.text('Settings are unavailable'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -39,7 +39,7 @@ void main() {
       find.text('CopyPaste is waiting for protected history access.'),
       findsOneWidget,
     );
-    expect(find.text('History runtime is unavailable'), findsNothing);
+    expect(find.text('History is unavailable'), findsNothing);
     expect(find.text('Try again'), findsNothing);
   });
 
@@ -61,7 +61,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('History is unavailable'), findsOneWidget);
     expect(find.text('Protected history is unavailable.'), findsOneWidget);
     await tester.tap(find.widgetWithText(Button, 'Try again'));
     await tester.pump();
@@ -69,11 +69,11 @@ void main() {
 
     navigation.selectDestination(AppDestination.devices);
     await tester.pump();
-    expect(find.text('Devices runtime is unavailable'), findsOneWidget);
+    expect(find.text('Devices are unavailable'), findsOneWidget);
 
     navigation.selectDestination(AppDestination.settings);
     await tester.pump();
-    expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+    expect(find.text('Settings are unavailable'), findsOneWidget);
   });
 
   testWidgets(
@@ -107,7 +107,7 @@ void main() {
               isNull,
               reason: '$brightness, text scale $scale, width $width',
             );
-            expect(find.text('History runtime is unavailable'), findsOneWidget);
+            expect(find.text('History is unavailable'), findsOneWidget);
           }
         }
       }

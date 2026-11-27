@@ -20,8 +20,9 @@ abstract class OnboardingSetup extends ChangeNotifier {
   /// Optional setup result shown without blocking onboarding.
   String? get noticeMessage => null;
 
-  /// Whether the notice can be resolved from system settings.
-  bool get noticeOpensSystemSettings => false;
+  /// [noticeMessage] while the setup step is visible: without what the step
+  /// already shows as its own alert.
+  String? get stepNoticeMessage => noticeMessage;
 
   /// Setup step action label when continuing skips optional features.
   String? get continueLabel => null;

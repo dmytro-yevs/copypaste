@@ -167,16 +167,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 Alert(
                   title: Text(context.l10n.onboardingOptionalSetupTitle),
                   content: Text(message),
-                  trailing:
-                      step == OnboardingStep.setup &&
-                          setup.noticeOpensSystemSettings
-                      ? Button.secondary(
-                          onPressed: setup.openSystemSettings,
-                          child: Text(
-                            context.l10n.onboardingOpenSystemSettings,
-                          ),
-                        )
-                      : null,
                 ),
               ],
             ],
@@ -195,12 +185,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   String? _readyMessage(BuildContext context) {
     final l10n = context.l10n;
-    if (controller.paired) {
-      return switch (controller.pairedDeviceName) {
-        final name? => l10n.onboardingReadyPaired(name),
-        null => l10n.onboardingReadyPairedUnnamed,
-      };
-    }
+    if (controller.paired) return l10n.onboardingReadyPaired;
     return switch (controller.spaceChoice) {
       OnboardingSpaceChoice.create => l10n.onboardingReadySpaceCreated,
       OnboardingSpaceChoice.join => l10n.onboardingReadyJoin,

@@ -57,6 +57,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get commonEnable => '有効にする';
 
   @override
+  String get commonChoose => '選択';
+
+  @override
   String get settingsLanguageTitle => '言語';
 
   @override
@@ -78,9 +81,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get settingsRuntimeRefreshFailed => '設定を再読み込みできませんでした。もう一度お試しください。';
-
-  @override
-  String get settingsRuntimeLoadFailed => '設定を読み込めませんでした。';
 
   @override
   String get settingsRuntimeAppAlreadyExcluded => 'そのアプリはすでに除外されています。';
@@ -343,9 +343,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickPasteSearchPlaceholder => '入力して検索…';
 
   @override
-  String get quickPasteLoadingHistory => 'クリップボード履歴を読み込んでいます。';
-
-  @override
   String get quickPasteHistoryUnavailable => '履歴を利用できません';
 
   @override
@@ -392,7 +389,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'macOS、Android、Windows、Linux で使えるプライベートなクリップボード履歴。';
 
   @override
-  String get transfersTitle => 'ダウンロードと転送';
+  String get transfersTitle => '転送';
 
   @override
   String transfersActiveTooltip(int count, String written, String total) {
@@ -421,10 +418,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transfersShowEarlier => '以前';
 
   @override
-  String get transfersClearCompletedHistory => '完了した履歴を消去';
-
-  @override
-  String get transfersErrorTitle => '転送';
+  String get transfersClearCompletedHistory => '履歴を消去';
 
   @override
   String get transfersEmptyTitle => '転送はありません';
@@ -498,9 +492,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get transfersUpdatesUnavailable => '転送の更新を受信できません。開き直して更新してください。';
-
-  @override
-  String get transfersLoadFailed => '転送を読み込めませんでした。もう一度お試しください。';
 
   @override
   String get transfersUpdatesLoadFailed => '転送の最新状態を読み込めませんでした。';
@@ -607,9 +598,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get platformCaptureActionResumeStopped => '記録を再開（停止中）';
 
   @override
-  String get platformTrayOpen => '開く';
-
-  @override
   String get platformTraySettings => '設定';
 
   @override
@@ -624,7 +612,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'システムトレイを利用できません。CopyPaste を開いたままにして、再試行するか終了してください。';
 
   @override
-  String get platformQuitFailed => 'CopyPaste を終了できませんでした。もう一度お試しください。';
+  String get platformQuitFailed => 'CopyPaste を終了できませんでした。';
 
   @override
   String get platformVisibilityChangeFailed =>
@@ -699,16 +687,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsSectionGeneral => '一般';
 
   @override
-  String get settingsSectionGeneralSummary => '言語とアプリの表示。';
-
-  @override
   String get settingsSectionAppearance => '外観';
-
-  @override
-  String get settingsSectionAppearanceSummary => 'テーマとウィンドウの素材。';
-
-  @override
-  String get settingsAppearanceDescription => 'テーマとウィンドウの見た目。';
 
   @override
   String get settingsThemeTitle => 'テーマ';
@@ -771,43 +750,22 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsSectionClipboard => 'クリップボード';
 
   @override
-  String get settingsSectionClipboardSummary => '記録と履歴の上限。';
-
-  @override
   String get settingsSectionPrivacy => 'プライバシー';
-
-  @override
-  String get settingsSectionPrivacySummary => 'アプリの除外と画面の保護。';
 
   @override
   String get settingsSectionQuickPaste => 'Quick Paste';
 
   @override
-  String get settingsSectionQuickPasteSummary => 'ショートカットと自動ペーストの動作。';
-
-  @override
   String get settingsSectionSync => '同期';
-
-  @override
-  String get settingsSectionSyncSummary => '同期と近くのデバイスの検出。';
 
   @override
   String get settingsSectionNotifications => '通知';
 
   @override
-  String get settingsSectionNotificationsSummary => '記録の通知とサウンド。';
-
-  @override
   String get settingsSectionData => 'データ';
 
   @override
-  String get settingsSectionDataSummary => 'エクスポート、バックアップ、復元。';
-
-  @override
   String get settingsSectionModules => 'モジュール';
-
-  @override
-  String get settingsSectionModulesSummary => 'オプションモジュールのインストールと管理。';
 
   @override
   String get settingsSectionRules => 'コンテンツルール';
@@ -819,13 +777,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsSectionQuickAccess => 'クイックアクセス';
 
   @override
-  String get settingsSectionQuickAccessSummary => 'キーボード、タイル、ホーム画面ウィジェット。';
-
-  @override
   String get settingsSectionTransforms => 'テキスト変換';
-
-  @override
-  String get settingsSectionTransformsSummary => 'お気に入り、パイプライン、貼り付け時の既定の変換。';
 
   @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
@@ -965,17 +917,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueueCollectingEmptyTitle => 'コピーすると追加されます';
 
   @override
-  String get pasteQueueCollectingEmptyMessage =>
-      '収集を停止するまで、コピーした内容がキューに追加されます。';
-
-  @override
   String get pasteQueueStartCollecting => '収集を開始';
 
   @override
   String get pasteQueueStopCollecting => '収集を停止';
-
-  @override
-  String get pasteQueueLoading => 'キューを読み込んでいます…';
 
   @override
   String get pasteQueueLoadFailed => 'キューを読み込めませんでした';
@@ -1145,10 +1090,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueuePasteNextStyleTitle => '「次を貼り付け」の動作';
 
   @override
-  String get pasteQueuePasteNextStyleDescription =>
-      '自動で貼り付けるか、クリップボードへのコピーのみ行います。';
-
-  @override
   String get pasteQueuePasteIntoApp => '前面のアプリに貼り付け';
 
   @override
@@ -1158,9 +1099,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueueInsertTitle => '新しい項目の追加先';
 
   @override
-  String get pasteQueueInsertDescription => '収集・追加した項目をキューのどこに入れるか。';
-
-  @override
   String get pasteQueueInsertEnd => '末尾（先入れ先出し）';
 
   @override
@@ -1168,9 +1106,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get pasteQueueEndBehaviorTitle => '最後の項目の後';
-
-  @override
-  String get pasteQueueEndBehaviorDescription => 'すべて貼り付けた後に「次を貼り付け」が行う動作。';
 
   @override
   String get pasteQueueEndStop => '停止';
@@ -1218,13 +1153,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueuePlainTextTitle => '常にプレーンテキストで貼り付け';
 
   @override
-  String get pasteQueuePlainTextDescription => 'キューの項目から書式を取り除きます。';
-
-  @override
   String get pasteQueueIdleStopTitle => '収集を自動停止するまでの時間';
 
   @override
-  String get pasteQueueIdleStopDescription => 'この時間コピーがないと収集を停止します。';
+  String get pasteQueueIdleStopDescription => '新しいコピーがない時間です。';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1244,47 +1176,17 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueueRestoreTitle => '完了時に以前のクリップボードを復元';
 
   @override
-  String get pasteQueueRestoreDescription => '貼り付け前にコピーしていた内容に戻します。';
-
-  @override
   String get pasteQueueSettingsKeywords => 'paste queue キュー 収集 順番 ショートカット 区切り';
 
   @override
   String get settingsSectionAbout => '情報';
 
   @override
-  String get settingsSectionAboutSummary => 'バージョンとアプリのアップデート。';
-
-  @override
-  String get settingsGeneralDescription => '言語、自動起動、アプリの表示。';
-
-  @override
   String get settingsModulesDescription => 'CopyPaste のオプション機能。';
-
-  @override
-  String get settingsClipboardDescription => 'クリップボードの変更を記録し、履歴の上限を管理します。';
-
-  @override
-  String get settingsDataDescription => 'クリップボード履歴をエクスポート、バックアップ、復元します。';
-
-  @override
-  String get settingsSyncDescription => 'ペアリングしたデバイスとの同期を管理します。';
-
-  @override
-  String get settingsPrivacyDescription => '記録するアプリを管理し、クリップボードの内容を保護します。';
-
-  @override
-  String get settingsNotificationsDescription => '記録したクリップの通知とサウンドを選択します。';
-
-  @override
-  String get settingsAboutDescription => 'CopyPaste のバージョンとアプリのアップデート。';
 
   @override
   String get settingsQuickPasteDescription =>
       'ウインドウを切り替えずに、どこからでもクリップボード履歴を開けます。';
-
-  @override
-  String get settingsLoadingMessage => '設定を読み込んでいます。';
 
   @override
   String get settingsUnavailableTitle => '設定を利用できません';
@@ -1332,9 +1234,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsStartupAndroidDescription => '再起動後にバックグラウンドサービスを再開します。';
 
   @override
-  String get settingsStartupDesktopDescription => 'ログイン時に CopyPaste を自動的に開きます。';
-
-  @override
   String get settingsShowInDock => 'Dock に表示';
 
   @override
@@ -1372,9 +1271,6 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get settingsLightweightModeKeywords =>
       '軽量 閉じる 終了 バックグラウンド メモリ lightweight close quit background memory';
-
-  @override
-  String get settingsVisibilityErrorTitle => '表示を変更できませんでした';
 
   @override
   String get settingsModulesSearchDescription =>
@@ -1457,8 +1353,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsRetentionTitle => '保持期間';
 
   @override
-  String get settingsRetentionDescription =>
-      'ピン留めされていない古いクリップボードの項目を自動的に削除します。';
+  String get settingsRetentionDescription => 'ピン留めされていない古いクリップを自動的に削除します。';
 
   @override
   String get settingsRetentionForever => '無期限に保持';
@@ -1551,7 +1446,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsExportTextTitle => 'テキスト履歴をエクスポート';
 
   @override
-  String get settingsExportTextDescription => 'テキストのクリップを汎用的なファイルに保存します。';
+  String get settingsExportTextDescription => 'テキストのクリップを JSON ファイルとして保存します。';
 
   @override
   String get settingsExportAction => 'エクスポート';
@@ -1694,10 +1589,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get applicationPickerEmpty => 'アプリが見つかりません';
 
   @override
-  String get settingsSkipSecretTitle => '機密のクリップボードをスキップ';
+  String get settingsSkipSecretTitle => 'シークレットのクリップボードをスキップ';
 
   @override
-  String get settingsSkipSecretDescription => 'アプリが機密と指定したコピーを保存しません。';
+  String get settingsSkipSecretDescription => 'アプリがシークレットと指定したコピーを保存しません。';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1756,9 +1651,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsVersionTitle => 'バージョン';
 
   @override
-  String get settingsVersionDescription => 'インストールされている CopyPaste のバージョン。';
-
-  @override
   String get settingsVersionUnavailable => '不明';
 
   @override
@@ -1773,9 +1665,6 @@ class AppLocalizationsJa extends AppLocalizations {
       'バージョン GitHub リリース version github release';
 
   @override
-  String get settingsUpdateIdle => 'CopyPaste の新しいバージョンを確認します。';
-
-  @override
   String get settingsUpdateChecking => 'アップデートを確認しています。';
 
   @override
@@ -1784,6 +1673,11 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String settingsUpdateVersionUpToDate(String version) {
     return 'バージョン $version は最新です。';
+  }
+
+  @override
+  String settingsUpdateVersion(String version) {
+    return 'バージョン $version';
   }
 
   @override
@@ -1829,26 +1723,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsUpdateCheckAgainAction => '再確認';
 
   @override
+  String get settingsUpdateCheckAction => '今すぐ確認';
+
+  @override
   String get settingsUpdateNoneTitle => 'アップデートはありません';
 
   @override
-  String get settingsUpdateLatest => 'CopyPaste は最新バージョンです。';
-
-  @override
-  String settingsUpdateVersionLatest(String version) {
-    return 'CopyPaste $version は最新バージョンです。';
-  }
-
-  @override
   String get settingsUpdateAvailableTitle => 'アップデートがあります';
-
-  @override
-  String get settingsUpdateReady => 'CopyPaste の新しいバージョンをインストールする準備ができました。';
-
-  @override
-  String settingsUpdateVersionReady(String version) {
-    return 'CopyPaste $version をインストールする準備ができました。';
-  }
 
   @override
   String get settingsUpdateUnavailableTitle => 'アップデートを利用できません';
@@ -1858,10 +1739,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get settingsUpdateCheckFailedTitle => 'アップデートの確認に失敗しました';
-
-  @override
-  String get settingsUpdateCheckFailedMessage =>
-      'CopyPaste はアップデートを確認できませんでした。';
 
   @override
   String get settingsQuickPasteSetupTitle => 'Quick Paste をセットアップ';
@@ -1878,9 +1755,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get settingsQuickPasteCheckAgain => '再確認';
-
-  @override
-  String get settingsQuickPasteLoading => 'Quick Paste の設定を読み込んでいます。';
 
   @override
   String get settingsQuickPasteUnavailableTitle => 'Quick Paste を利用できません';
@@ -1965,9 +1839,6 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get devicesLoading => 'デバイスを読み込んでいます…';
-
-  @override
   String get devicesUnavailableTitle => 'デバイスを利用できません';
 
   @override
@@ -1975,6 +1846,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get devicesScan => 'スキャン';
+
+  @override
+  String get devicesScanInvalidTitle => 'QR コードが違います';
 
   @override
   String get devicesScanning => 'スキャン中…';
@@ -2131,15 +2005,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get devicesConnectionUnknown => '不明';
 
   @override
-  String get devicesPeerAvailable => '利用可能';
-
-  @override
-  String get devicesPeerVisibleNow => '現在検出済み';
-
-  @override
-  String get devicesPeerStatusUnknown => '状態不明';
-
-  @override
   String get devicesPingUnavailable => '— ms';
 
   @override
@@ -2212,19 +2077,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pairingSendingRequest => '接続リクエストを送信しています…';
 
   @override
-  String get pairingEmptyTitle => 'ペアリング方法を選択';
-
-  @override
-  String get pairingEmptyMessage => 'ペアリングの操作がここに表示されます。';
-
-  @override
   String get pairingCreatingInvitation => 'ペアリングの招待を作成しています。';
 
   @override
   String get pairingCode => 'ペアリングコード';
 
   @override
-  String get pairingCodeHint => 'もう一方のデバイスに表示されている 8 文字のコードを入力してください。';
+  String get pairingCodeHint => 'もう一方のデバイスに表示されています。';
 
   @override
   String get pairingDeviceAddress => 'デバイスのアドレス';
@@ -2243,13 +2102,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pairingConnectingDevice => 'デバイスを接続しています…';
 
   @override
-  String get pairingQrScannerTitle => 'QR スキャナ';
-
-  @override
   String get pairingCameraPreviewPlaceholder => 'カメラのプレビューがここに表示されます。';
-
-  @override
-  String get pairingScannerNeedsAttention => 'スキャナの確認が必要です';
 
   @override
   String get pairingCodeIncomplete => '8 文字のペアリングコードをすべて入力してください。';
@@ -2263,10 +2116,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get pairingInviteInstructions =>
-      'もう一方のデバイスで「デバイスを追加」→「コードを入力」を選択するか、QR コードをスキャンしてください。';
-
-  @override
-  String get pairingDetailsTitle => 'ペアリング情報';
+      'もう一方のデバイスで「コードを入力」または「QR をスキャン」を選択してください。';
 
   @override
   String get pairingAddress => 'アドレス';
@@ -2293,9 +2143,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pairingStartScanner => 'スキャナを起動';
 
   @override
-  String get pairingActionNotStarted => 'ペアリング操作を開始できませんでした。';
-
-  @override
   String get pairingStateHandshaking => 'デバイスを検証中';
 
   @override
@@ -2320,12 +2167,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pairingHandshakingDescription => 'デバイス間で安全なチャネルを確立しています。';
 
   @override
-  String get pairingAwaitingConfirmationDescription =>
-      '保護された確認コードを照合してから、両方のデバイスで確認してください。';
-
-  @override
-  String get pairingConfirmedDescription =>
-      'デバイスが接続されました。グループのメンバー情報は自動的に同期されます。';
+  String get pairingConfirmedDescription => 'スペース内の他のデバイスも自動的に接続されます。';
 
   @override
   String get pairingNoDeviceAdded => 'デバイスは追加されませんでした。';
@@ -2541,7 +2383,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get syncPeerLastCheckStarted => '前回の確認開始日時';
 
   @override
-  String get syncPeerItemsOverSizeLimit => 'サイズ上限を超える項目';
+  String get syncPeerItemsOverSizeLimit => 'サイズ超過のクリップ';
 
   @override
   String syncPeerLastSeen(String time) {
@@ -2619,9 +2461,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyErrorRefresh => '履歴を更新できませんでした。もう一度お試しください。';
 
   @override
-  String get historyErrorLoad => '履歴を読み込めませんでした。もう一度お試しください。';
-
-  @override
   String get historyErrorLoadMore => '続きの履歴を読み込めませんでした。';
 
   @override
@@ -2669,7 +2508,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get historyErrorSecrecyUpdate => 'クリップの機密設定を更新できませんでした。';
+  String get historyErrorSecrecyUpdate => 'マスクを更新できませんでした。';
 
   @override
   String get historyErrorPinUpdate => 'ピン留めを更新できませんでした。';
@@ -2694,10 +2533,10 @@ class AppLocalizationsJa extends AppLocalizations {
       'OCR を利用できません。設定でモジュールを確認して、もう一度お試しください。';
 
   @override
-  String get historyOcrErrorStart => 'OCR を開始できませんでした。もう一度お試しください。';
+  String get historyOcrErrorStart => 'OCR を開始できませんでした。';
 
   @override
-  String get historyOcrErrorRecognize => '画像内のテキストを認識できませんでした。もう一度お試しください。';
+  String get historyOcrErrorRecognize => '画像内のテキストを認識できませんでした。';
 
   @override
   String get historyOcrRecognizing => '画像内のテキストを認識しています。';
@@ -2710,9 +2549,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyOcrTitle => '画像内のテキスト';
-
-  @override
-  String get historyOcrTextCopied => '認識したテキストをコピーしました。';
 
   @override
   String get historyOcrCopyError => 'テキストをコピーできませんでした。もう一度お試しください。';
@@ -2793,9 +2629,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyActionFailedTitle => '操作に失敗しました';
 
   @override
-  String get historyLoadingMessage => 'クリップボード履歴を読み込んでいます。';
-
-  @override
   String get historyUnavailableTitle => '履歴を利用できません';
 
   @override
@@ -2824,14 +2657,13 @@ class AppLocalizationsJa extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'クリップボードの行 $count 件をスキップしました',
+      other: 'クリップ $count 件をスキップしました',
     );
     return '$_temp0';
   }
 
   @override
-  String get historySkippedRowsMessage =>
-      '保持されている一部のクリップを読み取れなかったため、この一覧には表示されません。';
+  String get historySkippedRowsMessage => '一部のクリップを読み取れなかったため、この一覧には表示されません。';
 
   @override
   String get historySearch => '履歴を検索';
@@ -2918,9 +2750,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyCopyPlainText => 'プレーンテキストとしてコピー';
 
   @override
-  String get historyManageClipTags => 'クリップのタグを管理';
-
-  @override
   String get historyPinnedButton => 'ピン留め済み';
 
   @override
@@ -2942,16 +2771,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyCopyFailedTitle => 'コピーに失敗しました';
 
   @override
-  String get historyPlainTextCopied => 'プレーンテキストをコピーしました。';
-
-  @override
-  String get historyClipCopied => 'クリップをコピーしました。';
+  String get historyPlainTextCopied => 'プレーンテキストとして。';
 
   @override
   String get historyDownloadedTitle => 'ダウンロードしました';
-
-  @override
-  String get historyFileSaved => 'ファイルを保存しました。';
 
   @override
   String get historyShare => '共有';
@@ -3011,16 +2834,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyRetryDownload => 'ダウンロードを再試行';
 
   @override
-  String get historyDownloadFailedTitle => 'ダウンロードに失敗しました';
-
-  @override
   String get historyShowFile => 'ファイルを表示';
-
-  @override
-  String get historyMetadataPrivacy => 'プライバシー';
-
-  @override
-  String get historyMetadataConfidential => '機密';
 
   @override
   String get historyMetadataCaptured => '記録日時';
@@ -3030,9 +2844,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyMetadataDevice => 'デバイス';
-
-  @override
-  String get historyMetadataClipType => 'クリップの種類';
 
   @override
   String get historyMetadataType => 'タイプ';
@@ -3056,7 +2867,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyMetadataSync => '同期';
 
   @override
-  String get historyMetadataTooLargeToSync => '大きすぎて同期できません';
+  String get historyMetadataTooLargeToSync => '大きすぎます';
 
   @override
   String historyBulkDeleteTitle(int count) {
@@ -3119,22 +2930,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historyDatePresetAllTime => 'すべての期間';
 
   @override
-  String get appRuntimeStartFailed => 'CopyPaste のランタイムを起動できませんでした。';
-
-  @override
-  String get appPreparing => 'CopyPaste を準備しています。';
+  String get appRuntimeStartFailed => 'CopyPaste のバックグラウンドサービスを開始できませんでした。';
 
   @override
   String get appRuntimeWaiting => 'CopyPaste は保護された履歴へのアクセスを待っています。';
 
   @override
-  String get appHistoryUnavailableTitle => '履歴のランタイムを利用できません';
+  String get appHistoryUnavailableTitle => '履歴を利用できません';
 
   @override
-  String get appDevicesUnavailableTitle => 'デバイスのランタイムを利用できません';
+  String get appDevicesUnavailableTitle => 'デバイスを利用できません';
 
   @override
-  String get appSettingsUnavailableTitle => '設定のランタイムを利用できません';
+  String get appSettingsUnavailableTitle => '設定を利用できません';
 
   @override
   String get appQuit => 'CopyPaste を終了';
@@ -3153,11 +2961,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get appDestinationSettings => '設定';
-
-  @override
-  String appDestinationSelected(String destination) {
-    return '$destination、選択中';
-  }
 
   @override
   String get appActiveFilter => 'フィルタ適用中';
@@ -3187,8 +2990,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get sharedShizukuNoLongerNeeded => 'Shizuku はもう必要ありません。';
 
   @override
-  String get sharedGetShizukuDescription =>
-      '1 回限りのアクセスを適用するには、Shizuku を入手してください。';
+  String get sharedGetShizukuDescription => 'Shizuku が 1 回限りのアクセスを適用します。';
 
   @override
   String get sharedShizukuWirelessDebugging =>
@@ -3214,6 +3016,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get sharedAllow => '許可';
+
+  @override
+  String get sharedApply => '適用';
 
   @override
   String get sharedSetupCommandsCopyFailed => 'セットアップコマンドをコピーできませんでした。';
@@ -3261,9 +3066,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get onboardingStartAtLogin => 'ログイン時に起動';
-
-  @override
-  String get onboardingStartAtLoginDescription => 'ログイン時に CopyPaste を開く';
 
   @override
   String get onboardingStartAtLoginSemantics => 'ログイン時に CopyPaste を起動';
@@ -3387,8 +3189,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingLinuxCompanion => 'GNOME または KDE コンパニオン';
 
   @override
-  String get onboardingLinuxCompanionReady =>
-      '認証済みの Clipboard v2 ブリッジの準備ができました。';
+  String get onboardingLinuxCompanionReady => '準備ができました。';
 
   @override
   String get onboardingLinuxCompanionCapturePaused =>
@@ -3405,32 +3206,26 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingLinuxKeyboardControl => 'キーボード操作';
 
   @override
-  String get onboardingLinuxKeyboardAllowed =>
-      'Quick Paste でのキーボード操作が許可されています。';
+  String get onboardingLinuxKeyboardAllowed => 'Quick Paste 用に許可されています。';
 
   @override
-  String get onboardingLinuxKeyboardUnsupported =>
-      'このデスクトップセッションではキーボード操作を利用できません。';
+  String get onboardingLinuxKeyboardUnsupported => 'このデスクトップセッションでは利用できません。';
 
   @override
   String get onboardingLinuxAllowKeyboard => 'キーボード操作を許可';
 
   @override
-  String get onboardingLinuxQuickPasteReady => 'Quick Paste の準備ができました。';
+  String get onboardingLinuxQuickPasteReady => '準備ができました。';
 
   @override
   String get onboardingLinuxQuickPastePending =>
-      '必要なデスクトップ統合が有効になると、Quick Paste を使用できるようになります。';
-
-  @override
-  String get onboardingLinuxStartAtLoginDescription =>
-      'ログイン時に CopyPaste を開きます。';
+      '必要なデスクトップ統合が有効になると使用できるようになります。';
 
   @override
   String get onboardingLinuxLinks => 'CopyPaste リンク';
 
   @override
-  String get onboardingLinuxLinksRegistered => 'CopyPaste リンクはこのアプリで開きます。';
+  String get onboardingLinuxLinksRegistered => 'このアプリで開きます。';
 
   @override
   String get onboardingLinuxLinksUnregistered =>
@@ -3444,7 +3239,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get onboardingLinuxScreenshotBlockingUnavailable =>
-      'Linux ではスクリーンショットのブロックを利用できません。保護された保存データは暗号化されたままです。';
+      'Linux では利用できません。保存データは暗号化されたままです。';
 
   @override
   String get onboardingLinuxCheckAgain => '再確認';
@@ -3513,7 +3308,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingAndroidApplyAccess => '記録へのアクセスを適用';
 
   @override
-  String get onboardingAndroidApplyAccessDescription => '1 回限りの記録アクセスを適用します。';
+  String get onboardingAndroidApplyAccessDescription =>
+      '1 回限りです。その後 Shizuku は必要ありません。';
 
   @override
   String get onboardingAndroidFullCaptureLater => 'フル記録は後で設定できます。';
@@ -3545,7 +3341,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'Android のセットアップを監視できません。';
 
   @override
-  String get onboardingAndroidIntakeFailed => 'クリップボードの取り込みを有効にできませんでした。';
+  String get onboardingAndroidIntakeFailed => 'クリップボードの記録を有効にできませんでした。';
 
   @override
   String get onboardingAndroidStopCaptureFailed => 'バックグラウンド記録を停止できませんでした。';
@@ -3555,11 +3351,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get onboardingAndroidGrantsFailed =>
-      'CopyPaste は Shizuku で許可されていますが、Android の記録権限を適用できませんでした。';
+      'CopyPaste は Shizuku で許可されていますが、記録へのアクセスを適用できませんでした。';
 
   @override
   String get onboardingAndroidAllowInShizuku =>
-      '記録権限を適用するには、Shizuku で CopyPaste を許可してください。';
+      '記録へのアクセスを適用するには、Shizuku で CopyPaste を許可してください。';
 
   @override
   String get onboardingAndroidGrantAccessFirst =>
@@ -3601,13 +3397,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesOperationFailed => 'モジュールの操作に失敗しました';
 
   @override
-  String get modulesLoading => 'モジュールを読み込んでいます。';
-
-  @override
   String get modulesUnavailableTitle => 'モジュールを利用できません';
-
-  @override
-  String get modulesUnavailableMessage => 'もう一度モジュールを読み込んでください。';
 
   @override
   String get modulesNoneInstalled => 'インストール済みのモジュールはありません';
@@ -3622,13 +3412,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesTryDifferentSearch => '別のキーワードで検索してください。';
 
   @override
-  String get modulesMarketplaceLoading => 'マーケットプレイスを読み込んでいます。';
-
-  @override
   String get modulesMarketplaceUnavailableTitle => 'マーケットプレイスを利用できません';
-
-  @override
-  String get modulesMarketplaceUnavailableMessage => 'もう一度マーケットプレイスを読み込んでください。';
 
   @override
   String get modulesNoneAvailable => '利用できるモジュールはありません';
@@ -3690,9 +3474,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesNoSettingsTitle => '追加の設定はありません';
 
   @override
-  String get modulesNoSettingsMessage => 'このモジュールには追加の設定は必要ありません。';
-
-  @override
   String get modulesSetUpSmsAccess => 'SMS へのアクセスを設定';
 
   @override
@@ -3703,9 +3484,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get modulesCloseSmsAccess => 'SMS へのアクセスを閉じる';
-
-  @override
-  String get modulesSmsChecking => 'SMS へのアクセスを確認しています。';
 
   @override
   String get modulesSmsReady =>
@@ -3731,16 +3509,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesSmsApplyAccess => 'SMS へのアクセスを適用';
 
   @override
-  String get modulesSmsApplyAccessDescription => '1 回限りの SMS アクセスを適用します。';
+  String get modulesSmsApplyAccessDescription => '1 回だけ必要です。';
 
   @override
   String get modulesSmsSetupFailed => 'SMS のセットアップに失敗しました';
 
   @override
   String get modulesFileSelectionFailed => 'ファイルの選択に失敗しました';
-
-  @override
-  String get modulesChooseLanguages => '言語を選択';
 
   @override
   String get modulesChooseFile => 'ファイルを選択';
@@ -3835,9 +3610,6 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get modulesMarketplaceLoadFailed => 'モジュールマーケットプレイスを読み込めませんでした。';
-
-  @override
   String get modulesSmsSetupRequired => 'このモジュールを有効にする前に、SMS へのアクセスを設定してください。';
 
   @override
@@ -3880,10 +3652,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesResponseInvalid => 'モジュールの応答が無効です。';
 
   @override
-  String get modulesFileSelectionUnavailable => 'ファイルの選択を利用できません。';
-
-  @override
-  String get modulesFileSelectFailed => 'ファイルを選択できませんでした。';
+  String get modulesFileSelectionUnavailable => 'ここでは利用できません。';
 
   @override
   String modulesFileNotAccepted(String field) {
@@ -3941,12 +3710,6 @@ class AppLocalizationsJa extends AppLocalizations {
     });
     return '$_temp0';
   }
-
-  @override
-  String get deviceAuthUnavailable => 'このシステムでは利用できません';
-
-  @override
-  String get deviceAuthNotConfigured => '先にデバイスのパスワード、PIN、または生体認証を設定してください';
 
   @override
   String get commonOn => 'オン';
@@ -4071,7 +3834,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return '新しい上限：$limit。これより古いピン留めされていない項目は完全に削除されます。';
+    return '新しい上限：$limit。これより古いピン留めされていないクリップは完全に削除されます。';
   }
 
   @override
@@ -4079,7 +3842,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return '新しい上限：$size。超えた分は古いピン留めされていない項目から完全に削除されます。';
+    return '新しい上限：$size。超えた分は古いピン留めされていないクリップから完全に削除されます。';
   }
 
   @override
@@ -4114,7 +3877,7 @@ class AppLocalizationsJa extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'テキストクリップ $count 件をエクスポートしました',
+      other: 'テキストクリップ $count 件',
     );
     return '$_temp0';
   }
@@ -4133,15 +3896,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String settingsOutcomeDetail(String outcome, String detail) {
     return '$outcome · $detail';
   }
-
-  @override
-  String settingsBackupDoneMessage(String size) {
-    return '暗号化バックアップを保存しました · $size';
-  }
-
-  @override
-  String get settingsRestoreDoneMessage =>
-      'このデバイスのクリップボード履歴がバックアップの内容に置き換わりました。';
 
   @override
   String sharedSizeKibibytes(String size) {
@@ -4193,7 +3947,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return '新しい上限：$size。現在 $used を使用中のため、古いピン留めされていない項目から完全に削除されます。';
+    return '新しい上限：$size。現在 $used を使用中のため、古いピン留めされていないクリップから完全に削除されます。';
   }
 
   @override
@@ -4379,9 +4133,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsCategoryOther => 'その他';
 
   @override
-  String get transformsChainEmpty => 'ステップはまだありません';
-
-  @override
   String transformsStepLabel(int step, String name) {
     return '$step · $name';
   }
@@ -4438,7 +4189,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String transformsPipelineSavedMessage(String name) {
-    return '$name はすべての変換パレットで使えます。';
+    return '$name は「パイプライン」にあります。';
   }
 
   @override
@@ -4465,13 +4216,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get transformsNotTextMessage =>
-      'この項目は画像、ファイル、または色です。テキスト項目を選ぶか、テキストをコピーしてください。';
+      'このクリップは画像、ファイル、または色です。テキストのクリップを選ぶか、テキストをコピーしてください。';
 
   @override
   String get transformsNothingTitle => '変換するものがありません';
 
   @override
-  String get transformsNothingMessage => 'テキストをコピーするか、履歴の項目を選んでください。';
+  String get transformsNothingMessage => 'テキストをコピーするか、履歴からクリップを選んでください。';
 
   @override
   String get transformsPickTransform => '変換を選んでください';
@@ -4534,13 +4285,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsActionSave => '新しい項目として保存';
 
   @override
-  String get transformsCopiedMessage => '結果はクリップボードと履歴にあります。';
+  String get transformsCopiedMessage => '結果は履歴にもあります。';
 
   @override
   String get transformsSavedTitle => '保存しました';
 
   @override
-  String get transformsSavedMessage => '新しい履歴項目として保存しました。';
+  String get transformsSavedMessage => '結果は履歴に新しいクリップとして追加されました。';
 
   @override
   String get transformsPasteFailedTitle => '貼り付けできませんでした';
@@ -4573,6 +4324,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get transformsErrorTimestampUnit => '数値が秒かミリ秒かを選んでください';
+
+  @override
+  String get transformsErrorTimeLimit => '時間がかかりすぎました';
 
   @override
   String get transformsErrorExternalEntity => '外部エンティティは使用できません';
@@ -4682,11 +4436,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsFavoritesTitle => 'お気に入り';
 
   @override
-  String get transformsFavoritesDescription => 'すべてのパレットで先頭に表示されます。';
+  String get transformsFavoritesDescription => 'テキストの変換時に上のほうに表示されます。';
 
   @override
   String transformsFavoriteShortcut(String shortcut) {
-    return 'パレットで $shortcut';
+    return '「テキストを変換」で $shortcut';
   }
 
   @override
@@ -4728,7 +4482,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsHiddenTitle => '非表示の変換';
 
   @override
-  String get transformsHiddenDescription => 'パレットとおすすめに表示されません。';
+  String get transformsHiddenDescription => '一覧にもおすすめにも表示されません。';
 
   @override
   String get transformsHideTransform => '変換を非表示にする';
@@ -4783,10 +4537,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickAccessUnavailableTitle => 'クイックアクセスの状態を取得できません';
 
   @override
-  String get quickAccessUnavailableMessage =>
-      'CopyPaste はキーボード、タイル、ウィジェットの状態を読み取れませんでした。もう一度お試しください。';
-
-  @override
   String get quickAccessActionFailedTitle => '操作を完了できませんでした';
 
   @override
@@ -4811,17 +4561,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get quickAccessKeyboardSearchDescription =>
-      '「CopyPaste クリップ」キーボードパネルをオンにします。';
+      '「CopyPaste クリップ」キーボードをオンにします。';
 
   @override
   String get quickAccessKeyboardKeywords => 'キーボード 入力方法 ime パネル 有効';
 
   @override
   String get quickAccessSwitchKeyboardTitle => 'クリップキーボードに切り替え';
-
-  @override
-  String get quickAccessSwitchKeyboardDescription =>
-      '「CopyPaste クリップ」を現在のキーボードにします。';
 
   @override
   String get quickAccessSwitchKeyboardAction => 'キーボードを選択';
@@ -4831,9 +4577,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierTitle => '記録モード';
-
-  @override
-  String get quickAccessCaptureTierDescription => '他のアプリからのコピーを保存する方法です。';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -4846,10 +4589,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickAccessTierFull => 'フル: すべてのコピーをバックグラウンドで保存';
 
   @override
-  String get quickAccessTierPanelCollecting => 'パネル選択中: 収集中';
+  String get quickAccessTierPanelCollecting => 'クリップキーボード: 選択中はすべてのコピーを保存';
 
   @override
-  String get quickAccessTierPanelCatchUp => 'パネルモード: 開いたときに取り込み';
+  String get quickAccessTierPanelCatchUp => 'クリップキーボード: 開いたときにクリップボードを保存';
 
   @override
   String get quickAccessTierManual => '手動: アプリ、タイル、ウィジェット、共有から保存';
@@ -4867,10 +4610,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickAccessAutoReturnKeywords => '戻る 前のキーボード 自動 挿入';
 
   @override
-  String get quickAccessFocusSearchTitle => 'パネルを開いたときに検索にフォーカス';
-
-  @override
-  String get quickAccessFocusSearchDescription => '検索欄を選択した状態でパネルを開きます。';
+  String get quickAccessFocusSearchTitle => 'クリップキーボードを開いたときに検索にフォーカス';
 
   @override
   String get quickAccessTilesTitle => 'クイック設定タイル';
@@ -5002,10 +4742,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quickPasteDefaultSkippedMessage => '代わりに元の内容を使用しました。';
 
   @override
-  String get quickPastePasteManually => '内容はクリップボードにあります。手動で貼り付けてください。';
-
-  @override
-  String get quickPastePaste => '貼り付け';
+  String get quickPastePasteManually => '手動で貼り付けてください。';
 
   @override
   String get rulesLoadFailed => 'コンテンツルールを読み込めませんでした。';
@@ -5052,9 +4789,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get rulesEmptyTitle => 'ルールはまだありません';
-
-  @override
-  String get rulesEmptyMessage => 'ルールは新しいコピーにタグ付け、保護、期限設定、スキップを行います。';
 
   @override
   String get rulesDeletedTitle => '最近削除したルール';
@@ -5189,7 +4923,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get rulesApplyToItems => '既存の項目に適用…';
+  String get rulesApplyToItems => '既存のクリップに適用…';
 
   @override
   String get rulesResetBuiltin => 'デフォルトに戻す';
@@ -5378,9 +5112,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get rulesCaseSensitive => '大文字と小文字を区別';
 
   @override
-  String get rulesChooseValues => '選択';
-
-  @override
   String get rulesUnknownConditionNotice =>
       'この条件は新しいバージョンの CopyPaste で作成されました。';
 
@@ -5494,9 +5225,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get rulesTestTitle => 'テスト';
-
-  @override
-  String get rulesTestDescription => 'サンプルテキストでルールを試します。';
 
   @override
   String get rulesSamplePlaceholder => 'サンプルテキストを貼り付けるか入力';
@@ -5616,7 +5344,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get rulesTraceOutput => '変換後のテキスト';
 
   @override
-  String get rulesPreviewTitle => '既存の項目に適用';
+  String get rulesPreviewTitle => '既存のクリップに適用';
 
   @override
   String rulesPreviewRunning(int count) {
@@ -5690,12 +5418,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get rulesPreviewNote => '適用するまで何も変わりません。';
 
   @override
-  String get rulesSecretItem => 'シークレット項目';
-
-  @override
-  String rulesSecretItemFrom(String app) {
-    return '$app のシークレット項目';
-  }
+  String get rulesSecretItem => 'シークレットクリップ';
 
   @override
   String get rulesPreviewCancelled => 'プレビューを停止しました。何も変更されていません。';
@@ -5782,11 +5505,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get historySentTitle => '送信しました';
 
   @override
-  String historySentTo(String devices) {
-    return '$devices に送信しました。';
-  }
-
-  @override
   String get historySendFailedTitle => '送信できませんでした';
 
   @override
@@ -5819,9 +5537,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyEditSaved => '編集したテキストは履歴の先頭に新しいクリップとして追加されました。';
-
-  @override
-  String get historyNewClipSaved => 'テキストを保存しました。';
 
   @override
   String historyQueueAddedInOrder(int count) {
@@ -6005,9 +5720,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get diagnosticsExported => '診断をエクスポートしました';
 
   @override
-  String get diagnosticsExportedMessage => 'ログファイルをサポートに送信できます。';
-
-  @override
   String get diagnosticsExportFailed => 'エクスポートに失敗しました';
 
   @override
@@ -6023,8 +5735,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get diagnosticsLogLevelTitle => 'ログレベル';
 
   @override
-  String get diagnosticsLogLevelDescription =>
-      'このデバイスで記録する詳細の量。クリップボードの内容はログに含まれません。';
+  String get diagnosticsLogLevelDescription => 'このデバイスで記録する詳細の量。';
 
   @override
   String get onboardingAndroidCaptureMethod => '検出方法';
@@ -6107,9 +5818,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get fileSetShowFolder => 'フォルダを表示';
 
   @override
-  String get historyFilesSaved => 'ファイルを保存しました。';
-
-  @override
   String get transfersResume => '再開';
 
   @override
@@ -6189,9 +5897,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsLogsFolderTitle => 'ログフォルダ';
 
   @override
-  String get settingsLogsFolderDescription => 'このデバイスの診断ログを表示します。';
-
-  @override
   String get settingsOpenFolderAction => '開く';
 
   @override
@@ -6266,7 +5971,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get devicesSpaceRemovedMessage =>
-      'このデバイスは削除されたか、スペースから退出しました。履歴はこのデバイスに残ります。再び同期するにはスペースに参加してください。';
+      'このデバイスは削除されたか、スペースから退出しました。履歴はこのデバイスに残ります。';
 
   @override
   String get devicesSpaceJoin => 'スペースに参加';
@@ -6329,8 +6034,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingSpaceLater => '後で';
 
   @override
-  String get onboardingReadySpaceCreated =>
-      'スペースの準備ができました。他のデバイスは今すぐ、または後で「デバイス」から追加できます。';
+  String get onboardingReadySpaceCreated => '他のデバイスは今すぐ、または後で「デバイス」から追加できます。';
 
   @override
   String get onboardingReadyJoin => '次に、もう一方のデバイスに表示されたコードを確認してください。';
@@ -6357,15 +6061,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingPairJoinTitle => 'スペースに参加';
 
   @override
-  String get onboardingPairJoinSubtitle =>
-      'もう一方のデバイスのコードを入力するか、QR コードをスキャンしてください。その後、両方のデバイスに同じ確認コードが表示されていることを確認します。';
-
-  @override
   String get onboardingPairAddDeviceSubtitle =>
-      'もう一方のデバイスで CopyPaste を開き、この QR コードまたはコードで参加してください。その後、両方のデバイスに同じ確認コードが表示されていることを確認します。';
+      'もう一方のデバイスで CopyPaste を開き、このコードまたは QR コードで参加してください。';
 
   @override
-  String get onboardingPairSkip => '今はスキップ';
+  String get onboardingPairSkip => '後で';
 
   @override
   String get onboardingPairInterruptedTitle => 'ペアリングが完了しませんでした';
@@ -6375,13 +6075,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'もう一度試すか、続行して後で「デバイス」からペアリングしてください。';
 
   @override
-  String onboardingReadyPaired(String device) {
-    return '$device とペアリングしました。クリップボードが両方のデバイス間で同期されます。';
-  }
-
-  @override
-  String get onboardingReadyPairedUnnamed =>
-      'デバイスがペアリングされました。クリップボードがデバイス間で同期されます。';
+  String get onboardingReadyPaired => 'クリップボードがデバイス間で同期されます。';
 
   @override
   String get onboardingReadyPairLater => 'デバイスはいつでも「デバイス」からペアリングできます。';
@@ -6419,10 +6113,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get modulesDetailsPermissionsPending =>
-      'インストール後に表示されます。モジュールをオンにするときに確認します。';
+      'インストール後に表示されます。モジュールを有効にするときに確認します。';
 
   @override
-  String get modulesDetailsNoPermissions => 'CopyPaste のサービスを使用しません。';
+  String get modulesDetailsNoPermissions => '権限は必要ありません。';
 
   @override
   String get modulesDetailsInformation => '情報';

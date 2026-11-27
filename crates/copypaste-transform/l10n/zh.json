@@ -19,7 +19,10 @@
     },
     "structure.json_minify": {
       "name": "压缩 JSON",
-      "description": "删除 JSON 中所有无意义的空白。"
+      "description": "",
+      "keywords": [
+        "删除空白"
+      ]
     },
     "structure.json_validate": {
       "name": "验证 JSON",
@@ -63,7 +66,10 @@
     },
     "structure.json_to_yaml": {
       "name": "JSON 转 YAML",
-      "description": "将 JSON 转换为块样式的 YAML。"
+      "description": "",
+      "keywords": [
+        "转换"
+      ]
     },
     "structure.csv_to_json": {
       "name": "CSV 转 JSON",
@@ -99,13 +105,16 @@
     },
     "structure.xml_minify": {
       "name": "压缩 XML",
-      "description": "删除 XML 元素之间的空白。"
+      "description": "",
+      "keywords": [
+        "删除空白"
+      ]
     }
   },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 编码",
-      "description": "将文本的 UTF-8 字节编码为 Base64。",
+      "description": "",
       "params": {
         "variant": {
           "label": "字母表",
@@ -163,7 +172,10 @@
     },
     "encode.hex_encode": {
       "name": "十六进制编码",
-      "description": "将文本的 UTF-8 字节写成十六进制数字。",
+      "description": "",
+      "keywords": [
+        "字节"
+      ],
       "params": {
         "separator": {
           "label": "分隔符",
@@ -231,7 +243,10 @@
   "case": {
     "case.upper": {
       "name": "大写",
-      "description": "按完整的 Unicode 规则将所有字母转换为大写。",
+      "description": "",
+      "keywords": [
+        "字母"
+      ],
       "params": {
         "locale": {
           "label": "语言规则",
@@ -244,7 +259,10 @@
     },
     "case.lower": {
       "name": "小写",
-      "description": "按完整的 Unicode 规则将所有字母转换为小写。",
+      "description": "",
+      "keywords": [
+        "字母"
+      ],
       "params": {
         "locale": {
           "label": "语言规则",
@@ -273,7 +291,10 @@
     },
     "case.sentence": {
       "name": "句子格式",
-      "description": "将每个句子的第一个词首字母大写，其余转为小写。",
+      "description": "",
+      "keywords": [
+        "首字母大写"
+      ],
       "params": {
         "keep_acronyms": {
           "label": "保留缩写词"
@@ -282,7 +303,10 @@
     },
     "case.camel": {
       "name": "camelCase",
-      "description": "将单词连接成以小写开头的标识符。",
+      "description": "",
+      "keywords": [
+        "标识符"
+      ],
       "params": {
         "per_line": {
           "label": "逐行转换"
@@ -294,7 +318,10 @@
     },
     "case.pascal": {
       "name": "PascalCase",
-      "description": "将单词连接成每个词首字母大写的标识符。",
+      "description": "",
+      "keywords": [
+        "标识符"
+      ],
       "params": {
         "per_line": {
           "label": "逐行转换"
@@ -306,7 +333,10 @@
     },
     "case.snake": {
       "name": "snake_case",
-      "description": "用下划线连接小写单词。",
+      "description": "",
+      "keywords": [
+        "下划线"
+      ],
       "params": {
         "per_line": {
           "label": "逐行转换"
@@ -315,7 +345,10 @@
     },
     "case.kebab": {
       "name": "kebab-case",
-      "description": "用连字符连接小写单词。",
+      "description": "",
+      "keywords": [
+        "连字符"
+      ],
       "params": {
         "per_line": {
           "label": "逐行转换"
@@ -324,7 +357,11 @@
     },
     "case.constant": {
       "name": "CONSTANT_CASE",
-      "description": "用下划线连接大写单词。",
+      "description": "",
+      "keywords": [
+        "下划线",
+        "大写"
+      ],
       "params": {
         "per_line": {
           "label": "逐行转换"
@@ -333,13 +370,16 @@
     },
     "case.swap": {
       "name": "大小写互换",
-      "description": "将大写字母变为小写，小写字母变为大写。"
+      "description": ""
     }
   },
   "hash": {
     "hash.md5": {
       "name": "MD5 哈希",
-      "description": "MD5 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "description": "不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "keywords": [
+        "摘要"
+      ],
       "params": {
         "output": {
           "label": "输出",
@@ -353,7 +393,10 @@
     },
     "hash.sha1": {
       "name": "SHA-1 哈希",
-      "description": "SHA-1 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "description": "不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "keywords": [
+        "摘要"
+      ],
       "params": {
         "output": {
           "label": "输出",
@@ -367,7 +410,10 @@
     },
     "hash.sha256": {
       "name": "SHA-256 哈希",
-      "description": "SHA-256 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "description": "按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "keywords": [
+        "摘要"
+      ],
       "params": {
         "output": {
           "label": "输出",
@@ -381,7 +427,10 @@
     },
     "hash.sha512": {
       "name": "SHA-512 哈希",
-      "description": "SHA-512 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "description": "按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "keywords": [
+        "摘要"
+      ],
       "params": {
         "output": {
           "label": "输出",
@@ -395,7 +444,7 @@
     },
     "hash.crc32": {
       "name": "CRC-32 校验和",
-      "description": "使用 ZIP 和 PNG 所用 IEEE 多项式的 CRC-32。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "description": "使用 ZIP 和 PNG 所用的 IEEE 多项式。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
       "params": {
         "output": {
           "label": "输出",
@@ -437,7 +486,7 @@
     },
     "lines.remove_empty": {
       "name": "删除空行",
-      "description": "删除空行或只含空格的行。",
+      "description": "",
       "params": {
         "whitespace_only": {
           "label": "只含空白的行视为空行"
@@ -481,11 +530,15 @@
     },
     "lines.reverse": {
       "name": "反转行顺序",
-      "description": "将行按相反顺序排列。"
+      "description": ""
     },
     "lines.join": {
       "name": "合并行",
-      "description": "用分隔符将所有行合并为一行。",
+      "description": "",
+      "keywords": [
+        "分隔符",
+        "一行"
+      ],
       "params": {
         "separator": {
           "label": "分隔符",
@@ -607,7 +660,7 @@
   },
   "dev": {
     "dev.jwt_decode": {
-      "name": "JWT：解码",
+      "name": "JWT 解码",
       "description": "以 JSON 显示令牌的头部和载荷。不验证签名。",
       "keywords": [
         "令牌"

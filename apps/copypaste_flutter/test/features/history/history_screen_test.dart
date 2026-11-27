@@ -1577,7 +1577,6 @@ void main() {
       for (final label in [
         'Captured',
         'Observed app',
-        'Clip type',
         'File',
         'Type',
         'Size',
@@ -1707,11 +1706,10 @@ void main() {
       const ValueKey<String>('history-detail-metadata'),
     );
     for (final entry in <String, String>{
-      'Clip type': 'Image',
       'Type': 'image/png',
       'Resolution': '1920 × 1080',
       'Size': '4.0 MiB',
-      'Sync': 'Too large to sync',
+      'Sync': 'Too large',
     }.entries) {
       expect(
         find.descendant(of: metadata, matching: find.text(entry.key)),
@@ -1741,8 +1739,7 @@ void main() {
       find.descendant(
         of: metadata,
         matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is SelectableText && widget.data == 'Too large to sync',
+          (widget) => widget is SelectableText && widget.data == 'Too large',
         ),
       ),
     );
@@ -1973,7 +1970,7 @@ void main() {
   ) async {
     // Exercise overflow on a compact viewport instead of relying on a larger
     // metadata font to make short values scroll.
-    await tester.binding.setSurfaceSize(const Size(480, 640));
+    await tester.binding.setSurfaceSize(const Size(480, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _ScreenRepository()
       ..availableImagePreview = HistoryImagePreview(
@@ -2277,7 +2274,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('2 clipboard rows were skipped'), findsOneWidget);
+    expect(find.text('2 clips were skipped'), findsOneWidget);
     expect(find.text('No clips found'), findsOneWidget);
     controller.dispose();
   });

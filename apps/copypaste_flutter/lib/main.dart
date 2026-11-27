@@ -995,10 +995,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
               headers: unifiedTitleBar
                   ? const [MacosWindowHeader(title: Text('CopyPaste'))]
                   : const [AppBar(title: Text('CopyPaste')), Divider()],
-              child: Builder(
-                builder: (context) =>
-                    StateView.loading(message: context.l10n.appPreparing),
-              ),
+              child: const StateView.loading(),
             ),
           ),
         ),

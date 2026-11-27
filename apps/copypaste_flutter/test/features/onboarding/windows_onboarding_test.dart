@@ -176,6 +176,37 @@ void main() {
     },
   );
 
+  testWidgets('Setup shows startup disabled in Task Manager once', (
+    tester,
+  ) async {
+    final startup = _Startup()..status = LaunchAtLoginStatus.requiresApproval;
+    final controller = windowsOnboarding(
+      store: MemoryOnboardingStore(),
+      startup: startup,
+      offersSpace: true,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showSetup();
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
+      ),
+    );
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(controller.step, OnboardingStep.space);
+    expect(find.text('Optional setup needs attention'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Back'));
+    await tester.pumpAndSettle();
+
+    expect(controller.step, OnboardingStep.setup);
+    expect(find.byType(Alert), findsOneWidget);
+    expect(find.text('Disabled in Task Manager'), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Open Settings'), findsOneWidget);
+  });
+
   testWidgets('unavailable startup is disabled and leaves Continue usable', (
     tester,
   ) async {
