@@ -324,15 +324,19 @@ def observe_camera_scan(registry: Any, *, pid: int, expected: str, runtime_prefi
     )
 
 
-def matching_count(application: Any, name: str) -> int:
-    count = 0
+def named_accessibles_present(application: Any, name: str, count: int) -> bool:
+    """Stop at the last required match: the rest of the tree may be changing."""
+    found = 0
     for node in accessible_descendants(application):
         try:
-            if node.name == name:
-                count += 1
+            if node.name != name:
+                continue
         except Exception:
             continue
-    return count
+        found += 1
+        if found >= count:
+            return True
+    return False
 
 
 def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds: int, count: int = 1) -> dict[str, Any]:
@@ -340,7 +344,7 @@ def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds:
     application = atspi_application(registry, pid)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if matching_count(application, target) >= count:
+        if named_accessibles_present(application, target, count):
             return redacted_record(
                 "atspi_observe",
                 gui_pid=pid,
