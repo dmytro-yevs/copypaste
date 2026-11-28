@@ -279,11 +279,11 @@ def wayland_permission_receipt(output, *, gui_pid):
     return record
 
 
-def atspi_action(actor, command, gui_pid, target, environment):
-    result = run(
-        [sys.executable, str(actor), command, "--pid", str(gui_pid), "--target", target],
-        env=environment,
-    )
+def atspi_action(actor, command, gui_pid, target, environment, count=1):
+    argv = [sys.executable, str(actor), command, "--pid", str(gui_pid), "--target", target]
+    if count != 1:
+        argv += ["--count", str(count)]
+    result = run(argv, env=environment)
     return hashlib.sha256(result.stdout).hexdigest()
 
 
@@ -360,6 +360,7 @@ def require_linux_onboarding(args, *, gui_pid, environment):
     atspi_action(actor, "observe", gui_pid, "Continue", environment)
     atspi_action(actor, "click", gui_pid, "Continue", environment)
     atspi_action(actor, "observe", gui_pid, "Set up your Linux desktop", environment)
+    ready_rows = 1
     if args.session == "wayland":
         helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
         permission = run(
@@ -372,9 +373,10 @@ def require_linux_onboarding(args, *, gui_pid, environment):
         )
         receipt = wayland_permission_receipt(permission.stdout.decode("utf-8"), gui_pid=gui_pid)
         write_wayland_evidence(args.evidence_dir, "wayland-onboarding-permission.json", receipt)
-        atspi_action(actor, "observe", gui_pid, "The authenticated Clipboard v2 bridge is ready.", environment)
-        atspi_action(actor, "observe", gui_pid, "Keyboard control is allowed for Quick Paste.", environment)
-    atspi_action(actor, "observe", gui_pid, "Quick Paste is ready.", environment)
+        atspi_action(actor, "observe", gui_pid, "Allowed for Quick Paste.", environment)
+        # The Clipboard bridge row reads "Ready." as well, so both rows must.
+        ready_rows = 2
+    atspi_action(actor, "observe", gui_pid, "Ready.", environment, count=ready_rows)
     atspi_action(actor, "click", gui_pid, "Continue", environment)
     # A desktop runtime offers to join a space before the ready step.
     atspi_action(actor, "observe", gui_pid, "Your devices", environment)
@@ -1320,8 +1322,8 @@ class ModulesScreen:
         ])
 
     def set_languages(self, title, languages):
-        steps = [("observe", f"Enable {title}"), ("click", "Module settings"), ("observe", "Choose languages"),
-                 ("click", "Choose languages")]
+        steps = [("observe", f"Enable {title}"), ("click", "Module settings"), ("observe", "Choose"),
+                 ("click", "Choose")]
         steps += [step for language in languages for step in (("observe", language), ("click", language))]
         # Saving closes the drawer, which returns to the module's row.
         steps += [("key", "Escape"), ("observe", "Save"), ("click", "Save"), ("observe", f"Enable {title}")]
