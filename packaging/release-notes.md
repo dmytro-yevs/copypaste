@@ -1,6 +1,6 @@
-- The Quick Paste shortcut is registered again when it was lost: after a shortcut recording that was left open, or when another application held the combination at launch.
-- A new Quick Paste setting, "Hide previews in password fields", turns off masking while a password field has focus.
-- In Quick Paste, shortcut hints line up in one column, the footer actions have icons and clearer names, a file shows its folder under its name, and a new setting hides the Queue tab.
-- Sync activity lists only problems that need you, one line each with the time it lasted; brief connection drops no longer fill it. The device list stays in place while activity scrolls.
-- On Android, an update refused by device protection (Play Protect, Auto Blocker) is reported as blocked and can be retried. The README explains installing outside Google Play.
-- On Windows, the installer and uninstaller trip fewer antivirus heuristics: the uninstaller ships signed, the installer no longer unpacks a helper DLL, and an update starts the verified installer directly.
+- While CopyPaste starts, History, Devices and Settings show a loading state instead of an error. The error view stays for a start that failed, with the reason and "Try again".
+- The open app uses less memory and CPU: concealed secrets outside the view, open tooltips and the tray menu no longer keep drawing frames.
+- After Quick Paste closes, the hidden app returns the memory it took. This was measured on macOS; the Windows change was not measured.
+- The interface uses one name for one thing (sync, clip, secret, app), and descriptions, toasts and loading states no longer repeat their heading.
+- Corrected texts: the pairing invite names the real steps, Transfers has "Clear history", a QR code that is not a pairing code shows "Wrong QR code", a favorite transform shows its real shortcut, and the clipboard permission of a module reads "Read the text on your clipboard".
+- Icon-only buttons have screen reader labels, and the names of shipped rules are translated.
