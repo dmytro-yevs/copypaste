@@ -324,12 +324,23 @@ def observe_camera_scan(registry: Any, *, pid: int, expected: str, runtime_prefi
     )
 
 
-def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds: int) -> dict[str, Any]:
+def matching_count(application: Any, name: str) -> int:
+    count = 0
+    for node in accessible_descendants(application):
+        try:
+            if node.name == name:
+                count += 1
+        except Exception:
+            continue
+    return count
+
+
+def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds: int, count: int = 1) -> dict[str, Any]:
     """Require an installed accessible state without invoking another action."""
     application = atspi_application(registry, pid)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if matching_accessible(application, target) is not None:
+        if matching_count(application, target) >= count:
             return redacted_record(
                 "atspi_observe",
                 gui_pid=pid,
@@ -554,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     observe.add_argument("--pid", required=True, type=int)
     observe.add_argument("--target", required=True)
     observe.add_argument("--timeout-seconds", type=int, default=8)
+    observe.add_argument("--count", type=int, default=1, help="how many accessibles must carry the name")
     ready = commands.add_parser("quick-paste-ready", help="require one ready Quick Paste input state")
     ready.add_argument("--pid", required=True, type=int)
     ready.add_argument("--marker", required=True)
@@ -583,13 +595,15 @@ def main(argv: list[str] | None = None) -> int:
                 emit(click_accessible(pyatspi.Registry, pid=args.pid, target=args.target, expected=args.expect, timeout_seconds=args.timeout_seconds))
             return 0
         if args.command == "observe":
-            if args.pid <= 0 or not 1 <= args.timeout_seconds <= MAX_TIMEOUT_SECONDS:
+            if args.pid <= 0 or args.count < 1 or not 1 <= args.timeout_seconds <= MAX_TIMEOUT_SECONDS:
                 raise MediaQualificationError("AT-SPI arguments are invalid")
             try:
                 import pyatspi  # type: ignore[import-not-found]
             except ImportError as error:
                 raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
-            emit(observe_accessible(pyatspi.Registry, pid=args.pid, target=args.target, timeout_seconds=args.timeout_seconds))
+            emit(observe_accessible(
+                pyatspi.Registry, pid=args.pid, target=args.target, timeout_seconds=args.timeout_seconds, count=args.count,
+            ))
             return 0
         if args.command == "quick-paste-ready":
             if args.pid <= 0 or not args.marker or not 1 <= args.timeout_seconds <= MAX_TIMEOUT_SECONDS:

@@ -1023,8 +1023,15 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             self.assertEqual([command[2] for command in commands], ["observe", "click", "observe", "observe", "click", "observe", "click", "observe", "click", "observe"])
             self.assertEqual(
                 [command[command.index("--target") + 1] for command in commands],
-                ["Continue", "Continue", "Set up your Linux desktop", "Quick Paste is ready.", "Continue", "Your devices", "Later", "Get started", "Get started", "History"],
+                ["Continue", "Continue", "Set up your Linux desktop", "Ready.", "Continue", "Your devices", "Later", "Get started", "Get started", "History"],
             )
+            self.assertFalse(any("--count" in command for command in commands))
+
+    def test_ready_rows_are_counted_when_two_rows_share_the_text(self):
+        result = subprocess.CompletedProcess(["python3", "actor.py"], 0, stdout=b"")
+        with mock.patch.object(driver, "run", return_value=result) as run:
+            driver.atspi_action(Path("actor.py"), "observe", 4321, "Ready.", {}, count=2)
+        self.assertEqual(run.call_args.args[0][-2:], ["--count", "2"])
 
     def test_workflow_producer_needs_no_external_wayland_consent_metadata(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")

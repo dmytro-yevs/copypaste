@@ -403,6 +403,19 @@ class LinuxNativeMediaTest(unittest.TestCase):
         self.assertEqual(record["gstreamer_mapping_sha256"], "a" * 64)
         self.assertNotIn("Confirm on both devices", str(record))
 
+    def test_observation_requires_the_requested_number_of_named_accessibles(self):
+        named = [mock.Mock(), mock.Mock()]
+        for node in named:
+            node.name = "Ready."
+        with mock.patch.object(media, "atspi_application", return_value=mock.Mock()), \
+             mock.patch.object(media, "accessible_descendants", return_value=named), \
+             mock.patch.object(media.time, "monotonic", side_effect=[0, 0, 0, 0, 2]), \
+             mock.patch.object(media.time, "sleep"):
+            record = media.observe_accessible(mock.Mock(), pid=123, target="Ready.", timeout_seconds=1, count=2)
+            with self.assertRaisesRegex(media.MediaQualificationError, "required state"):
+                media.observe_accessible(mock.Mock(), pid=123, target="Ready.", timeout_seconds=1, count=3)
+        self.assertEqual(record["kind"], "atspi_observe")
+
     def test_camera_observation_rejects_absent_decoded_pairing_state(self):
         with mock.patch.object(media, "atspi_application", return_value=mock.Mock()), \
              mock.patch.object(media, "matching_accessible", return_value=None):

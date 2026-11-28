@@ -42,7 +42,7 @@ MEDIA_ACTOR = Path(__file__).with_name("linux-native-media.py")
 PROC_ROOT = Path("/proc")
 UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
 PORTAL_IMPLEMENTATION_PREFIX = "org.freedesktop.impl.portal.desktop."
-APP_PERMISSION_GRANTED = "Keyboard control is allowed for Quick Paste."
+APP_PERMISSION_GRANTED = "Allowed for Quick Paste."
 PORTAL_DIALOG_PRESENTERS = {
     "GNOME": ("org.freedesktop.impl.portal.desktop.gnome",),
     "KDE": ("org.kde.plasmashell", "org.kde.KWin"),
